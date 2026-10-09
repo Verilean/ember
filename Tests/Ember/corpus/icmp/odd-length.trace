@@ -1,0 +1,7 @@
+# ember-trace v1  impl=spec  build=dev  profile=host64  link=slip
+# hand-written scenario `odd-length` (Tests/Ember/Scenarios.lean): odd payload length (checksum pads the last byte)
+# expected outputs are the Spec's, checked against the scenario's expectations
+0      rx   c0 45 00 00 55 12 34 00 00 40 01 54 72 0a 00 00 02 0a 00 00 01 08 00 0c 30 00 03 00 09 00 00 00 00 00 00 00 00 10 11 12 13 14 15 16 17 18 19 1a 1b 1c 1d 1e 1f 20 21 22 23 24 25 26 27 28 29 2a 2b 2c 2d 2e 2f 30 31 32 33 34 35 36 37 38 39 3a 3b 3c 3d 3e 3f 40 c0
+0      pkt  rx ipv4 10.0.0.2>10.0.0.1 icmp echo-req id=3 seq=9 len=85
+0      pkt  tx ipv4 10.0.0.1>10.0.0.2 icmp echo-rep id=3 seq=9 len=85
+0      tx   c0 45 00 00 55 00 01 00 00 40 01 66 a5 0a 00 00 01 0a 00 00 02 00 00 14 30 00 03 00 09 00 00 00 00 00 00 00 00 10 11 12 13 14 15 16 17 18 19 1a 1b 1c 1d 1e 1f 20 21 22 23 24 25 26 27 28 29 2a 2b 2c 2d 2e 2f 30 31 32 33 34 35 36 37 38 39 3a 3b 3c 3d 3e 3f 40 c0

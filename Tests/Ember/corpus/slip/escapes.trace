@@ -1,0 +1,7 @@
+# ember-trace v1  impl=spec  build=dev  profile=host64  link=slip
+# hand-written scenario `escapes` (Tests/Ember/Scenarios.lean): END and ESC inside the payload
+# expected outputs are the Spec's, checked against the scenario's expectations
+0      rx   c0 45 00 00 24 23 45 40 00 40 11 03 82 0a 00 00 02 0a 00 00 01 13 88 00 07 00 10 9c e7 db dc db dd db dc dc dd db dd db dd db dc c0
+0      pkt  rx ipv4 10.0.0.2>10.0.0.1 udp 5000>7 len=36
+0      pkt  tx ipv4 10.0.0.1>10.0.0.2 udp 7>5000 len=36
+0      tx   c0 45 00 00 24 00 01 40 00 40 11 26 c6 0a 00 00 01 0a 00 00 02 00 07 13 88 00 10 9c e7 db dc db dd db dc dc dd db dd db dd db dc c0

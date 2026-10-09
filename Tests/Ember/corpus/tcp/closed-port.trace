@@ -1,0 +1,8 @@
+# ember-trace v1  impl=spec  build=dev  profile=host64  link=slip
+# hand-written scenario `closed-port` (Tests/Ember/Scenarios.lean): SYN to a closed port: RST-ACK
+# expected outputs are the Spec's, checked against the scenario's expectations
+0      rx   c0 45 00 00 28 34 56 40 00 40 06 f2 77 0a 00 00 02 0a 00 00 01 9c 40 00 09 00 00 03 e8 00 00 00 00 50 02 fa f0 00 be 00 00 c0
+0      pkt  rx ipv4 10.0.0.2>10.0.0.1 tcp 40000>9 [S] seq=1000 ack=0 win=64240 data=0
+0      pkt  tx ipv4 10.0.0.1>10.0.0.2 tcp 9>40000 [R.] seq=0 ack=1001 win=0 data=0
+0      tx   c0 45 00 00 28 00 01 40 00 40 06 26 cd 0a 00 00 01 0a 00 00 02 00 09 9c 40 00 00 00 00 00 00 03 e9 50 14 00 00 fb 9b 00 00 c0
+0      drop reason=tcp-port-closed

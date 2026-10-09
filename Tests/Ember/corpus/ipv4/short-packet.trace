@@ -1,0 +1,6 @@
+# ember-trace v1  impl=spec  build=dev  profile=host64  link=slip
+# hand-written scenario `short-packet` (Tests/Ember/Scenarios.lean): fewer than 20 bytes
+# expected outputs are the Spec's, checked against the scenario's expectations
+0      rx   c0 45 00 00 54 12 34 00 00 40 01 54 73 0a 00 00 02 0a 00 00 c0
+0      pkt  rx ipv4 truncated len=19
+0      drop reason=short-packet

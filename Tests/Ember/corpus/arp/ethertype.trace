@@ -1,0 +1,6 @@
+# ember-trace v1  impl=spec  build=dev  profile=host64  link=eth  mtu=576
+# hand-written scenario `ethertype` (Tests/Ember/Scenarios.lean): IPv6 EtherType is not handled
+# expected outputs are the Spec's, checked against the scenario's expectations
+0      rx   02 00 00 00 00 01 02 00 00 00 00 02 86 dd 60 00 00 00
+0      pkt  rx eth 02:00:00:00:00:02>02:00:00:00:00:01 type=0x86dd len=18
+0      drop reason=unsupported-ethertype

@@ -1,0 +1,321 @@
+# ember-trace v1  impl=spec  build=dev  profile=host64  link=slip
+# hand-written scenario `syn-ack-giveup` (Tests/Ember/Scenarios.lean): SYN-ACK retransmitted on the same schedule, then reset
+# expected outputs are the Spec's, checked against the scenario's expectations
+0      rx   c0 45 00 00 2c 34 56 40 00 40 06 f2 73 0a 00 00 02 0a 00 00 01 9c 40 00 07 00 00 03 e8 00 00 00 00 60 02 fa f0 e9 03 00 00 02 04 05 b4 c0
+0      pkt  rx ipv4 10.0.0.2>10.0.0.1 tcp 40000>7 [S] seq=1000 ack=0 win=64240 data=0
+0      pkt  tx ipv4 10.0.0.1>10.0.0.2 tcp 7>40000 [S.] seq=65536 ack=1001 win=256 data=0
+0      tx   c0 45 00 00 2c 00 01 40 00 40 06 26 c9 0a 00 00 01 0a 00 00 02 00 07 9c 40 00 01 00 00 00 00 03 e9 60 12 01 00 e7 96 00 00 02 04 01 00 c0
+0      tcb  state=SYN-RCVD snd.una=65536 snd.nxt=65537 rcv.nxt=1001 pending=0 sent=0 rt=3/0
+1      tick
+2      tick
+3      tick
+3      pkt  tx ipv4 10.0.0.1>10.0.0.2 tcp 7>40000 [S.] seq=65536 ack=1001 win=256 data=0
+3      tx   c0 45 00 00 2c 00 02 40 00 40 06 26 c8 0a 00 00 01 0a 00 00 02 00 07 9c 40 00 01 00 00 00 00 03 e9 60 12 01 00 e7 96 00 00 02 04 01 00 c0
+3      tcb  state=SYN-RCVD snd.una=65536 snd.nxt=65537 rcv.nxt=1001 pending=0 sent=0 rt=6/1
+4      tick
+5      tick
+6      tick
+7      tick
+8      tick
+9      tick
+9      pkt  tx ipv4 10.0.0.1>10.0.0.2 tcp 7>40000 [S.] seq=65536 ack=1001 win=256 data=0
+9      tx   c0 45 00 00 2c 00 03 40 00 40 06 26 c7 0a 00 00 01 0a 00 00 02 00 07 9c 40 00 01 00 00 00 00 03 e9 60 12 01 00 e7 96 00 00 02 04 01 00 c0
+9      tcb  state=SYN-RCVD snd.una=65536 snd.nxt=65537 rcv.nxt=1001 pending=0 sent=0 rt=12/2
+10     tick
+11     tick
+12     tick
+13     tick
+14     tick
+15     tick
+16     tick
+17     tick
+18     tick
+19     tick
+20     tick
+21     tick
+21     pkt  tx ipv4 10.0.0.1>10.0.0.2 tcp 7>40000 [S.] seq=65536 ack=1001 win=256 data=0
+21     tx   c0 45 00 00 2c 00 04 40 00 40 06 26 c6 0a 00 00 01 0a 00 00 02 00 07 9c 40 00 01 00 00 00 00 03 e9 60 12 01 00 e7 96 00 00 02 04 01 00 c0
+21     tcb  state=SYN-RCVD snd.una=65536 snd.nxt=65537 rcv.nxt=1001 pending=0 sent=0 rt=24/3
+22     tick
+23     tick
+24     tick
+25     tick
+26     tick
+27     tick
+28     tick
+29     tick
+30     tick
+31     tick
+32     tick
+33     tick
+34     tick
+35     tick
+36     tick
+37     tick
+38     tick
+39     tick
+40     tick
+41     tick
+42     tick
+43     tick
+44     tick
+45     tick
+45     pkt  tx ipv4 10.0.0.1>10.0.0.2 tcp 7>40000 [S.] seq=65536 ack=1001 win=256 data=0
+45     tx   c0 45 00 00 2c 00 05 40 00 40 06 26 c5 0a 00 00 01 0a 00 00 02 00 07 9c 40 00 01 00 00 00 00 03 e9 60 12 01 00 e7 96 00 00 02 04 01 00 c0
+45     tcb  state=SYN-RCVD snd.una=65536 snd.nxt=65537 rcv.nxt=1001 pending=0 sent=0 rt=48/4
+46     tick
+47     tick
+48     tick
+49     tick
+50     tick
+51     tick
+52     tick
+53     tick
+54     tick
+55     tick
+56     tick
+57     tick
+58     tick
+59     tick
+60     tick
+61     tick
+62     tick
+63     tick
+64     tick
+65     tick
+66     tick
+67     tick
+68     tick
+69     tick
+70     tick
+71     tick
+72     tick
+73     tick
+74     tick
+75     tick
+76     tick
+77     tick
+78     tick
+79     tick
+80     tick
+81     tick
+82     tick
+83     tick
+84     tick
+85     tick
+86     tick
+87     tick
+88     tick
+89     tick
+90     tick
+91     tick
+92     tick
+93     tick
+93     pkt  tx ipv4 10.0.0.1>10.0.0.2 tcp 7>40000 [S.] seq=65536 ack=1001 win=256 data=0
+93     tx   c0 45 00 00 2c 00 06 40 00 40 06 26 c4 0a 00 00 01 0a 00 00 02 00 07 9c 40 00 01 00 00 00 00 03 e9 60 12 01 00 e7 96 00 00 02 04 01 00 c0
+93     tcb  state=SYN-RCVD snd.una=65536 snd.nxt=65537 rcv.nxt=1001 pending=0 sent=0 rt=48/5
+94     tick
+95     tick
+96     tick
+97     tick
+98     tick
+99     tick
+100    tick
+101    tick
+102    tick
+103    tick
+104    tick
+105    tick
+106    tick
+107    tick
+108    tick
+109    tick
+110    tick
+111    tick
+112    tick
+113    tick
+114    tick
+115    tick
+116    tick
+117    tick
+118    tick
+119    tick
+120    tick
+121    tick
+122    tick
+123    tick
+124    tick
+125    tick
+126    tick
+127    tick
+128    tick
+129    tick
+130    tick
+131    tick
+132    tick
+133    tick
+134    tick
+135    tick
+136    tick
+137    tick
+138    tick
+139    tick
+140    tick
+141    tick
+141    pkt  tx ipv4 10.0.0.1>10.0.0.2 tcp 7>40000 [S.] seq=65536 ack=1001 win=256 data=0
+141    tx   c0 45 00 00 2c 00 07 40 00 40 06 26 c3 0a 00 00 01 0a 00 00 02 00 07 9c 40 00 01 00 00 00 00 03 e9 60 12 01 00 e7 96 00 00 02 04 01 00 c0
+141    tcb  state=SYN-RCVD snd.una=65536 snd.nxt=65537 rcv.nxt=1001 pending=0 sent=0 rt=48/6
+142    tick
+143    tick
+144    tick
+145    tick
+146    tick
+147    tick
+148    tick
+149    tick
+150    tick
+151    tick
+152    tick
+153    tick
+154    tick
+155    tick
+156    tick
+157    tick
+158    tick
+159    tick
+160    tick
+161    tick
+162    tick
+163    tick
+164    tick
+165    tick
+166    tick
+167    tick
+168    tick
+169    tick
+170    tick
+171    tick
+172    tick
+173    tick
+174    tick
+175    tick
+176    tick
+177    tick
+178    tick
+179    tick
+180    tick
+181    tick
+182    tick
+183    tick
+184    tick
+185    tick
+186    tick
+187    tick
+188    tick
+189    tick
+189    pkt  tx ipv4 10.0.0.1>10.0.0.2 tcp 7>40000 [S.] seq=65536 ack=1001 win=256 data=0
+189    tx   c0 45 00 00 2c 00 08 40 00 40 06 26 c2 0a 00 00 01 0a 00 00 02 00 07 9c 40 00 01 00 00 00 00 03 e9 60 12 01 00 e7 96 00 00 02 04 01 00 c0
+189    tcb  state=SYN-RCVD snd.una=65536 snd.nxt=65537 rcv.nxt=1001 pending=0 sent=0 rt=48/7
+190    tick
+191    tick
+192    tick
+193    tick
+194    tick
+195    tick
+196    tick
+197    tick
+198    tick
+199    tick
+200    tick
+201    tick
+202    tick
+203    tick
+204    tick
+205    tick
+206    tick
+207    tick
+208    tick
+209    tick
+210    tick
+211    tick
+212    tick
+213    tick
+214    tick
+215    tick
+216    tick
+217    tick
+218    tick
+219    tick
+220    tick
+221    tick
+222    tick
+223    tick
+224    tick
+225    tick
+226    tick
+227    tick
+228    tick
+229    tick
+230    tick
+231    tick
+232    tick
+233    tick
+234    tick
+235    tick
+236    tick
+237    tick
+237    pkt  tx ipv4 10.0.0.1>10.0.0.2 tcp 7>40000 [S.] seq=65536 ack=1001 win=256 data=0
+237    tx   c0 45 00 00 2c 00 09 40 00 40 06 26 c1 0a 00 00 01 0a 00 00 02 00 07 9c 40 00 01 00 00 00 00 03 e9 60 12 01 00 e7 96 00 00 02 04 01 00 c0
+237    tcb  state=SYN-RCVD snd.una=65536 snd.nxt=65537 rcv.nxt=1001 pending=0 sent=0 rt=48/8
+238    tick
+239    tick
+240    tick
+241    tick
+242    tick
+243    tick
+244    tick
+245    tick
+246    tick
+247    tick
+248    tick
+249    tick
+250    tick
+251    tick
+252    tick
+253    tick
+254    tick
+255    tick
+256    tick
+257    tick
+258    tick
+259    tick
+260    tick
+261    tick
+262    tick
+263    tick
+264    tick
+265    tick
+266    tick
+267    tick
+268    tick
+269    tick
+270    tick
+271    tick
+272    tick
+273    tick
+274    tick
+275    tick
+276    tick
+277    tick
+278    tick
+279    tick
+280    tick
+281    tick
+282    tick
+283    tick
+284    tick
+285    tick
+285    pkt  tx ipv4 10.0.0.1>10.0.0.2 tcp 7>40000 [R.] seq=65537 ack=1001 win=0 data=0
+285    tx   c0 45 00 00 28 00 0a 40 00 40 06 26 c4 0a 00 00 01 0a 00 00 02 00 07 9c 40 00 01 00 01 00 00 03 e9 50 14 00 00 fb 9b 00 00 c0
+285    drop reason=give-up
+285    tcb  state=LISTEN snd.una=0 snd.nxt=0 rcv.nxt=0 pending=0 sent=0 rt=0/0

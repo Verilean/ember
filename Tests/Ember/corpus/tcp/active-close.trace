@@ -1,0 +1,116 @@
+# ember-trace v1  impl=spec  build=dev  profile=host64  link=slip
+# hand-written scenario `active-close` (Tests/Ember/Scenarios.lean): idle close: FIN-WAIT-1 → FIN-WAIT-2 → TIME-WAIT; FIN retransmission in TIME-WAIT is ACKed
+# expected outputs are the Spec's, checked against the scenario's expectations
+0      rx   c0 45 00 00 2c 34 56 40 00 40 06 f2 73 0a 00 00 02 0a 00 00 01 9c 40 00 07 00 00 03 e8 00 00 00 00 60 02 fa f0 e9 03 00 00 02 04 05 b4 c0
+0      pkt  rx ipv4 10.0.0.2>10.0.0.1 tcp 40000>7 [S] seq=1000 ack=0 win=64240 data=0
+0      pkt  tx ipv4 10.0.0.1>10.0.0.2 tcp 7>40000 [S.] seq=65536 ack=1001 win=256 data=0
+0      tx   c0 45 00 00 2c 00 01 40 00 40 06 26 c9 0a 00 00 01 0a 00 00 02 00 07 9c 40 00 01 00 00 00 00 03 e9 60 12 01 00 e7 96 00 00 02 04 01 00 c0
+0      tcb  state=SYN-RCVD snd.una=65536 snd.nxt=65537 rcv.nxt=1001 pending=0 sent=0 rt=3/0
+1      rx   c0 45 00 00 28 34 56 40 00 40 06 f2 77 0a 00 00 02 0a 00 00 01 9c 40 00 07 00 00 03 e9 00 01 00 01 50 10 fa f0 00 af 00 00 c0
+1      pkt  rx ipv4 10.0.0.2>10.0.0.1 tcp 40000>7 [.] seq=1001 ack=65537 win=64240 data=0
+1      tcb  state=ESTABLISHED snd.una=65537 snd.nxt=65537 rcv.nxt=1001 pending=0 sent=0 rt=0/0
+2      rx   c0 45 00 00 29 34 56 40 00 40 06 f2 76 0a 00 00 02 0a 00 00 01 9c 40 00 07 00 00 03 e9 00 01 00 01 50 18 fa f0 88 a5 00 00 78 c0
+2      pkt  rx ipv4 10.0.0.2>10.0.0.1 tcp 40000>7 [P.] seq=1001 ack=65537 win=64240 data=1
+2      pkt  tx ipv4 10.0.0.1>10.0.0.2 tcp 7>40000 [P.] seq=65537 ack=1002 win=255 data=1
+2      tx   c0 45 00 00 29 00 02 40 00 40 06 26 cb 0a 00 00 01 0a 00 00 02 00 07 9c 40 00 01 00 01 00 00 03 ea 50 18 00 ff 82 96 00 00 78 c0
+2      tcb  state=ESTABLISHED snd.una=65537 snd.nxt=65538 rcv.nxt=1002 pending=1 sent=1 rt=3/0
+3      rx   c0 45 00 00 28 34 56 40 00 40 06 f2 77 0a 00 00 02 0a 00 00 01 9c 40 00 07 00 00 03 ea 00 01 00 02 50 10 fa f0 00 ad 00 00 c0
+3      pkt  rx ipv4 10.0.0.2>10.0.0.1 tcp 40000>7 [.] seq=1002 ack=65538 win=64240 data=0
+3      tcb  state=ESTABLISHED snd.una=65538 snd.nxt=65538 rcv.nxt=1002 pending=0 sent=0 rt=0/0
+4      tick
+5      tick
+6      tick
+7      tick
+8      tick
+9      tick
+10     tick
+11     tick
+12     tick
+13     tick
+14     tick
+15     tick
+16     tick
+17     tick
+18     tick
+19     tick
+20     tick
+21     tick
+22     tick
+23     tick
+24     tick
+25     tick
+26     tick
+27     tick
+28     tick
+29     tick
+30     tick
+31     tick
+32     tick
+33     tick
+34     tick
+35     tick
+36     tick
+37     tick
+38     tick
+39     tick
+40     tick
+41     tick
+42     tick
+43     tick
+44     tick
+45     tick
+46     tick
+47     tick
+48     tick
+49     tick
+50     tick
+51     tick
+52     tick
+53     tick
+54     tick
+55     tick
+56     tick
+57     tick
+58     tick
+59     tick
+60     tick
+61     tick
+62     tick
+63     tick
+63     pkt  tx ipv4 10.0.0.1>10.0.0.2 tcp 7>40000 [F.] seq=65538 ack=1002 win=256 data=0
+63     tx   c0 45 00 00 28 00 03 40 00 40 06 26 cb 0a 00 00 01 0a 00 00 02 00 07 9c 40 00 01 00 02 00 00 03 ea 50 11 01 00 fa 9c 00 00 c0
+63     tcb  state=FIN-WAIT-1 snd.una=65538 snd.nxt=65539 rcv.nxt=1002 pending=0 sent=0 rt=3/0
+64     rx   c0 45 00 00 28 34 56 40 00 40 06 f2 77 0a 00 00 02 0a 00 00 01 9c 40 00 07 00 00 03 ea 00 01 00 03 50 10 fa f0 00 ac 00 00 c0
+64     pkt  rx ipv4 10.0.0.2>10.0.0.1 tcp 40000>7 [.] seq=1002 ack=65539 win=64240 data=0
+64     tcb  state=FIN-WAIT-2 snd.una=65539 snd.nxt=65539 rcv.nxt=1002 pending=0 sent=0 rt=0/0
+65     rx   c0 45 00 00 28 34 56 40 00 40 06 f2 77 0a 00 00 02 0a 00 00 01 9c 40 00 07 00 00 03 ea 00 01 00 03 50 11 fa f0 00 ab 00 00 c0
+65     pkt  rx ipv4 10.0.0.2>10.0.0.1 tcp 40000>7 [F.] seq=1002 ack=65539 win=64240 data=0
+65     pkt  tx ipv4 10.0.0.1>10.0.0.2 tcp 7>40000 [.] seq=65539 ack=1003 win=256 data=0
+65     tx   c0 45 00 00 28 00 04 40 00 40 06 26 ca 0a 00 00 01 0a 00 00 02 00 07 9c 40 00 01 00 03 00 00 03 eb 50 10 01 00 fa 9b 00 00 c0
+65     tcb  state=TIME-WAIT snd.una=65539 snd.nxt=65539 rcv.nxt=1003 pending=0 sent=0 rt=0/0
+66     rx   c0 45 00 00 28 34 56 40 00 40 06 f2 77 0a 00 00 02 0a 00 00 01 9c 40 00 07 00 00 03 ea 00 01 00 03 50 11 fa f0 00 ab 00 00 c0
+66     pkt  rx ipv4 10.0.0.2>10.0.0.1 tcp 40000>7 [F.] seq=1002 ack=65539 win=64240 data=0
+66     pkt  tx ipv4 10.0.0.1>10.0.0.2 tcp 7>40000 [.] seq=65539 ack=1003 win=256 data=0
+66     tx   c0 45 00 00 28 00 05 40 00 40 06 26 c9 0a 00 00 01 0a 00 00 02 00 07 9c 40 00 01 00 03 00 00 03 eb 50 10 01 00 fa 9b 00 00 c0
+66     drop reason=out-of-window
+67     tick
+68     tick
+69     tick
+70     tick
+71     tick
+72     tick
+73     tick
+74     tick
+75     tick
+76     tick
+77     tick
+78     tick
+79     tick
+80     tick
+81     tick
+82     tick
+83     tick
+84     tick
+85     tick
+86     tick
+86     tcb  state=LISTEN snd.una=0 snd.nxt=0 rcv.nxt=0 pending=0 sent=0 rt=0/0

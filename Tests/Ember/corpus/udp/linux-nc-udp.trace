@@ -1,0 +1,9 @@
+# ember-trace v1  impl=spec  build=dev  profile=host64  link=slip
+0      rx   c0 45 00 00 1f 1a 87 40 00 40 11 0c 45 0a 00 00 02 0a 00 00 01 c5 e6 00 07 00 0b b3 7e 68 69 0a c0
+0      pkt  rx ipv4 10.0.0.2>10.0.0.1 udp 50662>7 len=31
+0      pkt  tx ipv4 10.0.0.1>10.0.0.2 udp 7>50662 len=31
+0      tx   c0 45 00 00 1f 00 01 40 00 40 11 26 cb 0a 00 00 01 0a 00 00 02 00 07 c5 e6 00 0b b3 7e 68 69 0a c0
+1      tick
+2      tick
+3      tick
+4      tick

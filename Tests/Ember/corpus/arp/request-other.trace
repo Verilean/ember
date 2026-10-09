@@ -1,0 +1,6 @@
+# ember-trace v1  impl=spec  build=dev  profile=host64  link=eth  mtu=576
+# hand-written scenario `request-other` (Tests/Ember/Scenarios.lean): who-has for another address: not cached, not answered
+# expected outputs are the Spec's, checked against the scenario's expectations
+0      rx   ff ff ff ff ff ff 02 00 00 00 00 02 08 06 00 01 08 00 06 04 00 01 02 00 00 00 00 02 0a 00 00 02 00 00 00 00 00 00 0a 00 00 09
+0      pkt  rx eth 02:00:00:00:00:02>ff:ff:ff:ff:ff:ff arp who-has 10.0.0.9 tell 10.0.0.2
+0      drop reason=arp-not-for-us

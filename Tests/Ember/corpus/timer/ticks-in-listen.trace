@@ -1,0 +1,8 @@
+# ember-trace v1  impl=spec  build=dev  profile=host64  link=slip
+# hand-written scenario `ticks-in-listen` (Tests/Ember/Scenarios.lean): ticks with no connection do nothing
+# expected outputs are the Spec's, checked against the scenario's expectations
+0      tick
+1      tick
+2      tick
+3      tick
+4      tick

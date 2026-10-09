@@ -1,0 +1,8 @@
+# ember-trace v1  impl=spec  build=dev  profile=host64  link=slip
+0      rx   c0 45 00 00 3c fd e3 40 00 40 06 28 d6 0a 00 00 02 0a 00 00 01 84 14 00 08 ef 3e 28 b6 00 00 00 00 a0 02 ff ff cb a8 00 00 02 04 01 00 04 02 08 0a f7 9d d9 56 00 00 00 00 01 03 03 0a c0
+0      pkt  rx ipv4 10.0.0.2>10.0.0.1 tcp 33812>8 [S] seq=4013828278 ack=0 win=65535 data=0
+0      pkt  tx ipv4 10.0.0.1>10.0.0.2 tcp 8>33812 [R.] seq=0 ack=4013828279 win=0 data=0
+0      tx   c0 45 00 00 28 00 01 40 00 40 06 26 cd 0a 00 00 01 0a 00 00 02 00 08 84 14 00 00 00 00 ef 3e 28 b7 50 14 00 00 ff bb 00 00 c0
+0      drop reason=tcp-port-closed
+1      tick
+2      tick

@@ -1,0 +1,6 @@
+# ember-trace v1  impl=linux  build=linux-6.18.45  profile=host64  link=slip  mask=ipv4.id
+# recorded by: tools/ember/record-linux.py responder udp Tests/Ember/corpus/udp
+# Linux 6.18.45 as 10.0.0.1 answering 10.0.0.2
+# IP identification is random in Linux: compared with mask=ipv4.id
+0      rx   c0 45 00 00 1c 20 00 00 00 40 11 46 cf 0a 00 00 02 0a 00 00 01 9c 40 00 07 00 08 4f 94 c0
+0      tx   c0 45 00 00 1c 3b 4f 40 00 40 11 eb 7f 0a 00 00 01 0a 00 00 02 00 07 9c 40 00 08 4f 94 c0

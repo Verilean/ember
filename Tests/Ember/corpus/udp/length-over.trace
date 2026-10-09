@@ -1,0 +1,6 @@
+# ember-trace v1  impl=spec  build=dev  profile=host64  link=slip
+# hand-written scenario `length-over` (Tests/Ember/Scenarios.lean): UDP length beyond the IP payload
+# expected outputs are the Spec's, checked against the scenario's expectations
+0      rx   c0 45 00 00 1f 23 45 40 00 40 11 03 87 0a 00 00 02 0a 00 00 01 13 88 00 07 00 14 00 00 61 62 63 c0
+0      pkt  rx ipv4 10.0.0.2>10.0.0.1 udp 5000>7 len=31
+0      drop reason=bad-udp-length

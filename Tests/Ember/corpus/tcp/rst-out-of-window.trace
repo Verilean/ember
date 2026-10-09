@@ -1,0 +1,14 @@
+# ember-trace v1  impl=spec  build=dev  profile=host64  link=slip
+# hand-written scenario `rst-out-of-window` (Tests/Ember/Scenarios.lean): RST outside the window is ignored
+# expected outputs are the Spec's, checked against the scenario's expectations
+0      rx   c0 45 00 00 2c 34 56 40 00 40 06 f2 73 0a 00 00 02 0a 00 00 01 9c 40 00 07 00 00 03 e8 00 00 00 00 60 02 fa f0 e9 03 00 00 02 04 05 b4 c0
+0      pkt  rx ipv4 10.0.0.2>10.0.0.1 tcp 40000>7 [S] seq=1000 ack=0 win=64240 data=0
+0      pkt  tx ipv4 10.0.0.1>10.0.0.2 tcp 7>40000 [S.] seq=65536 ack=1001 win=256 data=0
+0      tx   c0 45 00 00 2c 00 01 40 00 40 06 26 c9 0a 00 00 01 0a 00 00 02 00 07 9c 40 00 01 00 00 00 00 03 e9 60 12 01 00 e7 96 00 00 02 04 01 00 c0
+0      tcb  state=SYN-RCVD snd.una=65536 snd.nxt=65537 rcv.nxt=1001 pending=0 sent=0 rt=3/0
+1      rx   c0 45 00 00 28 34 56 40 00 40 06 f2 77 0a 00 00 02 0a 00 00 01 9c 40 00 07 00 00 03 e9 00 01 00 01 50 10 fa f0 00 af 00 00 c0
+1      pkt  rx ipv4 10.0.0.2>10.0.0.1 tcp 40000>7 [.] seq=1001 ack=65537 win=64240 data=0
+1      tcb  state=ESTABLISHED snd.una=65537 snd.nxt=65537 rcv.nxt=1001 pending=0 sent=0 rt=0/0
+2      rx   c0 45 00 00 28 34 56 40 00 40 06 f2 77 0a 00 00 02 0a 00 00 01 9c 40 00 07 00 01 8a 89 00 00 00 00 50 04 fa f0 7a 1b 00 00 c0
+2      pkt  rx ipv4 10.0.0.2>10.0.0.1 tcp 40000>7 [R] seq=101001 ack=0 win=64240 data=0
+2      drop reason=rst-out-of-window

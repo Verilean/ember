@@ -1,0 +1,622 @@
+# Ember — implementation plan
+
+This is the working plan for Ember.  The *why* and the architecture are in
+[`Ember-design.md`](Ember-design.md); this document is the *how*: what is
+built in which order, how each step is tested, how a failure is located,
+and when a milestone counts as done.
+
+Status (2026-10-09): M0 done (design).  **M1, M2 and M3 done on the host**
+(see "Progress" below); M4 onwards (targets, proofs, own Z80 back end)
+to do.
+
+**Targets: the Z80 and the ESP32.**  The ESP32 variant is the
+**ESP32-C3** (RISC-V, rv32imc): it keeps the RISC-V path that CompCert
+supports, Espressif's QEMU emulates it, and it has Wi-Fi.  The classic
+ESP32 (Xtensa) is reachable through the same C with Espressif's gcc, but
+has no CompCert back end and is not the primary target.  See §7.
+
+Progress (2026-10-09)
+
+| Step | State | Where / notes |
+|---|---|---|
+| M1.0 | done | `Ember/Trace`, `Ember/Util`, `ember-diff`, `ember-pcap` (checked with `tshark`); corpus with a provenance README per directory |
+| M1.1–M1.6 | done | `Ember/Spec`; ICMP and UDP replies byte-equal to Linux's (recorded on a TUN device; IP identification masked) |
+| M1.7–M1.9 | done | one connection, passive open, uIP-style regeneration, RTO back-off; RFC 9293 scenarios hand-written *with expectations* (`Tests/Ember/Scenarios.lean`); out of scope listed in `corpus/tcp/UNSUPPORTED.md` |
+| M1.10 | done | `ember-host`; corpus through the binary = in process |
+| M1.11 | done | Ethernet II + ARP; fixtures from Linux on a **TAP** device (not a veth pair: same frames, one namespace) |
+| M1.12 | done | DHCP client, against dnsmasq; needs `mtu=576` on Ethernet (see decision log) |
+| M1 exit | met | corpus passes; 10 000 generated sessions per protocol (×3: as generated, mutated, re-chunked) without panic and with every frame accounted for; ping and TCP echo from Linux through `ember-host` (user-namespace variant recorded; `slattach` variant documented) |
+| M2.1–M2.6 | done | `Ember/Lang`, `Ember/C`; surface syntax `ember def/global/const/struct` |
+| M2.7–M2.8 | done | host harness; `ember-fuzz` (random programs, shrinker, planted bug found and shrunk to 5 statements) |
+| M2.9 | done | checksum, SLIP decoder, SPSC ring, CRC-32, and one program using every construct |
+| M2 exit | met | 10 000 random programs: interpreter = C at −O0 and −O2 under UBSan/ASan; warning-free with gcc `-Wall -Wextra -Wconversion -Werror -pedantic` and SDCC `--Werror` (two optimiser notes disabled, see decision log) |
+| M3.1–M3.7 | done | `Ember/Net` (layout in `Ember/Net/README.md`); `ember-lockstep` |
+| M3 exit | met | corpus and 10 000 generated sessions per protocol: Spec = Ember interpreter = host C, lockstep states equal; size baseline committed (`bench/ember-size.baseline`) |
+
+Findings worth knowing before M4:
+
+* the Ember stack is SLIP-only; Ethernet/ARP/DHCP exist in `Ember.Spec`
+  and move to Ember with M4w;
+* host64 build: 5.4 KB code, 935 B RAM; SDCC Z80 build: 24.8 KB code,
+  622 B RAM — RAM within the M4z target, code 3× over it (32-bit
+  sequence arithmetic and bounds-checked `u16` indexing dominate), the
+  M4z.4 risk as anticipated;
+* the emitter had to learn more than §2.3 of the design says: GCC's
+  `-Wtype-limits`/`-Wtautological-compare` see through casts and
+  constants, so closed subexpressions are folded *by the interpreter* and
+  comparison operands, divisors and shift amounts are hoisted into typed
+  temporaries (`Ember/C/Compile.lean`).
+
+Contents
+
+1. Principles
+2. Repository layout
+3. Debugging infrastructure (built first, used everywhere)
+4. Milestones M1–M7, step by step
+5. Continuous integration and gates
+6. Risk register
+7. Decision log
+8. Glossary
+
+---
+
+## 1. Principles
+
+These apply to every milestone.  They are what keeps the project
+debuggable when four implementations of the same stack exist side by
+side.
+
+1. **One trace format for everything.**  The reference stack, the DSL
+   interpreter, the host-compiled C, the QEMU run and the Z80 run all
+   write the same line-oriented event trace (§3.1).  A disagreement is
+   always "first differing line of two traces", never "it doesn't work".
+2. **Deterministic by construction.**  No randomness and no wall clock in
+   the stack: the TCP initial sequence number comes from a counter, time
+   is an input (`tick`).  The same input stream gives the same trace,
+   byte for byte, on every run and every implementation.
+3. **Every layer is runnable on the host.**  Each milestone produces
+   something that runs under `lake exe` or as a host binary before it
+   runs on a target.  A target only ever adds the runtime (start-up,
+   drivers, interrupts) — never new protocol logic.
+4. **Differential testing before proofs.**  Each new implementation is
+   checked against the previous one on the full corpus and on generated
+   inputs before any theorem about it is attempted.  Proofs then confirm
+   what the tests already showed, and a failing proof attempt is not the
+   first sign of a bug.
+5. **Small steps with a test each.**  Every step below ends with a test
+   that fails before the step and passes after it.  A step without a test
+   is not done.
+6. **Errors carry locations.**  Interpreter errors name the function and
+   the statement path; emitted C carries `#line` directives back to the
+   Ember source; target crashes print the trap cause and PC on a debug
+   UART.
+7. **Gates, not dashboards.**  Code size, RAM, instructions and cycles
+   per exchange are measured by scripts that fail CI outside a tolerance
+   against a committed baseline, as `bench/gate` does for the CSim JIT.
+
+## 2. Repository layout
+
+Ember lives in its own repository (decided 2026-10-09; the layout below is
+unchanged, rooted at the repository instead of inside Sparkle), with the
+same Lean toolchain as Sparkle (v4.32.1) and LSpec at Sparkle's pin.
+Nothing in `Ember/` depends on Sparkle; the RV32-SoC milestone (M4s) will
+*use* its simulator.
+
+```
+Ember/
+  Util/           Bytes, hex dump, pretty printers, pcap writer
+  Trace/          event type, text format, parser, diff
+  Spec/           reference stack (ordinary Lean)
+    Checksum.lean  Slip.lean  Ipv4.lean  Icmp.lean  Udp.lean
+    Tcp/  (Header.lean  Tcb.lean  Input.lean  Output.lean  Timer.lean)
+    Stack.lean     -- step : State → Input → State × List Output
+  Lang/           the DSL
+    Syntax.lean    -- AST
+    Types.lean     -- type checker
+    Eval.lean      -- interpreter (= semantics), traces
+    Surface.lean   -- `ember def` syntax → AST
+    Profile.lean   -- target profiles (host64, rv32, sdcc-z80)
+  C/              C subset
+    Ast.lean  Semantics.lean  Compile.lean (Lang → C AST)  Print.lean
+  Net/            the stack written in Ember (M3)
+  Z80/            own back end (M6): Isa.lean  Model.lean  Ir.lean  Isel.lean  Asm.lean
+  Proof/          P1, P2, P3, back-end proofs
+runtime/
+  common/         ring buffer, trace output (C)
+  esp32c3/        bare-metal: start.S  link.ld  uart.c  intr.c  systimer.c  Makefile   (M4)
+  esp32c3-idf/    ESP-IDF component: Wi-Fi raw frames ↔ ring, Ember task          (M4w)
+  rv32-sparkle/   (M4s) Sparkle RV32 SoC variant
+  z80/            crt0.s  acia.c / sio.c  Makefile (SDCC)  (M4z)
+Tests/Ember/
+  corpus/         *.trace fixtures with provenance (README per directory)
+  Drivers/        *Main.lean wrappers for lean_exe
+  host/           host C harness
+tools/ember/      ember-diff, ember-pcap, qemu-run.sh, z80-run.sh, gates
+```
+
+Conventions, following the repo's `CLAUDE.md`: test modules are
+namespaced and called from `Tests/AllTests.lean`; each `lean_exe` has a
+one-line driver under `Tests/Ember/Drivers/`; heavy jobs run under
+`systemd-run --user --scope -p MemoryMax=…`.
+
+## 3. Debugging infrastructure
+
+Built in M1.0 and extended as layers arrive.  It is listed first because
+every later step depends on it.
+
+### 3.1 The trace format
+
+One event per line, ASCII, stable, diffable:
+
+```
+# ember-trace v1  impl=spec  build=<git sha>  profile=host64
+0      rx   c0 45 00 00 54 ...           # raw link bytes (SLIP-framed)
+0      pkt  rx ipv4 10.0.0.2>10.0.0.1 icmp echo-req id=1 seq=1 len=84
+0      tcb  state=LISTEN snd.nxt=0 rcv.nxt=0
+0      pkt  tx ipv4 10.0.0.1>10.0.0.2 icmp echo-rep id=1 seq=1 len=84
+0      tx   c0 45 00 00 54 ...
+17     tick
+17     drop reason=bad-ip-checksum
+```
+
+- `rx` / `tx` / `tick` are the **observable** events: the only ones the
+  comparison between implementations requires.
+- `pkt`, `tcb`, `drop`, `note` are **diagnostic** events: emitted by
+  implementations that can (the Lean ones always; C builds with
+  `EMBER_TRACE=2`); ignored by the observable comparison, used to explain
+  a divergence.
+- The first column is the step number (number of inputs consumed), not
+  time, so traces from fast and slow implementations line up.
+
+Every implementation has a writer; Lean has a parser.  `pkt` lines are
+produced by one decoder (`Ember.Util.Pretty`) so that two
+implementations never disagree about how a packet is *printed*.
+
+### 3.2 `ember-diff`
+
+`lake exe ember-diff A.trace B.trace [--observable] [--context 5]`
+
+- aligns the two traces on observable events, reports the first
+  difference with context, and decodes both differing packets field by
+  field (`ipv4.ttl: 64 vs 63`, `tcp.ack: 1001 vs 1000`);
+- exit status 0/1 so it can sit in tests and CI;
+- `--first-only` for scripts, `--all` for a full report.
+
+### 3.3 Packet corpus and pcap
+
+- `Tests/Ember/corpus/<protocol>/<name>.trace`: input-and-expected-output
+  traces.  Each directory has a `README.md` with the provenance of every
+  fixture (RFC example, hand-written, recorded from Linux — with the
+  command line used).
+- `lake exe ember-pcap X.trace > X.pcap` writes the `rx`/`tx` packets as
+  a pcap (link type `RAW`/IPv4), so any trace can be opened in Wireshark.
+- Recording fixtures from Linux without root: `unshare -rn` gives a user
+  network namespace with its own loopback where `ping`, `nc` and
+  `tcpdump` work; a small script converts the capture to a trace.  The
+  recorded responses of Linux are the expected outputs for the cases
+  where Ember is meant to behave the same way.
+
+### 3.4 Generators and shrinking
+
+- `Ember.Spec.Gen`: random but valid packet streams (pings with random
+  sizes and ids, UDP payloads, TCP sessions with random segmentation), and
+  mutations (flip a bit, truncate, bad checksum, out-of-window sequence
+  number).  Used against every implementation.
+- `Ember.Lang.Gen`: random well-typed Ember programs for the emitter
+  (M2.6).
+- A shrinker for both: on a disagreement, remove packets/bytes or
+  statements while the disagreement persists, and write the minimal case
+  to `Tests/Ember/regress/` as a new fixture.
+
+### 3.5 Target-side debugging
+
+- **Debug channel**: targets have a second output channel (UART1 or the
+  USB-Serial-JTAG port on the ESP32-C3, a reserved port on the Z80) where
+  the runtime writes the trace in the §3.1 format.  The main link carries
+  only network traffic.
+- **Trap handler** prints `cause`, `pc`, `mtval` and the last trace step
+  number on the debug UART, then halts.
+- **`#line` directives** in the emitted C point at the Ember source in
+  the Lean file, so gdb and compiler errors show Ember lines.
+- **QEMU** (Espressif's fork, `-M esp32c3`): `tools/ember/qemu-run.sh
+  --gdb` starts with `-s -S`; `--log` adds `-d int,guest_errors,unimp`.
+- **ESP32-C3 board**: built-in USB-Serial-JTAG gives OpenOCD + gdb without
+  extra hardware; the panic handler's register dump goes to the debug
+  channel.
+- **Z80**: the emulator writes a symbol-annotated instruction trace on
+  request (`--trace-from <step>`), and a `.map` file maps addresses back
+  to Ember functions.
+- **Size reports**: `tools/ember/size-report` prints code and RAM per
+  Ember function from the linker map, so a size regression points at a
+  function.
+
+## 4. Milestones
+
+Each milestone lists: **Goal**, **Steps** (each with its test),
+**Debug aids** it adds, **Exit criteria**, and **Risks / fallback**.
+Effort is given as S (≤ 1 day), M (a few days), L (a week or more).
+
+---
+
+### M0 — Design  ✅
+
+`docs/Ember-design.md`.  Decisions in §7.
+
+---
+
+### M1 — Reference stack in Lean (`Ember.Spec`)
+
+**Goal.** A complete, deterministic TCP/IP stack as ordinary Lean
+functions, with the step interface
+`step : State → Input → State × List Output`, replaying the corpus.
+
+**Steps**
+
+| # | Step | Test that closes it | Effort |
+|---|---|---|---|
+| M1.0 | Debug infrastructure: `Bytes`, hex dump, trace type + writer + parser, `ember-diff`, `ember-pcap`, corpus directory layout | round trip: parse ∘ print = id on hand-written traces; `ember-diff` on two traces differing in one byte reports exactly that byte; pcap of a fixture opens in `tshark` with the expected fields | M |
+| M1.1 | Internet checksum: full, incremental (RFC 1624), pseudo-header | RFC 1071 / 1624 examples; random check incremental = recompute | S |
+| M1.2 | SLIP encode/decode (RFC 1055) as a byte-at-a-time state machine | escapes (`END`, `ESC`) in payload, empty frames, back-to-back `END`, oversize frame dropped; decode ∘ encode = id on random payloads | S |
+| M1.3 | IPv4 parse/emit, validation (version, IHL, length, checksum, TTL), drop reasons | header fixtures; mutated headers each produce the right `drop reason=` | M |
+| M1.4 | ICMP echo reply, built in place (swap addresses, type 8→0, incremental checksum) | `ping -c 3 -s {0,56,200}` fixtures recorded from Linux; reply bytes equal Linux's | S |
+| M1.5 | UDP: parse/emit, checksum (including the zero-checksum case), echo on a fixed port | `nc -u` fixtures; random payloads | S |
+| M1.6 | TCP header parse/emit, MSS option emitted on SYN-ACK, other options skipped | header fixtures incl. options of every length | S |
+| M1.7 | TCP state machine, one connection, passive open: LISTEN → SYN-RCVD → ESTABLISHED → CLOSE-WAIT → LAST-ACK → CLOSED; RST handling; in-order data only; out-of-order segments dropped with ACK | `nc` session fixtures (connect, send, echo, close from either side); RFC 793 / 9293 scenario traces written by hand: simultaneous FIN, RST in each state, segment outside the window, duplicate SYN | L |
+| M1.8 | Echo application (TCP port 7, UDP port 7) on the uIP model: no retransmission buffer, the application is asked to regenerate unacknowledged data | session with a dropped segment: the retransmission carries the same bytes | M |
+| M1.9 | Timers from `tick`: retransmission with exponential back-off, TIME-WAIT, give-up after N retries | hand-written traces with ticks; back-off schedule checked against a table | M |
+| M1.10 | `lake exe ember-host`: the Spec stack on stdin/stdout as SLIP, so the host harness of later milestones can talk to it directly | the corpus replayed through the binary equals the in-process replay | S |
+| M1.11 | Ethernet II framing and ARP (request/reply, a small cache) as a second link layer, selected at build time — needed for Wi-Fi on the ESP32 (M4w) | ARP fixtures recorded from Linux on a veth pair in a user namespace; the IP corpus replayed over Ethernet framing gives the same IP-level trace | M |
+| M1.12 | DHCP client (DISCOVER/OFFER/REQUEST/ACK, lease renewal by `tick`) — optional; a static address is the default | fixtures against `dnsmasq` in a user namespace | M |
+
+**Debug aids added:** `pkt`/`tcb`/`drop` diagnostic events from every
+Spec function; `Ember.Spec.Gen` packet generator with mutations; the
+shrinker.
+
+**Exit criteria**
+
+- all corpus fixtures pass (`lake test` includes them);
+- 10 000 generated sessions per protocol run without a Lean panic, and
+  every mutated packet is either answered correctly or dropped with a
+  reason;
+- the Spec stack answers `ping` and TCP echo from Linux through
+  `ember-host` attached to a pty (manual demo, documented in
+  `Tests/Ember/README.md`).
+
+**Risks / fallback**
+
+- *TCP corner cases eat time.*  Keep scope to the table in the design
+  (one connection, passive open, in-order).  Anything else is answered
+  with RST or dropped, with a `drop reason=unsupported-…` event, and
+  listed in `Tests/Ember/corpus/tcp/UNSUPPORTED.md`.
+- *Recording fixtures without root fails on the CI runner.*  Fixtures are
+  recorded once and committed; CI only replays.
+
+---
+
+### M2 — The DSL core (`Ember.Lang`, `Ember.C`)
+
+**Goal.** Write small programs in Ember, run them in the interpreter,
+emit C, and get the same trace from the C compiled on the host — with no
+undefined behaviour.
+
+**Steps**
+
+| # | Step | Test that closes it | Effort |
+|---|---|---|---|
+| M2.1 | AST (`Syntax.lean`): types, expressions, statements, functions, programs; source spans on every node | constructing the AST of each example by hand compiles | S |
+| M2.2 | Type checker: widths, array bounds of literals, `ref` non-aliasing at call sites, acyclic call graph, every path returns | one positive and one negative `#guard_msgs` test per rule, error messages naming the span | M |
+| M2.3 | Interpreter (`Eval.lean`): total arithmetic (shift ≥ width = 0, div by 0 = 0), bounds errors with the statement path, fuel, effect trace (`mmio`, `ring`, `trace`) | unit programs per construct; an out-of-bounds read reports `fn=… at stmt 3.2.1` | M |
+| M2.4 | Surface syntax `ember def …` (`Surface.lean`): `do`-style body → AST, spans from the Lean source | each example written in surface syntax elaborates to the hand-built AST of M2.1 (`#guard` equality) | M |
+| M2.5 | Target profiles (`Profile.lean`): `host64`, `rv32`, `sdccZ80` — `int` width, preferred operation width | unit tests of the width-selection function, incl. `u8 * u8` on `sdccZ80` | S |
+| M2.6 | C AST + emitter (`Compile.lean`, `Print.lean`): temporaries, explicit casts per profile, guarded shifts/divisions, bounds checks calling `ember_trap()`, `#line` directives | golden C for each example; compiles with `gcc -std=c99 -Wall -Wextra -Wconversion -Werror` | M |
+| M2.7 | Host differential harness: a C `main` that feeds the same input oracle and writes the trace; `ember-diff` against the interpreter | every example: interpreter trace = C trace | M |
+| M2.8 | Random program generator + shrinker for the emitter (`Lang.Gen`) | 10 000 random programs: interpreter = C under `-fsanitize=undefined,address`, at `-O0` and `-O2`; a planted emitter bug (dropped cast) is found and shrunk to ≤ 5 statements | M |
+| M2.9 | Example library: checksum, SLIP decoder, SPSC ring buffer, CRC32 | each is also compared with the corresponding `Ember.Spec` function on random inputs | S |
+
+**Debug aids added:** span-carrying interpreter errors; `#line` in C;
+`EMBER_TRACE` levels in the C runtime; the program shrinker.
+
+**Exit criteria**
+
+- the M2.8 fuzz run is clean at both optimisation levels with UBSan and
+  ASan, and is part of CI at a reduced count (1 000);
+- emitted C is warning-free with `-Wall -Wextra -Wconversion` on gcc and
+  on SDCC (`--std-c99`, `--Werror`);
+- each Lang construct has an interpreter test, an emitter golden test and
+  a differential test (the repo's "every construct: sim + synth"
+  rule, transposed).
+
+**Risks / fallback**
+
+- *Surface syntax takes longer than expected.*  M3 can start on the
+  hand-built AST with small helper functions; the syntax is sugar.
+- *SDCC rejects some C99 construct.*  The emitter avoids them from the
+  start (no compound literals, no VLAs, no designated initialisers); the
+  SDCC compile is in the M2 exit criteria so this is found early.
+
+---
+
+### M3 — The stack in Ember (`Ember.Net`)
+
+**Goal.** The M1 stack rewritten in Ember, agreeing with `Ember.Spec`
+on every input, as interpreter and as host C.
+
+**Steps** — one protocol at a time, each compared function by function
+before the whole stack is compared:
+
+| # | Step | Test that closes it | Effort |
+|---|---|---|---|
+| M3.1 | Data layout: one packet buffer (`[u8; MTU]`), TCB as a record, constants | `sizeof` report; layout doc in `Ember/Net/README.md` | S |
+| M3.2 | Checksum, SLIP (from M2.9) wired into the buffer layout | function-level: = Spec on 10 000 random inputs | S |
+| M3.3 | IPv4 + ICMP in place | function-level vs Spec; corpus `icmp/` through the Ember step | M |
+| M3.4 | UDP echo | corpus `udp/` | S |
+| M3.5 | TCP input/output, state machine, application callback | corpus `tcp/`; generated sessions | L |
+| M3.6 | Timers | corpus with ticks | M |
+| M3.7 | Main loop: `poll` (drain the ring, run `step`, emit SLIP) in Ember | whole corpus: Ember interpreter = Spec; host C = interpreter | M |
+
+**Debug aids added:** a *lockstep* mode in the host harness: Spec and
+Ember interpreter consume the same input and their **states** are
+compared after every step (TCB fields, buffer contents), so a divergence
+is caught where it starts, not where it becomes visible on the wire.
+
+**Exit criteria**
+
+- whole corpus and 10 000 generated sessions: Spec = interpreter = host
+  C (observable traces), lockstep states equal;
+- host C size report: code and RAM per function, first baseline
+  committed.
+
+**Risks / fallback**
+
+- *Ember is too restrictive for some protocol logic.*  Extend the
+  language (with M2-style tests for the new construct) rather than work
+  around it in the runtime; the runtime stays protocol-free.
+
+---
+
+### M4 — ESP32-C3, bare metal, SLIP over the UART
+
+**Goal.** The emitted stack answers ping, UDP echo and TCP echo on an
+ESP32-C3, first in Espressif's QEMU and then on a board, over SLIP on
+UART0, receiving through an interrupt.  No ESP-IDF, no FreeRTOS: a
+bare-metal runtime, so that what runs is only Ember and a small runtime.
+
+**Steps** — the hardware path first, then the protocols, so that a
+failure is always in the newest piece:
+
+| # | Step | Test that closes it | Effort |
+|---|---|---|---|
+| M4.0 | **Spike / toolchain**: Espressif's QEMU (`qemu-system-riscv32 -M esp32c3`, from ESP-IDF's tools or built from source; packaged for nix if missing), `riscv32-none-elf-gcc` with `-march=rv32imc`, `esptool.py` for images; `tools/ember/qemu-run.sh` with UART0 on a socket, UART1 to a file, `--gdb`, `--log` | a bare `while(1)` image boots in QEMU and exits cleanly on timeout | M |
+| M4.1 | `start.S`, `link.ld` (IRAM/DRAM layout of the C3), watchdogs disabled, trap handler printing `mcause`/`mepc`/`mtval` on UART1 | an illegal instruction prints `cause=2 pc=…` | M |
+| M4.2 | UART0/UART1 polled TX, "hello" on UART1 | host sees the string | S |
+| M4.3 | Interrupt matrix + UART0 RX FIFO interrupt → SPSC ring; main loop echoes bytes | host sends 10 000 random bytes, gets them back in order; interrupt count printed | M |
+| M4.4 | SLIP loopback through the Ember SLIP code | random frames echoed | S |
+| M4.5 | Ember stack linked in; host test driver replays the corpus over the socket | `icmp/` corpus: target trace = Spec trace | M |
+| M4.6 | UDP, then TCP, then the SYSTIMER as `tick` | `udp/`, `tcp/` corpora and timer traces | M |
+| M4.7 | Size and instruction gate: code/RAM from the map, instructions per ping via QEMU `-icount` | gate script with committed baseline | S |
+| M4.8 | Board (ESP32-C3 DevKit): same image flashed with `esptool.py`; SLIP over the USB-UART bridge; `slattach` on a Linux host, `ping` and `nc` | documented steps and a recorded session; corpus replay on the board through the serial port | S |
+
+**Debug aids added:** the target trace on UART1 (same §3.1 format), so
+`ember-diff target.trace spec.trace` works directly; QEMU interrupt log;
+OpenOCD/gdb over USB-Serial-JTAG on the board.
+
+**Exit criteria**
+
+- `tools/ember/qemu-test.sh` replays the whole corpus in QEMU and all
+  traces match (CI job);
+- the same on the board, run manually and recorded;
+- code < 16 KB, RAM < 8 KB, recorded in the gate baseline.
+
+**Risks / fallback**
+
+- *Espressif's QEMU unavailable or incomplete for the peripherals used.*
+  Fallback for CI: generic QEMU `virt` riscv32 with a 16550 UART (the
+  runtime's driver layer is the only difference); the board stays the
+  reference for the C3 peripherals.
+- *Interrupt bugs (lost bytes, ring races).*  M4.3 isolates them before
+  any protocol code runs; the ring has its own stress test (bursts at
+  line rate, random gaps).
+- *Timing differs between QEMU and the board.*  The protocol layer never
+  depends on timing other than `tick`.
+
+---
+
+### M4w — ESP32-C3 on Wi-Fi
+
+**Goal.** The same stack on Wi-Fi: ping and TCP echo from a laptop on
+the same network.  This is the demonstration that matters to most people,
+and it is the one place where Ember runs next to code it does not
+control: Espressif's Wi-Fi driver is a binary blob that needs ESP-IDF.
+
+**Design.** An ESP-IDF component registers a raw receive callback on the
+station interface (`esp_wifi_internal_reg_rxcb`) and transmits with
+`esp_wifi_internal_tx`, bypassing lwIP entirely.  Received Ethernet frames
+go into the same SPSC ring as the UART bytes did; an Ember task runs the
+main loop.  The Ember stack uses the Ethernet + ARP link layer of M1.11
+and a static address (DHCP from M1.12 if available).
+
+| # | Step | Test that closes it | Effort |
+|---|---|---|---|
+| M4w.0 | Spike: ESP-IDF (via a nix flake for ESP development or ESP-IDF's installer), a station connecting to an AP, raw RX callback counting frames, lwIP disabled for the interface | frame counter on the debug channel | M |
+| M4w.1 | Frame ring and TX path; frames mirrored to the debug channel as pcap-over-serial (`ember-pcap --serial`) | Wireshark shows the frames the board sees | M |
+| M4w.2 | Ember stack with Ethernet + ARP; static IP | `arping` and `ping` from a laptop | M |
+| M4w.3 | UDP and TCP echo | `nc` sessions; traces recorded and compared with the Spec replaying the same frames | M |
+| M4w.4 | DHCP (if M1.12 is done) | address obtained from the AP | S |
+
+**Exit criteria:** ping, UDP echo and TCP echo from a laptop over Wi-Fi;
+the board's trace of a session, replayed through `Ember.Spec`, gives the
+same outputs.
+
+**Risks / fallback**
+
+- *The raw RX/TX hooks are internal ESP-IDF APIs and change between
+  versions.*  Pin the ESP-IDF version; keep the component small; the
+  UART path (M4) does not depend on it.
+- *The trusted base grows* (Wi-Fi blob, ESP-IDF, FreeRTOS).  Stated
+  plainly: proofs (M5) cover the stack, not the radio.  The bare-metal
+  UART build (M4) is the one with the small trusted base.
+- *Classic ESP32 (Xtensa) wanted for its Ethernet MAC.*  Same component
+  with `xtensa-esp32-elf-gcc`; no CompCert claim on that path.
+
+---
+
+### M4s — Sparkle's own RV32 SoC (optional, after M4)
+
+**Goal.** The M4 code on the Sparkle RV32 SoC under the CSim JIT: own
+CPU, own stack (a different runtime layer; the Ember code is the same).
+
+| # | Step | Test | Effort |
+|---|---|---|---|
+| M4s.1 | Check the SoC's UART: RX interrupt path, interrupt controller; add what is missing (as a Sparkle PR with sim + synth tests per `CLAUDE.md`) | UART RX interrupt test program | M |
+| M4s.2 | Runtime variant `runtime/rv32-sparkle/` | M4.3 byte-echo test on the SoC | S |
+| M4s.3 | Corpus replay through the JIT-simulated UART | traces = Spec | M |
+
+---
+
+### M4z — Z80 via SDCC
+
+**Goal.** The same exchanges on a Z80, with code ≤ 8 KB and RAM ≤ 1 KB.
+
+| # | Step | Test that closes it | Effort |
+|---|---|---|---|
+| M4z.0 | **Spike**: pick the emulator.  Check whether `z88dk-ticks` can feed input bytes and raise interrupts (IM 1) from a host-driven port.  If not, use the Lean Z80 model started early from M6.1, or an existing emulator library with a scriptable ACIA | a 20-line program receives bytes by interrupt and echoes them in the chosen emulator | S |
+| M4z.1 | `sdccZ80` profile end to end: the M2 example library compiled with SDCC, run in the emulator, traces = interpreter | M2 examples | M |
+| M4z.2 | `crt0.s`, ACIA (68B50) or SIO driver, IM 1 ISR → ring; debug output port | byte-echo stress test as M4.3 | M |
+| M4z.3 | Stack linked; corpus replay | all corpora | M |
+| M4z.4 | Footprint work: MTU 296, one buffer, 16-bit checksums; size/cycle gate with `z88dk-ticks` | code ≤ 8 KB, RAM ≤ 1 KB; cycles per ping in the baseline | M |
+| M4z.5 | Hardware (RC2014-class): same binary, SLIP to a Linux host | manual demo, recorded session | S |
+
+**Risks / fallback**
+
+- *Code does not fit 8 KB with SDCC.*  The size report points at the
+  functions; options in order: narrower arithmetic in the profile,
+  restructure the Ember code, and finally M6 (own back end) — which is
+  the planned answer anyway.
+
+---
+
+### M5 — Proofs
+
+Proofs follow the tests; each item is small enough to finish on its own.
+
+| # | Statement | Notes | Effort |
+|---|---|---|---|
+| M5.1 | P1: checksum algebra — incremental update (RFC 1624) equals recomputation; one's-complement sum is order-independent | pure `BitVec 16` / `Nat` lemmas | M |
+| M5.2 | P1: SLIP decode ∘ encode = id; IPv4/UDP/TCP header parse ∘ emit = id | structural | M |
+| M5.3 | P1: TCP invariants — `snd.una ≤ snd.nxt`, no data delivered outside ESTABLISHED/CLOSE-WAIT, accepted segments lie in the receive window | state-machine induction over `step` | L |
+| M5.4 | P2 tooling: a symbolic-execution tactic for `Lang.exec` on straight-line code and bounded loops | measured on the checksum function first | L |
+| M5.5 | P2: function-level refinement for checksum, SLIP, IPv4, ICMP, UDP | uses M5.4 | L |
+| M5.6 | P2: the main loop as a simulation of `Spec.step` | the TCP part last | L |
+| M5.7 | P3: `Ember.C` semantics (the subset the emitter produces) | small-step, CompCert Clight as the reference | L |
+| M5.8 | P3: `Lang → C AST` forward simulation | per construct, then whole programs | L |
+| M5.9 | Bounds-check elimination: the emitter drops a check when a P2 lemma proves the index in range; size/cycle gates record the gain | ties proofs to performance | M |
+
+**Debugging proofs:** every lemma is first checked on the generators
+with `#eval` over random inputs (or `decide`/`native_decide` on small
+instances) before a proof is attempted — a false statement is found by a
+counterexample, not by a stuck proof.
+
+---
+
+### M6 — Own Z80 back end
+
+**Goal.** Ember → Z80 machine code without a C compiler, at least as
+small and fast as the SDCC build of M4z.
+
+| # | Step | Test that closes it | Effort |
+|---|---|---|---|
+| M6.1 | Lean Z80 model of the instruction subset (registers, flags, memory, I/O ports, IM 1 interrupts) | differential against the emulator on random instruction sequences (10 000 sequences of 50 instructions, all registers and flags compared after each instruction) | L |
+| M6.2 | Encoder/assembler in Lean (`Asm.lean`), checked against z88dk's assembler | byte-identical output for every instruction form used | M |
+| M6.3 | Linear IR (three-address, explicit widths) and `Lang → IR` | IR interpreter = Lang interpreter on the M2 fuzz corpus | M |
+| M6.4 | Static frame allocation (overlay along the call graph) | no two live locals share an address — checked by a separate validator on every compiled program | M |
+| M6.5 | Instruction selection: 8-bit in `A`, 16-bit in `HL`/`DE`, runtime routines for 32-bit and multiply/divide | Lang interpreter = Lean Z80 model = emulator on the fuzz corpus | L |
+| M6.6 | Runtime routines in assembly, each with a Lean specification | exhaustive tests for 8-bit operands, random for 16/32-bit | M |
+| M6.7 | Whole stack on the own back end; compare with SDCC | corpus replay; size and cycles vs the M4z baseline | M |
+
+**Debug aids added:** the three-way comparison (interpreter, Lean Z80
+model, emulator) with first-divergence reporting at instruction level,
+and a listing that interleaves Ember source, IR and Z80 instructions.
+
+---
+
+### M7 — Back-end proof
+
+| # | Statement | Effort |
+|---|---|---|
+| M7.1 | `Lang → IR` preserves semantics | L |
+| M7.2 | Frame allocation is sound (validator proven, translation-validation style) | M |
+| M7.3 | `IR → Z80` preserves semantics over the M6.1 model | L |
+| M7.4 | Encoder correctness: decode ∘ encode = id on the subset | M |
+
+Result: a chain from `Ember.Spec` to Z80 machine code whose trusted base
+is Lean's kernel, the Z80 model, and the hand-written runtime (start-up,
+ISR, ring buffer).
+
+## 5. Continuous integration and gates
+
+| Job | Runs | From |
+|---|---|---|
+| `ember-spec` | corpus replay, 1 000 generated sessions per protocol | M1 |
+| `ember-lang` | interpreter tests, golden C, differential with gcc + UBSan/ASan, 1 000 fuzz programs | M2 |
+| `ember-net` | whole corpus: Spec = interpreter = host C | M3 |
+| `ember-esp32` | corpus on QEMU `-M esp32c3`; size/instruction gate | M4 |
+| `ember-z80` | corpus in the Z80 emulator; size/cycle gate | M4z |
+| `ember-proofs` | `lake build Ember.Proof` | M5 |
+
+Gate scripts follow `bench/gate/run.sh`: the measurement is compared
+against a committed baseline produced by the same script; outside ±3 %
+in either direction fails; `--update` re-records, so every change in
+cost is a reviewed diff.
+
+## 6. Risk register
+
+| Risk | Where | Mitigation |
+|---|---|---|
+| TCP scope creep | M1.7, M3.5 | fixed scope; unsupported cases answered with RST and listed |
+| Interrupt and ring races | M4.3, M4z.2 | isolated stress tests before protocol code; SPSC ring with a single writer per index |
+| Z80 emulator lacks scriptable I/O/interrupts | M4z.0 | spike first; Lean Z80 model as fallback |
+| Espressif QEMU missing or incomplete | M4.0 | generic QEMU `virt` for CI; the board as reference |
+| ESP-IDF internal Wi-Fi APIs change | M4w | pinned ESP-IDF; UART path independent of it |
+| Trusted base on Wi-Fi includes the radio blob and ESP-IDF | M4w | stated; proofs claim the stack, the bare-metal UART build is the small-TCB configuration |
+| SDCC code too large for 8 KB | M4z.4 | size report per function; M6 own back end |
+| Surface syntax effort | M2.4 | M3 can start on the AST |
+| Proofs slower than code | M5 | proofs never block milestones; each M5 item is independent |
+| Divergent behaviour hidden by trace formatting | all | one decoder for `pkt` lines; observable comparison on raw bytes only |
+
+## 7. Decision log
+
+| Date | Decision | Reason |
+|---|---|---|
+| 2026-10-05 | Name: Ember | embedded + Sparkle |
+| 2026-10-05 | `Ember/` inside the Sparkle repo, own `lean_lib` | shared toolchain and simulator |
+| 2026-10-05 | QEMU riscv32 first, then Z80 | debuggability first, impact second |
+| 2026-10-09 | Targets: **Z80 and ESP32**; the ESP32 variant is the ESP32-C3 (RISC-V) | user's choice of targets; C3 keeps RISC-V (CompCert, one toolchain with the rest of the repo) and is emulated by Espressif's QEMU; classic ESP32 (Xtensa) only via gcc |
+| 2026-10-09 | ESP32-C3 bare metal over SLIP first (M4), Wi-Fi through ESP-IDF raw frames second (M4w) | small trusted base and full debuggability first; Wi-Fi needs the vendor blob |
+| 2026-10-05 | SLIP over UART | one interrupt source, no NIC driver |
+| 2026-10-05 | Deep embedding with an executable semantics | needed for P2/P3; avoids reflection of arbitrary Lean terms |
+| 2026-10-05 | Own Z80 back end as M6, C path kept | removes SDCC from the trusted base; C stays the portable back end and the baseline |
+| 2026-10-09 | One trace format and first-divergence diffing for all implementations | debuggability across four implementations |
+| 2026-10-09 | Ember in its own repository, not inside Sparkle | user's choice; no dependency on Sparkle's libraries anyway |
+| 2026-10-09 | Implementation pass 1 = M1–M3 on the host | everything that runs without target hardware or emulators |
+| 2026-10-09 | `Input = rx chunk \| tick`; one trace step per input; the SLIP decoder still sees one byte at a time | traces stay readable (a frame per line) without changing the byte-level state machine |
+| 2026-10-09 | One tick = 500 ms; RTO 3·2^k ticks capped at 48, 8 retries; TIME-WAIT 20; the echo application closes after 60 idle ticks | small integers on small targets; idle close makes the active-close states reachable from tests |
+| 2026-10-09 | DF set on UDP and TCP, not on ICMP echo replies; Ethernet frames not padded to 60 bytes | what Linux does (recorded fixtures); padding is the driver's job |
+| 2026-10-09 | MTU 576 for the Ethernet build, 296 for SLIP | dnsmasq's OFFER is 328 bytes; RFC 2131 requires 576 |
+| 2026-10-09 | Fixtures from Linux through TUN/TAP devices in a user namespace (`tools/ember/record-linux.py`); Linux-responder fixtures masked on `ipv4.id` | no root, no tcpdump; Linux's IP identification is random |
+| 2026-10-09 | Hand-written fixtures are scenarios with stated expectations, not Spec output | a fixture must not be "whatever the Spec printed" |
+| 2026-10-09 | Ember evaluates every operand (strict `&&`, `\|\|`, `if-then-else`); the destination of a call is evaluated after the call | one evaluation order for the interpreter and the hoisted C; found by the fuzzer |
+| 2026-10-09 | Emitter folds closed subexpressions with the interpreter and hoists comparison operands, divisors and shift amounts into temporaries | GCC's front-end range warnings otherwise fire on legal Ember; found by the fuzzer |
+| 2026-10-09 | SDCC warnings 110 and 126 ("conditional flow changed by optimizer", "unreachable code") disabled in the `--Werror` check | they report what SDCC's optimiser proved, not a property of the C |
+
+## 8. Glossary
+
+- **Observable event**: `rx`, `tx`, `tick` — what two implementations
+  must agree on.
+- **Diagnostic event**: `pkt`, `tcb`, `drop`, `note` — explanation only.
+- **Lockstep**: two implementations run side by side with their internal
+  states compared after every input.
+- **Profile**: target description used by the emitter (int width,
+  operation widths).
+- **P1/P2/P3**: properties of the reference / refinement of the reference
+  by the Ember program / semantics preservation of `Lang → C`.
+- **Trusted base**: what is assumed, not proven (design §4).

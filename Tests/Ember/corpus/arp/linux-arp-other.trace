@@ -1,0 +1,4 @@
+# ember-trace v1  impl=linux  build=linux-6.18.45  profile=host64  link=eth  mask=ipv4.id
+# recorded by: tools/ember/record-linux.py responder arp Tests/Ember/corpus/arp
+# Linux as 10.0.0.1 with Ember's MAC on a TAP device; IP identification masked
+0      rx   ff ff ff ff ff ff 02 00 00 00 00 02 08 06 00 01 08 00 06 04 00 01 02 00 00 00 00 02 0a 00 00 02 00 00 00 00 00 00 0a 00 00 09

@@ -1,0 +1,7 @@
+# ember-trace v1  impl=spec  build=dev  profile=host64  link=slip
+# hand-written scenario `listen-no-syn` (Tests/Ember/Scenarios.lean): neither SYN nor ACK nor RST in LISTEN: drop
+# expected outputs are the Spec's, checked against the scenario's expectations
+0      rx   c0 45 00 00 29 34 56 40 00 40 06 f2 76 0a 00 00 02 0a 00 00 01 9c 40 00 07 00 00 03 e8 00 00 00 00 50 08 fa f0 88 b8 00 00 78 c0
+0      pkt  rx ipv4 10.0.0.2>10.0.0.1 tcp 40000>7 [P] seq=1000 ack=0 win=64240 data=1
+0      drop reason=no-syn-in-listen
+0      tcb  state=LISTEN snd.una=0 snd.nxt=0 rcv.nxt=0 pending=0 sent=0 rt=0/0

@@ -1,0 +1,6 @@
+# ember-trace v1  impl=spec  build=dev  profile=host64  link=eth  mtu=576
+# hand-written scenario `short-frame` (Tests/Ember/Scenarios.lean): frame under 14 bytes
+# expected outputs are the Spec's, checked against the scenario's expectations
+0      rx   01 02 03
+0      pkt  rx eth truncated len=3
+0      drop reason=short-frame

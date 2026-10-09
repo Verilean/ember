@@ -1,0 +1,27 @@
+# ember-trace v1  impl=spec  build=dev  profile=host64  link=slip
+0      rx   c0 45 00 00 3c 95 9c 40 00 40 06 91 1d 0a 00 00 02 0a 00 00 01 d4 c6 00 07 fe ae e8 87 00 00 00 00 a0 02 ff ff 09 b1 00 00 02 04 01 00 04 02 08 0a 26 3d 4c bc 00 00 00 00 01 03 03 0a c0
+0      pkt  rx ipv4 10.0.0.2>10.0.0.1 tcp 54470>7 [S] seq=4272875655 ack=0 win=65535 data=0
+0      pkt  tx ipv4 10.0.0.1>10.0.0.2 tcp 7>54470 [S.] seq=65536 ack=4272875656 win=256 data=0
+0      tx   c0 45 00 00 2c 00 01 40 00 40 06 26 c9 0a 00 00 01 0a 00 00 02 00 07 d4 c6 00 01 00 00 fe ae e8 88 60 12 01 00 cb c1 00 00 02 04 01 00 c0
+0      tcb  state=SYN-RCVD snd.una=65536 snd.nxt=65537 rcv.nxt=4272875656 pending=0 sent=0 rt=3/0
+1      rx   c0 45 00 00 28 95 9d 40 00 40 06 91 30 0a 00 00 02 0a 00 00 01 d4 c6 00 07 fe ae e8 88 00 01 00 01 50 10 ff ff df ca 00 00 c0
+1      pkt  rx ipv4 10.0.0.2>10.0.0.1 tcp 54470>7 [.] seq=4272875656 ack=65537 win=65535 data=0
+1      tcb  state=ESTABLISHED snd.una=65537 snd.nxt=65537 rcv.nxt=4272875656 pending=0 sent=0 rt=0/0
+2      rx   c0 45 00 00 35 95 9e 40 00 40 06 91 22 0a 00 00 02 0a 00 00 01 d4 c6 00 07 fe ae e8 88 00 01 00 01 50 18 ff ff 9e 7d 00 00 68 65 6c 6c 6f 2c 20 65 6d 62 65 72 0a c0
+2      pkt  rx ipv4 10.0.0.2>10.0.0.1 tcp 54470>7 [P.] seq=4272875656 ack=65537 win=65535 data=13
+2      pkt  tx ipv4 10.0.0.1>10.0.0.2 tcp 7>54470 [P.] seq=65537 ack=4272875669 win=243 data=13
+2      tx   c0 45 00 00 35 00 02 40 00 40 06 26 bf 0a 00 00 01 0a 00 00 02 00 07 d4 c6 00 01 00 01 fe ae e8 95 50 18 00 f3 9d 7d 00 00 68 65 6c 6c 6f 2c 20 65 6d 62 65 72 0a c0
+2      tcb  state=ESTABLISHED snd.una=65537 snd.nxt=65550 rcv.nxt=4272875669 pending=13 sent=13 rt=3/0
+3      rx   c0 45 00 00 28 95 9f 40 00 40 06 91 2e 0a 00 00 02 0a 00 00 01 d4 c6 00 07 fe ae e8 95 00 01 00 0e 50 10 ff f3 df bc 00 00 c0
+3      pkt  rx ipv4 10.0.0.2>10.0.0.1 tcp 54470>7 [.] seq=4272875669 ack=65550 win=65523 data=0
+3      tcb  state=ESTABLISHED snd.una=65550 snd.nxt=65550 rcv.nxt=4272875669 pending=0 sent=0 rt=0/0
+4      rx   c0 45 00 00 28 95 a0 40 00 40 06 91 2d 0a 00 00 02 0a 00 00 01 d4 c6 00 07 fe ae e8 95 00 01 00 0e 50 11 ff f3 df bb 00 00 c0
+4      pkt  rx ipv4 10.0.0.2>10.0.0.1 tcp 54470>7 [F.] seq=4272875669 ack=65550 win=65523 data=0
+4      pkt  tx ipv4 10.0.0.1>10.0.0.2 tcp 7>54470 [F.] seq=65550 ack=4272875670 win=256 data=0
+4      tx   c0 45 00 00 28 00 03 40 00 40 06 26 cb 0a 00 00 01 0a 00 00 02 00 07 d4 c6 00 01 00 0e fe ae e8 96 50 11 01 00 de ae 00 00 c0
+4      tcb  state=LAST-ACK snd.una=65550 snd.nxt=65551 rcv.nxt=4272875670 pending=0 sent=0 rt=3/0
+5      rx   c0 45 00 00 28 95 a1 40 00 40 06 91 2c 0a 00 00 02 0a 00 00 01 d4 c6 00 07 fe ae e8 96 00 01 00 0f 50 10 ff f2 df bb 00 00 c0
+5      pkt  rx ipv4 10.0.0.2>10.0.0.1 tcp 54470>7 [.] seq=4272875670 ack=65551 win=65522 data=0
+5      tcb  state=LISTEN snd.una=0 snd.nxt=0 rcv.nxt=0 pending=0 sent=0 rt=0/0
+6      tick
+7      tick

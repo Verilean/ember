@@ -1,0 +1,9 @@
+# ember-trace v1  impl=spec  build=dev  profile=host64  link=slip
+# hand-written scenario `bad-header` (Tests/Ember/Scenarios.lean): short segment, data offset below 20
+# expected outputs are the Spec's, checked against the scenario's expectations
+0      rx   c0 45 00 00 24 34 56 40 00 40 06 f2 7b 0a 00 00 02 0a 00 00 01 9c 40 00 07 00 00 03 e8 00 00 00 00 50 02 fa f0 c0
+0      pkt  rx ipv4 10.0.0.2>10.0.0.1 proto=6 len=36
+0      drop reason=short-tcp
+1      rx   c0 45 00 00 28 34 56 40 00 40 06 f2 77 0a 00 00 02 0a 00 00 01 9c 40 00 07 00 00 03 e8 00 00 00 00 40 02 fa f0 10 db dc 00 00 c0
+1      pkt  rx ipv4 10.0.0.2>10.0.0.1 tcp 40000>7 [S] seq=1000 ack=0 win=64240 data=4
+1      drop reason=bad-tcp-header

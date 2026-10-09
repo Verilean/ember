@@ -1,0 +1,26 @@
+# ember-trace v1  impl=spec  build=dev  profile=host64  link=slip
+# hand-written scenario `small-mss` (Tests/Ember/Scenarios.lean): peer MSS 100: window and echo limited to 100
+# expected outputs are the Spec's, checked against the scenario's expectations
+0      rx   c0 45 00 00 2c 34 56 40 00 40 06 f2 73 0a 00 00 02 0a 00 00 01 9c 40 00 07 00 00 03 e8 00 00 00 00 60 02 fa f0 ee 53 00 00 02 04 00 64 c0
+0      pkt  rx ipv4 10.0.0.2>10.0.0.1 tcp 40000>7 [S] seq=1000 ack=0 win=64240 data=0
+0      pkt  tx ipv4 10.0.0.1>10.0.0.2 tcp 7>40000 [S.] seq=65536 ack=1001 win=100 data=0
+0      tx   c0 45 00 00 2c 00 01 40 00 40 06 26 c9 0a 00 00 01 0a 00 00 02 00 07 9c 40 00 01 00 00 00 00 03 e9 60 12 00 64 e8 32 00 00 02 04 01 00 c0
+0      tcb  state=SYN-RCVD snd.una=65536 snd.nxt=65537 rcv.nxt=1001 pending=0 sent=0 rt=3/0
+1      rx   c0 45 00 00 28 34 56 40 00 40 06 f2 77 0a 00 00 02 0a 00 00 01 9c 40 00 07 00 00 03 e9 00 01 00 01 50 10 fa f0 00 af 00 00 c0
+1      pkt  rx ipv4 10.0.0.2>10.0.0.1 tcp 40000>7 [.] seq=1001 ack=65537 win=64240 data=0
+1      tcb  state=ESTABLISHED snd.una=65537 snd.nxt=65537 rcv.nxt=1001 pending=0 sent=0 rt=0/0
+2      rx   c0 45 00 00 be 34 56 40 00 40 06 f1 e1 0a 00 00 02 0a 00 00 01 9c 40 00 07 00 00 03 e9 00 01 00 01 50 18 fa f0 3c 02 00 00 00 01 02 03 04 05 06 07 08 09 0a 0b 0c 0d 0e 0f 10 11 12 13 14 15 16 17 18 19 1a 1b 1c 1d 1e 1f 20 21 22 23 24 25 26 27 28 29 2a 2b 2c 2d 2e 2f 30 31 32 33 34 35 36 37 38 39 3a 3b 3c 3d 3e 3f 40 41 42 43 44 45 46 47 48 49 4a 4b 4c 4d 4e 4f 50 51 52 53 54 55 56 57 58 59 5a 5b 5c 5d 5e 5f 60 61 62 63 64 65 66 67 68 69 6a 6b 6c 6d 6e 6f 70 71 72 73 74 75 76 77 78 79 7a 7b 7c 7d 7e 7f 80 81 82 83 84 85 86 87 88 89 8a 8b 8c 8d 8e 8f 90 91 92 93 94 95 c0
+2      pkt  rx ipv4 10.0.0.2>10.0.0.1 tcp 40000>7 [P.] seq=1001 ack=65537 win=64240 data=150
+2      pkt  tx ipv4 10.0.0.1>10.0.0.2 tcp 7>40000 [P.] seq=65537 ack=1101 win=0 data=100
+2      tx   c0 45 00 00 8c 00 02 40 00 40 06 26 68 0a 00 00 01 0a 00 00 02 00 07 9c 40 00 01 00 01 00 00 04 4d 50 18 00 00 5f 02 00 00 00 01 02 03 04 05 06 07 08 09 0a 0b 0c 0d 0e 0f 10 11 12 13 14 15 16 17 18 19 1a 1b 1c 1d 1e 1f 20 21 22 23 24 25 26 27 28 29 2a 2b 2c 2d 2e 2f 30 31 32 33 34 35 36 37 38 39 3a 3b 3c 3d 3e 3f 40 41 42 43 44 45 46 47 48 49 4a 4b 4c 4d 4e 4f 50 51 52 53 54 55 56 57 58 59 5a 5b 5c 5d 5e 5f 60 61 62 63 c0
+2      tcb  state=ESTABLISHED snd.una=65537 snd.nxt=65637 rcv.nxt=1101 pending=100 sent=100 rt=3/0
+3      rx   c0 45 00 00 28 34 56 40 00 40 06 f2 77 0a 00 00 02 0a 00 00 01 9c 40 00 07 00 00 04 4d 00 01 00 65 50 10 fa f0 ff e6 00 00 c0
+3      pkt  rx ipv4 10.0.0.2>10.0.0.1 tcp 40000>7 [.] seq=1101 ack=65637 win=64240 data=0
+3      pkt  tx ipv4 10.0.0.1>10.0.0.2 tcp 7>40000 [.] seq=65637 ack=1101 win=100 data=0
+3      tx   c0 45 00 00 28 00 03 40 00 40 06 26 cb 0a 00 00 01 0a 00 00 02 00 07 9c 40 00 01 00 65 00 00 04 4d 50 10 00 64 fa 73 00 00 c0
+3      tcb  state=ESTABLISHED snd.una=65637 snd.nxt=65637 rcv.nxt=1101 pending=0 sent=0 rt=0/0
+4      rx   c0 45 00 00 5a 34 56 40 00 40 06 f2 45 0a 00 00 02 0a 00 00 01 9c 40 00 07 00 00 04 4d 00 01 00 65 50 18 fa f0 d7 6b 00 00 64 65 66 67 68 69 6a 6b 6c 6d 6e 6f 70 71 72 73 74 75 76 77 78 79 7a 7b 7c 7d 7e 7f 80 81 82 83 84 85 86 87 88 89 8a 8b 8c 8d 8e 8f 90 91 92 93 94 95 c0
+4      pkt  rx ipv4 10.0.0.2>10.0.0.1 tcp 40000>7 [P.] seq=1101 ack=65637 win=64240 data=50
+4      pkt  tx ipv4 10.0.0.1>10.0.0.2 tcp 7>40000 [P.] seq=65637 ack=1151 win=50 data=50
+4      tx   c0 45 00 00 5a 00 04 40 00 40 06 26 98 0a 00 00 01 0a 00 00 02 00 07 9c 40 00 01 00 65 00 00 04 7f 50 18 00 32 d1 f8 00 00 64 65 66 67 68 69 6a 6b 6c 6d 6e 6f 70 71 72 73 74 75 76 77 78 79 7a 7b 7c 7d 7e 7f 80 81 82 83 84 85 86 87 88 89 8a 8b 8c 8d 8e 8f 90 91 92 93 94 95 c0
+4      tcb  state=ESTABLISHED snd.una=65637 snd.nxt=65687 rcv.nxt=1151 pending=50 sent=50 rt=3/0

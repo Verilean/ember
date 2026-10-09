@@ -1,0 +1,10 @@
+# ember-trace v1  impl=linux  build=linux-6.18.45  profile=host64  link=slip  mask=ipv4.id
+# recorded by: tools/ember/record-linux.py responder icmp Tests/Ember/corpus/icmp
+# Linux 6.18.45 as 10.0.0.1 answering 10.0.0.2
+# IP identification is random in Linux: compared with mask=ipv4.id
+0      rx   c0 45 00 00 1c 10 01 00 00 40 01 56 de 0a 00 00 02 0a 00 00 01 08 00 b5 bc 42 42 00 01 c0
+0      tx   c0 45 00 00 1c 01 9e 00 00 40 01 65 41 0a 00 00 01 0a 00 00 02 00 00 bd bc 42 42 00 01 c0
+1      rx   c0 45 00 00 1c 10 02 00 00 40 01 56 dd 0a 00 00 02 0a 00 00 01 08 00 b5 bb 42 42 00 02 c0
+1      tx   c0 45 00 00 1c 02 0e 00 00 40 01 64 d1 0a 00 00 01 0a 00 00 02 00 00 bd bb 42 42 00 02 c0
+2      rx   c0 45 00 00 1c 10 03 00 00 40 01 56 dc 0a 00 00 02 0a 00 00 01 08 00 b5 ba 42 42 00 03 c0
+2      tx   c0 45 00 00 1c 03 3b 00 00 40 01 63 a4 0a 00 00 01 0a 00 00 02 00 00 bd ba 42 42 00 03 c0

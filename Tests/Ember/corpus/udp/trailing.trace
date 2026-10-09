@@ -1,0 +1,7 @@
+# ember-trace v1  impl=spec  build=dev  profile=host64  link=slip
+# hand-written scenario `trailing` (Tests/Ember/Scenarios.lean): bytes beyond the UDP length are not echoed
+# expected outputs are the Spec's, checked against the scenario's expectations
+0      rx   c0 45 00 00 24 00 01 40 00 40 11 26 c6 0a 00 00 02 0a 00 00 01 13 88 00 07 00 0c 07 6f 6b 65 65 70 6a 75 6e 6b c0
+0      pkt  rx ipv4 10.0.0.2>10.0.0.1 udp 5000>7 len=36
+0      pkt  tx ipv4 10.0.0.1>10.0.0.2 udp 7>5000 len=32
+0      tx   c0 45 00 00 20 00 01 40 00 40 11 26 ca 0a 00 00 01 0a 00 00 02 00 07 13 88 00 0c 07 6f 6b 65 65 70 c0
