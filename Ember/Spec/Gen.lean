@@ -299,6 +299,188 @@ def rechunk (s : Session) : RandM Session := do
   if pend.size > 0 then out := out.push (.rx pend)
   return { s with inputs := out }
 
+/-- Put ticks inside frames: some `rx` items are split in two with one to
+three ticks between the halves (a tick in the middle of a frame is
+deferred to its end; a second one gives the frame up). -/
+def midTicks (s : Session) : RandM Session := do
+  let mut out : Array Input := #[]
+  for i in s.inputs do
+    match i with
+    | .rx b =>
+      if b.size ≥ 2 && (← randBool 35) then
+        let k ← randRange 1 (b.size - 1)
+        out := out.push (.rx (b.extract 0 k))
+        for _ in [0:(← randRange 1 3)] do out := out.push .tick
+        out := out.push (.rx (b.extract k b.size))
+      else out := out.push i
+    | .tick => out := out.push i
+  return { s with inputs := out }
+
+/-! ## Ethernet: the same sessions in frames, with ARP around them
+
+A generated session (possibly mutated) becomes an Ethernet session: each
+packet in a frame from the peer's MAC, and between the frames ARP
+requests and replies (for us, for others, malformed), frames for other
+stations, other EtherTypes, truncated and oversized frames. -/
+
+def peerMac : ByteArray := Bytes.ofList [0x02, 0x00, 0x00, 0x00, 0x00, 0x02]
+
+def randMac : RandM ByteArray := do
+  match ← randNat 4 with
+  | 0 => return Arp.ourMacDefault
+  | 1 => return Arp.broadcastMac
+  | 2 => return peerMac
+  | _ => randBytes 6
+
+/-- A frame that is not part of the session. -/
+def ethNoise (mtu : Nat) : RandM ByteArray := do
+  let someIp : RandM UInt32 := do
+    match ← randNat 4 with
+    | 0 => return ourIpDefault
+    | 1 => return peerIpDefault
+    | 2 => return 0
+    | _ => return 0x0A000000 + (← randNat 256).toUInt32
+  match ← randNat 8 with
+  | 0 | 1 =>  -- an ARP request
+    let spa ← someIp
+    let tpa ← someIp
+    let sha ← if ← randBool 70 then pure peerMac else randBytes 6
+    return Arp.frame (← randMac) sha Arp.typeArp (Arp.packet 1 sha spa (Bytes.ofList [0, 0, 0, 0, 0, 0]) tpa)
+  | 2 =>  -- an ARP reply
+    let sha ← randBytes 6
+    return Arp.frame Arp.ourMacDefault sha Arp.typeArp (Arp.packet 2 sha (← someIp) Arp.ourMacDefault (← someIp))
+  | 3 =>  -- ARP with a wrong field, or cut short
+    let p := Arp.packet (← randRange 0 3).toUInt16 peerMac peerIpDefault Arp.ourMacDefault ourIpDefault
+    let i ← randNat 8
+    let cut ← randNat 28
+    let flip ← randBool
+    let p := if flip then Bytes.set p i (Bytes.get p i ^^^ 0x11) else p.extract 0 cut
+    return Arp.frame Arp.broadcastMac peerMac Arp.typeArp p
+  | 4 =>  -- another EtherType
+    return Arp.frame Arp.ourMacDefault peerMac (← randNat 65536).toUInt16 (← randBytes (← randNat 40))
+  | 5 =>  -- shorter than a header
+    randBytes (← randNat 14)
+  | 6 =>  -- too large for the buffer
+    return Arp.frame Arp.ourMacDefault peerMac Arp.typeIpv4 (← randBytes (mtu + 1 + (← randNat 40)))
+  | _ =>  -- a ping from a station not seen before, or to another address
+    let src := 0x0A000000 + (← randRange 3 250).toUInt32
+    let toUs ← randBool 80
+    let dst := if toUs then ourIpDefault else src + 1
+    return Arp.frame (← randMac) (← randBytes 6) Arp.typeIpv4
+      (Peer.ping 7 1 (← randBytes (← randNat 32)) (src := src) (dst := dst))
+
+/-- The Ethernet form of a SLIP session. -/
+def toEth (s : Session) (mtu : Nat := mtuEth) : RandM Session := do
+  let mut ins : Array Input := #[]
+  for i in s.inputs do
+    if ← randBool 12 then ins := ins.push (.rx (← ethNoise mtu))
+    match i with
+    | .tick =>
+      -- four other stations push the peer out of the cache: what the
+      -- tick then sends (a retransmission) finds no address
+      if ← randBool 25 then
+        for k in [0:4] do
+          let src := 0x0A000064 + (← randNat 100).toUInt32 * 4 + k.toUInt32
+          ins := ins.push (.rx (Arp.frame Arp.ourMacDefault (← randBytes 6) Arp.typeIpv4
+            (Peer.ping 7 1 .empty (src := src))))
+      ins := ins.push .tick
+    | .rx b =>
+      for p in Slip.decodeAll b (maxLen := 65535) do
+        let dst ← if ← randBool 4 then randMac else pure Arp.ourMacDefault
+        ins := ins.push (.rx (Arp.frame dst peerMac Arp.typeIpv4 p))
+  if ← randBool 30 then ins := ins.push (.rx (← ethNoise mtu))
+  return { s with kind := "eth-" ++ s.kind, cfg := { link := .eth, mtu }, inputs := ins }
+
+/-! ## DHCP: a server that answers the client, not always well -/
+
+def dhcpServer : UInt32 := 0x0A0000FE
+def serverMac : ByteArray := Bytes.ofList [0x02, 0x00, 0x00, 0x00, 0x00, 0xFE]
+
+/-- A BOOTREPLY in a frame; `opts` are raw option bytes. -/
+def dhcpReply (xid : UInt32) (yi : UInt32) (chaddr : ByteArray) (opts : List UInt8) (dst : UInt32)
+    (op : UInt8 := 2) (dport : UInt16 := Dhcp.clientPort) : ByteArray :=
+  let fixed := [op, 1, 6, 0] ++ Bytes.be32 xid ++ [0, 0, 0x80, 0x00] ++ [0, 0, 0, 0] ++ Bytes.be32 yi ++
+    Bytes.be32 dhcpServer ++ [0, 0, 0, 0]
+  let m := Bytes.ofList (fixed ++ chaddr.toList ++ List.replicate 10 0 ++ List.replicate 192 0 ++
+    Bytes.be32 Dhcp.magic ++ opts)
+  Arp.frame Arp.broadcastMac serverMac Arp.typeIpv4
+    (Ipv4.packet Ipv4.protoUdp 0x4444 dhcpServer dst (Udp.emit dhcpServer dst Dhcp.serverPort dport m))
+
+/-- A session with the DHCP client on: ticks, and after each message of
+the client an answer drawn from the right one, the wrong type, a wrong
+transaction, a damaged message — and now and then traffic to the address
+the client has (or had). -/
+def dhcp : RandM Session := do
+  let cfg : Config := { link := .eth, dhcp := true, mtu := mtuEth }
+  let mut st := State.init cfg
+  let mut ins : Array Input := #[]
+  let steps ← randRange 4 40
+  for _ in [0:steps] do
+    let feed (st : State) (ins : Array Input) (i : Input) : State × Array Input := ((step st i).1, ins.push i)
+    match ← randNat 11 with
+    | 0 | 1 | 2 => (st, ins) := feed st ins .tick
+    | 10 =>  -- silence: long enough for a timeout or a renewal
+      for _ in [0:(← randRange 7 10)] do (st, ins) := feed st ins .tick
+    | 3 =>  -- traffic for the address offered or bound
+      let a := if st.ip != 0 then st.ip else st.dhcp.offered
+      (st, ins) := feed st ins (.rx (Arp.frame Arp.ourMacDefault peerMac Arp.typeIpv4
+        (Peer.ping 9 1 (← randBytes (← randNat 24)) (dst := a))))
+    | 4 =>  -- who has the address?
+      let a := if st.ip != 0 then st.ip else st.dhcp.offered
+      (st, ins) := feed st ins (.rx (Arp.frame Arp.broadcastMac peerMac Arp.typeArp
+        (Arp.packet 1 peerMac peerIpDefault (Bytes.ofList [0, 0, 0, 0, 0, 0]) a)))
+    | _ =>
+      -- an answer for the phase the client is in
+      let ack ← randBool 85
+      let any ← randRange 1 8
+      let want : UInt8 := match st.dhcp.phase with
+        | .selecting => 2
+        | .requesting => if ack then 5 else 6
+        | _ => any.toUInt8
+      let right ← randBool 85
+      let other ← randRange 0 8
+      let mtype : UInt8 := if right then want else other.toUInt8
+      let sameXid ← randBool 90
+      let off ← randRange 1 3
+      let xid := if sameXid then st.dhcp.xid else st.dhcp.xid + off.toUInt32
+      let chaddr ← if ← randBool 92 then pure Arp.ourMacDefault else randBytes 6
+      let yi := 0x0A000000 + (← randRange 2 200).toUInt32
+      let lease ← match ← randNat 5 with
+        | 0 => pure 0
+        | 1 => pure 1
+        | 2 => pure 3
+        | 3 => randRange 2 40
+        | _ => pure 3600
+      -- options in either order, padded, sometimes without a type,
+      -- sometimes cut off or with a length that runs past the end
+      let tOpt : List UInt8 := [53, 1, mtype]
+      let sOpt : List UInt8 := [54, 4] ++ Bytes.be32 dhcpServer
+      let lOpt : List UInt8 := [51, 4] ++ Bytes.be32 lease.toUInt32
+      let pad : List UInt8 := List.replicate (← randNat 3) 0
+      let opts ← match ← randNat 12 with
+        | 0 => pure (sOpt ++ lOpt ++ [255])
+        | 1 => pure (tOpt ++ [255] ++ sOpt)
+        | 2 => pure (lOpt ++ pad ++ sOpt ++ tOpt)
+        | 3 => pure (tOpt ++ [54, 9, 1, 2])
+        | 4 => pure ([53, 0] ++ tOpt ++ sOpt ++ [255])
+        | 5 => pure (tOpt ++ [54, 2, 1, 2] ++ sOpt ++ lOpt ++ [255])
+        | 6 => pure (pad ++ tOpt ++ [53, 1, 6] ++ sOpt ++ lOpt ++ [12, 3, 97, 98, 99, 255])
+        | _ => pure (pad ++ tOpt ++ sOpt ++ pad ++ lOpt ++ [255])
+      let toAll ← randBool 80
+      let reply ← randBool 95
+      let rightPort ← randBool 95
+      let f := dhcpReply xid yi chaddr opts (if toAll then Ipv4.broadcast else yi)
+        (op := if reply then 2 else 1) (dport := if rightPort then Dhcp.clientPort else 69)
+      -- now and then damaged, or cut inside the fixed part
+      let f ← match ← randNat 14 with
+        | 0 => pure (f.extract 0 (← randRange 14 f.size))
+        | 1 =>
+          let i ← randRange 14 (f.size - 1)
+          pure (Bytes.set f i (Bytes.get f i ^^^ 0x40))
+        | _ => pure f
+      (st, ins) := feed st ins (.rx f)
+  return { kind := "dhcp", cfg, inputs := ins }
+
 /-! ## Properties -/
 
 /-- A transmitted packet is well-formed: IP header, lengths, and the

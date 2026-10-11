@@ -32,7 +32,30 @@ are needed for Wi-Fi (M4w), which is not part of this pass.
 | `booted` | `bool` | 1 | `tcb_reset` on the first call |
 
 Total RAM 935 bytes on host64 including the drop-reason name table (a
-diagnostic, 296 bytes of pointers); 622 bytes with SDCC on the Z80.
+diagnostic, 296 bytes of pointers); 887 bytes with SDCC on the Z80,
+receive ring (256 bytes) included.
+
+### The Ethernet build (`Eth.lean`)
+
+For Wi-Fi raw frames (plan M4w).  Frames arrive whole through
+`input.frame`; the 14-byte header is kept in `eth`, the payload goes to
+`buf[0, …)` — where the IP code of the SLIP build expects its packet, so
+`ip_input`, `icmp_input` and all of TCP are used as they are.  Added:
+
+| | |
+|---|---|
+| `eth_store`, `eth_input` | receive a frame; destination MAC, EtherType, size; learn the sender of a well-formed IPv4 packet |
+| `arp_input`, `arp_update`, `arp_find`, `arp_request` | RFC 826 with a cache of four entries, replaced round-robin |
+| `eth_send`, `ip_send` | the frame out; an ARP request and the drop `arp-miss` when the destination is not in the cache |
+| `dhcp_tick`, `dhcp_input`, `dhcp_send` | the client: DISCOVER, REQUEST, renewal at half the lease, NAK and time-outs |
+| `udp_input` | the SLIP build's, with port 68 for DHCP |
+
+Buffers: `buf : [u8; 576]`, `pend : [u8; 536]` (RFC 2131 requires 576);
+the address `OUR_IP` is a variable here.  Programs: `Eth.prog` (static
+address), `Eth.progDhcp`, and `Eth.progFor false 296`.  Tested on the
+host only — Spec = interpreter = host C on the Ethernet fixtures and on
+generated sessions (`ember-lockstep --gen eth|dhcp`); no target runtime
+delivers frames yet.
 
 ### Replies in place
 
@@ -77,11 +100,16 @@ Differences that are not observable, by design:
 | | code | RAM |
 |---|---|---|
 | host64, `gcc -Os` | 5.4 KB | 935 B |
-| Z80, SDCC 4.6 `--opt-code-size` | 24.8 KB | 622 B |
+| ESP32-C3, `riscv32-none-elf-gcc -Os`, no trace | 7.0 KB + 0.8 KB constants | 5.0 KB (4 KB stack) |
+| Z80, SDCC 4.6 `--opt-code-size`, no trace | 7.5 KB | 887 B + 179 B of stack |
+| Z80, own back end (`Ember/Z80`), no trace | 5.9 KB | 1 051 B + 14 B of stack |
 
-The ESP32-C3 budget (16 KB code, 8 KB RAM) is met with a wide margin.
-On the Z80 the RAM target (≤ 1 KB) is met and the code target (≤ 8 KB) is
-not: SDCC's 32-bit arithmetic (sequence numbers) and the bounds-checked
-`u16` indexing into a 296-byte buffer dominate.  That is the M4z.4 work
-the plan anticipates (narrower profile arithmetic, bounds checks removed
-where proofs allow, then the own back end of M6).
+The ESP32-C3 budget (16 KB code, 8 KB RAM) is met.  On the Z80 the code
+budget (8 KB) is met by both builds; the RAM budget (1 KB) is missed by
+about 40 bytes once the stack is counted — SDCC keeps locals there, the
+own back end has static frames and only return addresses on the stack.
+A ping costs 16 634 instructions on the C3; on the Z80 184 850 T-states
+with SDCC and 183 136 with the own back end (46 ms at 4 MHz), most of it
+the wire: 86 bytes each way at 640 T-states per byte.  (An earlier
+version of this file said 24.8 KB for SDCC, a mistake of the size
+script.)

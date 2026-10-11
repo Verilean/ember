@@ -48,6 +48,8 @@ structure State where
   iss  : UInt32 := issInit
   arp  : Arp.Cache := {}
   dhcp : Dhcp.St := {}
+  /-- SLIP: a tick arrived while a frame was being received and waits for its end. -/
+  tickDue : Bool := false
   deriving Inhabited
 
 /-- The trace header describing a configuration. -/
@@ -170,21 +172,52 @@ def tickInput : StackM Unit := do
   let s ← getS
   if s.cfg.dhcp then dhcpApply (Dhcp.tick s.dhcp s.ip s.cfg.mac)
 
+/-- A tick.  On a SLIP link the packet buffer holds the frame being
+received, and a tick may have to send; so a tick that arrives in the
+middle of a frame waits for the end of that frame (`tickDue`).  A second
+tick while one is waiting means the frame has been incomplete for a
+whole tick period: it is given up (the decoder skips the rest of it, as
+it does for an oversize frame, and reports `oversize-frame` at its end)
+and both ticks happen. -/
+def tickArrives : StackM Unit := do
+  let s ← getS
+  match s.cfg.link with
+  | .eth => tickInput
+  | .slip =>
+    if s.slip.buf.size == 0 then tickInput
+    else if !s.tickDue then modifyS fun s => { s with tickDue := true }
+    else
+      modifyS fun s => { s with slip := { over := true }, tickDue := false }
+      tickInput
+      tickInput
+
+/-- One received byte on a SLIP link: the decoder, and the frame it may complete. -/
+def slipByte (c : UInt8) : StackM Unit := do
+  let s ← getS
+  let (d, r) := s.slip.feed c s.cfg.mtu
+  modifyS fun s => { s with slip := d }
+  match r with
+  | .frame f => frameInput f
+  | .drop reason => dropR reason
+  | .none => pure ()
+
+/-- One received byte on a SLIP link, then a tick that waited for the end of the frame. -/
+def byteInput (c : UInt8) : StackM Unit := do
+  slipByte c
+  let s ← getS
+  if s.tickDue && s.slip.buf.size == 0 then
+    modifyS fun s => { s with tickDue := false }
+    tickInput
+
 def input : Input → StackM Unit
-  | .tick => tickInput
+  | .tick => tickArrives
   | .rx bytes => do
     let s ← getS
     match s.cfg.link with
     | .eth => frameInput bytes
     | .slip =>
       for c in bytes.toList do
-        let s ← getS
-        let (d, r) := s.slip.feed c s.cfg.mtu
-        modifyS fun s => { s with slip := d }
-        match r with
-        | .frame f => frameInput f
-        | .drop reason => dropR reason
-        | .none => pure ()
+        byteInput c
 
 def step (s : State) (i : Input) : State × List Event :=
   let ((), (s', es)) := (input i).run (s, #[])

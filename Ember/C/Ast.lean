@@ -4,7 +4,7 @@
 Close to CompCert's Clight: expressions have no side effects (calls are
 statements), every operation is written with explicit casts, and there
 are no compound literals, VLAs or designated initialisers, so SDCC
-accepts it.  `Ember.C.Semantics` (M5.7) will give this AST a meaning;
+accepts it.  `Ember.C.Sem` (M5.7) gives this AST a meaning;
 the printer (`Ember.C.Print`) is trusted.
 -/
 
@@ -18,7 +18,7 @@ inductive CTy where
   | strct (name : String)
   | ptr (t : CTy)
   | arr (t : CTy) (n : Nat)
-  deriving Inhabited, BEq, Repr
+  deriving Inhabited, DecidableEq, Repr
 
 inductive CExpr where
   | var   (x : String)
@@ -36,6 +36,29 @@ inductive CExpr where
   | call  (f : String) (args : List CExpr)
   | str   (s : String)
   deriving Inhabited, BEq, Repr
+
+mutual
+/-- Structural equality, as a function proofs can unfold (the derived `==` is opaque to them). -/
+def CExpr.same : CExpr → CExpr → Bool
+  | .var x, .var y => x == y
+  | .lit n s, .lit m t => n == m && s == t
+  | .blit a, .blit b => a == b
+  | .bin o a b, .bin o' a' b' => o == o' && CExpr.same a a' && CExpr.same b b'
+  | .un o a, .un o' a' => o == o' && CExpr.same a a'
+  | .cast t a, .cast t' a' => t == t' && CExpr.same a a'
+  | .cond c a b, .cond c' a' b' => CExpr.same c c' && CExpr.same a a' && CExpr.same b b'
+  | .index a i, .index a' i' => CExpr.same a a' && CExpr.same i i'
+  | .dot a f, .dot a' f' => CExpr.same a a' && f == f'
+  | .arrow a f, .arrow a' f' => CExpr.same a a' && f == f'
+  | .addr a, .addr a' => CExpr.same a a'
+  | .call f as, .call f' as' => f == f' && CExpr.sameL as as'
+  | .str s, .str t => s == t
+  | _, _ => false
+def CExpr.sameL : List CExpr → List CExpr → Bool
+  | [], [] => true
+  | a :: as, b :: bs => CExpr.same a b && CExpr.sameL as bs
+  | _, _ => false
+end
 
 inductive CStmt where
   | decl   (t : CTy) (x : String) (init : Option CExpr)

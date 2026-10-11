@@ -9,12 +9,14 @@ import Ember.Spec.Stack
 namespace Ember.Tools
 open Ember Ember.Trace
 
-/-- `ember-diff A.trace B.trace [--observable] [--context N] [--first-only] [--all]`;
+/-- `ember-diff A.trace B.trace [--observable | --drops] [--context N] [--first-only] [--all]`
+(`--drops`: observable events and drop reasons);
 exit status 0 when the traces agree, 1 when they differ, 2 on bad usage. -/
 def diffMain (args : List String) : IO UInt32 := do
   let rec go : List String → DiffOpts → List String → Except String (DiffOpts × List String)
     | [], o, fs => .ok (o, fs.reverse)
     | "--observable" :: r, o, fs => go r { o with observable := true } fs
+    | "--drops" :: r, o, fs => go r { o with observable := true, drops := true } fs
     | "--context" :: n :: r, o, fs => match n.toNat? with
       | some v => go r { o with context := v } fs
       | none => .error s!"bad --context {n}"
@@ -30,7 +32,7 @@ def diffMain (args : List String) : IO UInt32 := do
     IO.println r.report
     return if r.equal then 0 else 1
   | .ok _ =>
-    IO.eprintln "usage: ember-diff A.trace B.trace [--observable] [--context N] [--first-only] [--all]"
+    IO.eprintln "usage: ember-diff A.trace B.trace [--observable | --drops] [--context N] [--first-only] [--all]"
     return 2
 
 /-- `ember-pcap X.trace > X.pcap` -/

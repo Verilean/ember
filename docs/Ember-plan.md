@@ -5,9 +5,17 @@ This is the working plan for Ember.  The *why* and the architecture are in
 built in which order, how each step is tested, how a failure is located,
 and when a milestone counts as done.
 
-Status (2026-10-09): M0 done (design).  **M1, M2 and M3 done on the host**
-(see "Progress" below); M4 onwards (targets, proofs, own Z80 back end)
-to do.
+Status (2026-10-11): M0 done (design).  **M1, M2 and M3 done on the host;
+M4 done in QEMU (not on a board); M4z done on a Lean model of the machine
+(not on hardware); M5.1–M5.8 done (the stack in Ember, SLIP build, is proved against the Spec: function by function, per received byte and per tick, per call of `main`, and from the initial state for any input — it never traps and transmits and drops what `Spec.step` does, input by input.  Outside the theorems: the `while` of the driver `Sem.run`, the printing of the trace, the Ethernet build.  The proof of the tick found a defect — a tick that sent in the middle of a received frame destroyed that frame — which is fixed: such a tick now waits for the end of the frame.  M5.7: a semantics for the emitted C, against which the emitted code is run; it found an evaluation-order defect in the emitter, fixed.  M5.8: the emitted C is proved to do what the Ember semantics does — expressions, statements, calls, programs — for programs without by-reference parameters, which the stack is; so the C of the SLIP build, under the C semantics, transmits and drops what the Spec does); M6 done — the own Z80 back end
+compiles the stack without a C compiler, smaller than SDCC's build and as
+fast** (see "Progress" below).
+The stack in Ember also has its Ethernet/ARP/DHCP link layer now (what
+M4w needs on the host side).
+To do: the board and hardware steps (M4.8, M4z.5), Wi-Fi on a board (M4w:
+the ESP-IDF component), the Sparkle SoC (M4s), the rest of the P2/P3
+proofs (by-reference parameters in M5.8, M5.9) and the
+proof of the back end (M7).
 
 **Targets: the Z80 and the ESP32.**  The ESP32 variant is the
 **ESP32-C3** (RISC-V, rv32imc): it keeps the RISC-V path that CompCert
@@ -15,7 +23,7 @@ supports, Espressif's QEMU emulates it, and it has Wi-Fi.  The classic
 ESP32 (Xtensa) is reachable through the same C with Espressif's gcc, but
 has no CompCert back end and is not the primary target.  See §7.
 
-Progress (2026-10-09)
+Progress (2026-10-11)
 
 | Step | State | Where / notes |
 |---|---|---|
@@ -32,15 +40,54 @@ Progress (2026-10-09)
 | M2 exit | met | 10 000 random programs: interpreter = C at −O0 and −O2 under UBSan/ASan; warning-free with gcc `-Wall -Wextra -Wconversion -Werror -pedantic` and SDCC `--Werror` (two optimiser notes disabled, see decision log) |
 | M3.1–M3.7 | done | `Ember/Net` (layout in `Ember/Net/README.md`); `ember-lockstep` |
 | M3 exit | met | corpus and 10 000 generated sessions per protocol: Spec = Ember interpreter = host C, lockstep states equal; size baseline committed (`bench/ember-size.baseline`) |
+| M4.0–M4.2 | done | Espressif's QEMU packaged for nix (`tools/ember/nix/qemu-esp32c3.nix`); `runtime/esp32c3` (start-up, vectored traps, linker script, both UARTs); `tools/ember/qemu-run.sh` |
+| M4.3–M4.4 | done | UART0 receive interrupt → ring, pause/resume when full; 10 000 bytes echoed; SLIP loopback through the Ember SLIP code (`Ember/Net/Loop.lean`) |
+| M4.5–M4.6 | done | `tools/ember/esp32.py` replays fixtures over QEMU's UART sockets: the whole SLIP corpus and generated sessions, target trace = Spec trace; SYSTIMER tick (ticks on the host's request during replay, see decision log) |
+| M4.7 | done | 7.0 KB code, 0.8 KB constants, 5.0 KB RAM (4 KB of it the stack); 16 634 instructions per ping (QEMU `-icount`), in the baseline |
+| M4.8 | **not done** | needs a board; the image is the one QEMU loads, untested on silicon |
+| M4 exit | met in QEMU | `tools/ember/qemu-test.sh` (in `lake test`); board run open |
+| M4w (host part) | done | `Ember/Net/Eth.lean`: Ethernet frames, ARP (cache of 4), DHCP client, in Ember; IP, ICMP and TCP are the SLIP build's functions unchanged.  The 20 Ethernet fixtures (Linux-recorded ARP, ping, TCP echo, DHCP against dnsmasq) and 1 000 generated Ethernet and 1 000 DHCP sessions: Spec = interpreter (states compared after every input) = host C.  A planted bug (cache replacement modulo 3) is caught by 104 of 500 sessions |
+| M4w.0–M4w.4 | **not done** | ESP-IDF, the raw-frame component and a board: nothing of it exists |
+| M4z.0 | done | `z88dk-ticks` cannot raise interrupts from host-driven input, so the machine is the Lean model (`Ember/Z80/Machine.lean`: 68B50 ACIA, debug and tick ports) around the CPU model of M6.1 |
+| M4z.1 | done | examples and fuzz regressions: interpreter = SDCC's code on the model (`Tests/Ember/Z80Tests.lean`); random programs with `ember-z80 fuzz` |
+| M4z.2 | done | `runtime/z80`: `crt0.s` with the receive interrupt in assembly (a C one was too slow for line rate), RTS flow control; 10 000 bytes echoed with no overrun |
+| M4z.3 | done | whole SLIP corpus and generated sessions on the model: target trace = Spec trace |
+| M4z.4 | done, RAM target missed by 42 B | **7.5 KB code** (no trace), 184 850 T-states per ping (46 ms at 4 MHz), in the baseline.  RAM: 887 B of variables, within 1 KB — but the stack reaches 179 B over the corpus (`ember-z80 stack`), **1 066 B in all**.  (An earlier version of this line counted the variables only.) |
+| M4z.5 | **not done** | needs hardware; the debug and tick ports of the model need a counterpart on a board |
+| M5.1–M5.3 | done | `Ember/Proof` (checksum algebra and RFC 1624, SLIP and header round trips, TCP invariants over `Spec.step`); no `sorry`, no `native_decide`, standard axioms only; statements and their hypotheses in `Ember/Proof/README.md` |
+| M5.4 | done | `Ember/Lang/Sem.lean`: the semantics as total functions (fuel for loops and calls), tested equal to the interpreter on random programs, the examples and every build of the stack on the corpus; `Ember/Proof/Symex.lean`: symbolic execution by one equation per statement form, calls through the callee's theorem; `checked_fn%` inserts a function's checked AST as a term |
+| M5.5 | done | functions of the stack refine the Spec's (`Ember/Proof/Refine*.lean`): checksums (`add16`, `verifies`, `csum_update`, `pseudo`, `csum` — the loop by induction), field access (`get16/32`, `set16/32`), SLIP (`slip_store` = `Slip.Dec.store`, `slip_send` transmits `Slip.encode`), `ip_send` transmits `Spec.Ipv4.packet`, `icmp_input` = `Icmp.reply` + `sendIp`, `udp_input` = `Udp.parse` + echo with `Udp.emit`, `ip_input` = `Ipv4.validate` + the dispatch of `Spec.ipInput` (with the loop that skips IP options).  Drop reasons and reply bytes are the Spec's.  TCP: the *raw layer* is done — each of the 18 functions of `Ember/Net/Tcp.lean` (three of them with loops) is proved to compute a Lean function on one state value, `tcp_emit` sends `Spec.Tcp.emit`, and under the size hypotheses no TCP function traps (`RefineTcp*.lean`).  The *second layer* is done too (`TcpSim.lean`, `TcpSimParse.lean`): under a relation between the two control blocks (`TcbRel`: machine integers and a fixed echo buffer against naturals and a `ByteArray`) those Lean functions are the Spec's — `tcp_input` is `Tcp.parse` then `Tcp.input` (`tcp_input_sim`), `tcp_tick` is `Tcp.tick` (`tcp_tick_sim`, under `Tcp.Inv` and counters below 255): same transmissions, same drops, related states again.  The two layers are joined (`tcp_input_refines`, `tcp_tick_refines`): the calls, run by the Ember semantics from a state that agrees with the Spec's, do not trap and end in a state that agrees again.  **Not done** (M5.6): TCP inside `ip_input`/`slip_rx`; the Spec's `tcb` and note lines are not compared; the counter bound the tick theorem assumes |
+| M5.6 | done | per input item, TCP included (`TcpRx.lean`, `NetStep.lean`): an invariant `NetInv` between the stack's globals and the Spec's stack state (SLIP decoder, TCP control block, counters); **one received byte** through `slip_rx` keeps it and adds the Spec's transmissions and drops (`slip_rx_step`, from `frame_refines`: a frame through `ip_input` is a frame through `Spec.ipInput`, every protocol); **one tick between frames** likewise (`tick_step`).  Also the whole SLIP loopback program (`loop_main_refines`, `loop_initial`, `loop_safe`).  **A defect found by the proof, fixed:** a tick that sent while a frame was half received overwrote the shared packet buffer and the frame was lost; now a tick in the middle of a frame waits for its end, in the stack and in the Spec (`Spec.tickArrives`; a second tick gives the frame up), with fixtures `corpus/timer/midframe-tick-*` and a `-midtick` variant of the generated lockstep sessions (cost: about 60–90 bytes of code, 1 byte of RAM, +1.6 % per ping).  **`main` and its repetition** (`TcpBound.lean`, `Main.lean`, `Driver.lean`): the tick counters are bounded in every reachable state (`reach_bnd`); one call of `main` is one input item of the Spec — nothing, a tick as `Spec.tickArrives` treats it, a byte as `Spec.byteInput` does (`main_step`; so `tcp_tick` is only called between frames); the first call boots into the invariant (`boot_call`, `boot_inv`); `Spec.input` is its items (`input_items`); any number of calls from the initial state does not trap, and once the input is read the stack's transmissions and drops are those of `Spec.step`, input by input, and its state agrees with `Spec.reach` (`main_run_all`).  For this the per-byte body of `Spec.input` got names (`slipByte`, `byteInput`) and `Prog.framed` became structurally recursive.  **Outside the theorems:** the `while` loop of `Sem.run` (core's `partial` loop) and how it prints the trace; that the checker's output is the program the theorems are about (`#guard`s); the Ethernet build |
+| M5.7 | done | `Ember/C/Sem.lean`: a semantics for the C subset the emitter produces — total functions in the style of `Lang.Sem` (expressions by structural recursion, statements by fuel), unsigned integers with widths, the profile's `int` width, by-reference arguments as pointers to storage (aliasing modelled), `ember_*` as the effects on the same `World`.  A program has a meaning only where C gives one that does not depend on a signed type: an operation that C's promotions would do in signed `int`, a shift by the width or more, a division by zero, an index out of range, and `l = f()` when `l` names different storage before and after the call are all `undef`.  Test (`lake test`): the emitted C of 1 000 random programs, the examples and regressions, and the stack on the 114 fixtures, for the three profiles, runs under it to the trace of `Lang.Sem`, never `undef`; a planted emitter bug (dropped cast) is noticed.  **A defect found, fixed:** `a[i] = f();` with an index that needs no check (`u8` into ≥ 256 elements) and a callee that changes `i` — C leaves the order open; the call's result now goes through a temporary (`regress_call_changes_index`).  For M5.8 the emitter is now made of total functions (no `partial`; `closedVal` is `Sem.evalE`), with byte-identical output |
+| M5.8 | done, without by-reference parameters | `Ember/Proof/C*.lean`, `LangFrame.lean` — **the emitted C does what `Lang.Sem` does**, proved through the emitter itself against `Ember.C.Sem`.  Expressions (`expr_ok`, `place_ok`): the hoisted statements run and the C expression has the value of `evalE`, or they end in `ember_trap` exactly when `evalE` has no value; every operator with its guards, folds, casts and the SDCC helpers.  Statements (`stmt_ok`, `block_ok`): every construct — declarations, assignments, `if`, both loops, `break`, `return`, the nine effects, calls, the destination of a result — ends as `Lang.Sem.execS` ends, in related states, or traps when it traps.  Functions (`fn_sim`), programs (`compile_unit`, `init_rel`, `iter_sim`): the entry function called again and again from the initial state.  A checker for what the theorems assume of a program, proved right (`progOkB_sound`), accepts every build of the stack for the three profiles.  **With M5.6 (`stack_c`): the C emitted for the SLIP build, run under the C semantics from its initial state, never traps, is never undefined, and transmits and drops what the Spec does**, for any input.  For any profile with `int` of 16 bits or more.  Emitter changes for the proof, output byte-identical: `assignResult` compiles the destination again after the call's temporary; `compileFn`/`compile` are made of named functions.  **Not covered:** by-reference parameters (`Lang.Sem` copies in and out, C passes a pointer — needs the no-aliasing rules as a theorem; the stack has none, the checker rejects them); the C semantics is a definition and the printer is trusted (gcc/SDCC agreement is tested, not proved) |
+| M5.9 | **not done** | |
+| M6.1 | done | `Ember/Z80/Cpu.lean`: every documented instruction and the undocumented ones SDCC and z88dk use, flags with X/Y, `R`, IM 0–2, T-states; 1 000 000 random instructions equal to `z88dk-ticks` register for register (`ember-z80 check`) |
+| M6.2 | done | `Ember/Z80/Asm.lean`: instructions as data, encoder that rejects operand combinations the Z80 does not have, two-pass assembler with labels; the 1 748 forms it accepts assemble to the same bytes with `z88dk-z80asm` (`ember-z80 asm-check`) |
+| M6.3 | done | `Ember/Z80/IR.lean` (three-address, explicit sizes, static storage, checks in the address) and its interpreter `IRInterp.lean`; 5 000 random programs and the corpus: Ember interpreter = IR interpreter (`ember-z80 ir-fuzz`, `ir-replay`) |
+| M6.4 | done | `Ember/Z80/Frame.lean`: frames overlaid along the call graph; `validate` checks every layout used (no frame overlaps the frame of a function it can reach, nor a global) — the IR interpreter and the image builder both refuse a layout that fails it |
+| M6.5 | done | `Ember/Z80/Codegen.lean`: 8 bits in `A`, 16 in `HL`, 32/64 in a memory accumulator; registers tracked across forward joins; temporaries and locals that are always at hand never touch memory.  20 000 random programs: interpreter = generated code on the model (`ember-z80 own-fuzz`); a planted bug (8-bit `sub` as `add`) is found and shrunk to 3 statements |
+| M6.6 | done | `Ember/Z80/Runtime.lean`: the routines in assembly, each against its specification on the model (`ember-z80 rt-check`): every operand pair for 8 bits, edge and random values for 16/32/64 — 279 551 cases |
+| M6.7 | done | the stack by the own back end with a board runtime in assembly (`Runtime.board`): corpus and generated sessions, target trace = Spec trace.  Against SDCC (both without trace): **code 5 859 B vs 7 481 B (−22 %), ping 183 136 vs 184 850 T-states (−0.9 %), RAM with the stack 1 065 B vs 1 066 B** (static 1 051 + 14 of stack, against 887 + 179) |
 
 Findings worth knowing before M4:
 
-* the Ember stack is SLIP-only; Ethernet/ARP/DHCP exist in `Ember.Spec`
-  and move to Ember with M4w;
-* host64 build: 5.4 KB code, 935 B RAM; SDCC Z80 build: 24.8 KB code,
-  622 B RAM — RAM within the M4z target, code 3× over it (32-bit
-  sequence arithmetic and bounds-checked `u16` indexing dominate), the
-  M4z.4 risk as anticipated;
+* the Ember stack was SLIP-only after M3; Ethernet, ARP and DHCP are now
+  in Ember too (`Ember/Net/Eth.lean`, the host part of M4w) — what M4w
+  still needs is the ESP-IDF component and a board;
+* host64 build: 5.4 KB code, 935 B RAM; SDCC Z80 build: 7.5 KB code,
+  887 B of variables plus 179 B of stack — the code within the M4z
+  target, the RAM 42 B over 1 KB once the stack is counted.  (An earlier version of this
+  document said 24.8 KB, "3× over": the size script added up the
+  linker map's area lines, which the map repeats on every page.  The
+  script now reads the linker's `l__AREA` symbols.)
+* **SDCC 4.6.0 miscompiles** (found by `ember-z80 fuzz`, each confirmed
+  outside the Lean model): 64-bit shifts by a variable and 64-bit
+  comparisons; a guarded division moved above its guard, where SDCC's
+  own division routine does not return for a zero divisor; and a dead
+  local in an `if` in a loop deleting the rest of the function.  It also
+  stops with an internal error on some valid programs.  What Ember does
+  about each is in the decision log; the stack uses no `u64` and draws
+  none of SDCC's "unreachable code" warnings.  This is the case for M6;
 * the emitter had to learn more than §2.3 of the design says: GCC's
   `-Wtype-limits`/`-Wtautological-compare` see through casts and
   constants, so closed subexpressions are folded *by the interpreter* and
@@ -117,7 +164,7 @@ Ember/
     Surface.lean   -- `ember def` syntax → AST
     Profile.lean   -- target profiles (host64, rv32, sdcc-z80)
   C/              C subset
-    Ast.lean  Semantics.lean  Compile.lean (Lang → C AST)  Print.lean
+    Ast.lean  Sem.lean  Compile.lean (Lang → C AST)  Print.lean
   Net/            the stack written in Ember (M3)
   Z80/            own back end (M6): Isa.lean  Model.lean  Ir.lean  Isel.lean  Asm.lean
   Proof/          P1, P2, P3, back-end proofs
@@ -507,7 +554,7 @@ Proofs follow the tests; each item is small enough to finish on its own.
 | M5.4 | P2 tooling: a symbolic-execution tactic for `Lang.exec` on straight-line code and bounded loops | measured on the checksum function first | L |
 | M5.5 | P2: function-level refinement for checksum, SLIP, IPv4, ICMP, UDP | uses M5.4 | L |
 | M5.6 | P2: the main loop as a simulation of `Spec.step` | the TCP part last | L |
-| M5.7 | P3: `Ember.C` semantics (the subset the emitter produces) | small-step, CompCert Clight as the reference | L |
+| M5.7 | P3: `Ember.C` semantics (the subset the emitter produces) | as built: big-step with fuel, like `Lang.Sem`, so that M5.8 relates two functions of the same shape; C11 §6.3 and §6.5 as the reference for what has no meaning | L |
 | M5.8 | P3: `Lang → C AST` forward simulation | per construct, then whole programs | L |
 | M5.9 | Bounds-check elimination: the emitter drops a check when a P2 lemma proves the index in range; size/cycle gates record the gain | ties proofs to performance | M |
 
@@ -560,7 +607,7 @@ ISR, ring buffer).
 | `ember-lang` | interpreter tests, golden C, differential with gcc + UBSan/ASan, 1 000 fuzz programs | M2 |
 | `ember-net` | whole corpus: Spec = interpreter = host C | M3 |
 | `ember-esp32` | corpus on QEMU `-M esp32c3`; size/instruction gate | M4 |
-| `ember-z80` | corpus in the Z80 emulator; size/cycle gate | M4z |
+| `ember-z80` | CPU model vs `z88dk-ticks`; corpus on the Z80 model; random programs; size/cycle gate | M4z |
 | `ember-proofs` | `lake build Ember.Proof` | M5 |
 
 Gate scripts follow `bench/gate/run.sh`: the measurement is compared
@@ -607,6 +654,27 @@ cost is a reviewed diff.
 | 2026-10-09 | Ember evaluates every operand (strict `&&`, `\|\|`, `if-then-else`); the destination of a call is evaluated after the call | one evaluation order for the interpreter and the hoisted C; found by the fuzzer |
 | 2026-10-09 | Emitter folds closed subexpressions with the interpreter and hoists comparison operands, divisors and shift amounts into temporaries | GCC's front-end range warnings otherwise fire on legal Ember; found by the fuzzer |
 | 2026-10-09 | SDCC warnings 110 and 126 ("conditional flow changed by optimizer", "unreachable code") disabled in the `--Werror` check | they report what SDCC's optimiser proved, not a property of the C |
+| 2026-10-11 | …but they are **errors in the Z80 build of the stack** (`runtime/z80/Makefile`) | SDCC 4.6.0 gives them when it deletes live code: `for (t = 0; t < 5; t++) { if (g == 0) { uint8_t x = 1; } } f();` compiles to `ret`.  The stack draws none; random programs draw them almost always (constant conditions), so the fuzzer runs them and counts a divergence of a flagged program apart |
+| 2026-10-11 | ESP32-C3 fixture replay requests each tick from the host (a byte on UART1 arms a one-shot SYSTIMER alarm); the shipped image ticks every 500 ms | a fixture says where ticks fall between bytes; a free-running timer cannot reproduce that |
+| 2026-10-11 | The Z80 machine for tests is a Lean model (CPU of M6.1 + 68B50 ACIA + debug/tick ports), not `z88dk-ticks` | ticks has no host-driven input with interrupts; the CPU model is checked against ticks instruction by instruction instead |
+| 2026-10-11 | Known differences of `z88dk-ticks` from a real Z80, excluded from the comparison: `DD CB` adds 3 to `R`; `LD IXH,IXL` copies the wrong register; `ADC A,H` takes 7 T-states; X/Y flags of `BIT n,(HL)` | found by the differential test; the model follows the documented behaviour |
+| 2026-10-11 | On `sdcc-z80`, division and remainder by a non-literal go through emitted helpers `ember_divN`/`ember_modN` | SDCC hoists `d == 0 ? 0 : a / d` out of a loop, above the test, and `__divulong`/`__modulong` loop for ever on `d = 0` |
+| 2026-10-11 | `u64` is not tested on `sdcc-z80` (`ember-z80 fuzz --u64` shows why) | SDCC 4.6.0: `1ULL >> n` and `x > 0xC000000000000000ULL` give wrong results; the stack has no `u64` |
+| 2026-10-11 | `--nogenconstprop` and `--nolabelopt` not used | the first avoids SDCC's internal errors but costs 5 % code; the second avoids the dead-local bug but brings many more wrong results |
+| 2026-10-11 | Z80 size build: `-DEMBER_TRACE=0 -DEMBER_TRAP_TERSE -DEMBER_NO_NAMES` | trap messages and the drop/note name tables are 0.9 KB of strings that a board without a debug port never prints |
+| 2026-10-11 | A second input effect, `input.frame`: bytes, ticks, and `0x0200` at the end of each frame; a program uses it or `input.next` | Ethernet has no in-band frame boundary; the byte-stream semantics of `input.next` (and everything tested on it) stays untouched.  Implemented in the interpreter, the IR interpreter and the host harness; no target runtime has it yet |
+| 2026-10-11 | The Ethernet build shares the SLIP build's functions by name: a program is a list of functions and globals, and `Eth.progFor` puts `buf : [u8; 576]`, `MTU`, `OUR_MSS` and a *variable* `OUR_IP` in place of the SLIP build's | no change to the SLIP build (its size gates do not move), no duplicated IP/TCP code; only `ip_send` and `udp_input` exist twice |
+| 2026-10-11 | Three Ethernet builds: MTU 576 static, MTU 576 with DHCP, MTU 296 static | the fixtures' headers name these; the buffer size is a compile-time constant in Ember |
+| 2026-10-11 | Proofs about Ember code use a second, total semantics (`Lang.Sem`: fuel, association lists, copy-in/copy-out for references) rather than the interpreter | the interpreter's loops are `partial`, which the kernel cannot unfold; the two are tested against each other, and the proofs README says that this link is a test, not a theorem |
+| 2026-10-11 | The checked AST of a function enters a proof as a literal made at elaboration time (`checked_fn%`), re-checked by `#guard` | the type checker is `partial` too; the alternative — proving about unchecked ASTs — would not be about the program that runs |
+| 2026-10-11 | RAM is reported with the deepest stack over the corpus (`z80.stack`, `z80own.stack` in the baseline) | SDCC keeps locals on the stack (179 B), the own back end in static frames (14 B of return addresses): variables alone do not compare |
+| 2026-10-11 | Own back end: no register allocator — a fixed register per size and a tracker of what each holds; all storage static | Ember has no recursion, so frames need no stack pointer arithmetic (costly on a Z80), and the tracker removes most loads; simple enough for the proofs of M7 |
+| 2026-10-11 | Own back end: an index check is dropped when a comparison on the straight path to it already established it (`IR.dropChecks`) | a static fact, not a proof obligation (M5.9 remains for the checks that need reasoning); `Tests/Ember/LangPrograms.lean` (`Guard`) has the cases where the check must stay |
+| 2026-10-11 | Own back end: the last one- or two-byte parameter travels in `A`/`HL`; the others are stored into the callee's frame by the caller | one store in the callee instead of one per call site, and the value is at hand on entry |
+| 2026-10-11 | Inlining (`IR.inlineCalls`) is implemented and tested on the IR, but off | with static frames it made the stack larger and no faster: a call costs little here, and a copy loses the tail call |
+| 2026-10-11 | The runtime of the own back end is assembly written as Lean data (`Runtime.lean`), assembled by `Asm.lean` | no external assembler or C compiler in the Z80 path; the routines are checked on the model against one-line specifications |
+| 2026-10-11 | M5.8 is proved for programs without by-reference parameters; a checker (`progOkB`, proved right) decides whether a program is covered | the stack has no by-reference parameter, and with pointers the relation between the states needs the type checker's no-aliasing rules as theorems (the checker is `partial` code); the C semantics models the pointers, and the differential tests cover the examples that use them |
+| 2026-10-11 | M5.8 goes through the emitter itself (`wpc` over its monad), not through a second, proof-friendly translation | a theorem about another function would say nothing about the C that is shipped; the price was making the emitter total and splitting it into small functions, with byte-identical output |
 
 ## 8. Glossary
 

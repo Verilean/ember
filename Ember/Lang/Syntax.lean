@@ -125,15 +125,20 @@ inductive Effect where
   | mmioWrite32
   /-- The runtime's receive ring (on the host it is the input oracle). -/
   | ringPop
+  /-- Next input item of a link that delivers whole frames (Ethernet):
+  as `input.next`, and `0x0200` after the last byte of each frame.
+  A program uses either this or `input.next`. -/
+  | inputFrame
   deriving Inhabited, BEq, Repr, DecidableEq
 
 def Effect.name : Effect → String
   | .inputNext => "input.next" | .outByte => "out.byte" | .outEnd => "out.end"
   | .drop => "trace.drop" | .note => "trace.note"
   | .mmioRead32 => "mmio.read32" | .mmioWrite32 => "mmio.write32" | .ringPop => "ring.pop"
+  | .inputFrame => "input.frame"
 
 def Effect.all : List Effect :=
-  [.inputNext, .outByte, .outEnd, .drop, .note, .mmioRead32, .mmioWrite32, .ringPop]
+  [.inputNext, .outByte, .outEnd, .drop, .note, .mmioRead32, .mmioWrite32, .ringPop, .inputFrame]
 
 def Effect.ofName? (s : String) : Option Effect := Effect.all.find? (·.name == s)
 
@@ -147,6 +152,7 @@ def Effect.sig : Effect → List Ty × Option Ty
   | .mmioRead32 => ([.u32], some .u32)
   | .mmioWrite32 => ([.u32, .u32], none)
   | .ringPop => ([], some .u16)
+  | .inputFrame => ([], some .u16)
 
 structure Span where
   file : String := ""
@@ -217,6 +223,23 @@ structure Prog where
   deriving Inhabited, BEq, Repr
 
 def Prog.fn? (p : Prog) (f : String) : Option Fn := p.fns.find? (·.name == f)
+
+mutual
+/-- Does the statement use the effect `e`?  (Structural, so that proofs can compute it.) -/
+def Stmt.usesEffect (e : Effect) : Stmt → Bool
+  | .eff _ e' _ => e == e'
+  | .ite _ t f => Stmt.usesEffectL e t || Stmt.usesEffectL e f
+  | .forRange _ _ _ _ b => Stmt.usesEffectL e b
+  | .loop _ b => Stmt.usesEffectL e b
+  | .at _ s => Stmt.usesEffect e s
+  | _ => false
+def Stmt.usesEffectL (e : Effect) : List Stmt → Bool
+  | [] => false
+  | s :: r => Stmt.usesEffect e s || Stmt.usesEffectL e r
+end
+
+/-- Does the program read its input frame by frame (`input.frame`)? -/
+def Prog.framed (p : Prog) : Bool := p.fns.any fun f => Stmt.usesEffectL .inputFrame f.body
 def Prog.global? (p : Prog) (g : String) : Option Global := p.globals.find? (·.name == g)
 def Prog.struct? (p : Prog) (s : String) : Option StructDef := p.structs.find? (·.name == s)
 

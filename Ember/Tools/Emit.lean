@@ -1,5 +1,7 @@
 import Ember.Lang.Examples
 import Ember.Net.Main
+import Ember.Net.Loop
+import Ember.Net.Eth
 import Ember.Lang.Pretty
 import Ember.C.Compile
 
@@ -15,8 +17,11 @@ for every registered program and profile; the tests compare against them.
 namespace Ember.Tools.Emit
 open Ember Ember.Lang Ember.C
 
-/-- Programs known to the tools: the examples and the stack. -/
-def registry : IO (List (String × Prog)) := pure (Examples.all ++ [("net", Net.prog)])
+/-- Programs known to the tools: the examples, the stack and the SLIP
+loopback used to bring up a target. -/
+def registry : IO (List (String × Prog)) :=
+  pure (Examples.all ++ [("net", Net.prog), ("sliploop", Net.Loop.prog),
+    ("net-eth", Net.Eth.prog), ("net-eth-dhcp", Net.Eth.progDhcp)])
 
 def goldenDir : System.FilePath := "Tests/Ember/golden"
 

@@ -1,0 +1,1030 @@
+import Ember.Z80.Runtime
+import Ember.Z80.Frame
+
+/-!
+# Ember.Z80.Codegen — IR to Z80 (plan M6.5)
+
+One IR instruction at a time, with these conventions:
+
+* a value of one byte is computed in `A`, of two bytes in `HL`, of four
+  or eight bytes in the memory accumulator `rt_acc` (through the
+  routines of `Ember.Z80.Runtime`);
+* the second operand of an operation is an immediate, or memory (`(HL)`
+  for 8 bits, loaded into `DE` for 16, pointed to by `HL` for wider
+  ones); wide constants live in a literal pool;
+* an address is formed in `HL` using `BC`, so that a value waiting in
+  `A` or `DE` survives it.
+
+The generator remembers which operand each of `A`, `HL` and the
+accumulator holds (`Regs`) and skips a load when the value is at hand.
+That is also how temporaries stay out of memory: a first pass generates
+code as if every temporary had a frame slot and notes which ones are
+ever *read* from their slot; the second pass gives slots (and stores)
+only to those.  Labels, calls and stores through addresses forget what
+they may have invalidated.
+-/
+
+namespace Ember.Z80.Codegen
+open Ember.Z80.Asm (Arg Op Item Val)
+open Ember.Z80.IR
+open Ember.Lang (Effect)
+
+def sanitize (s : String) : String :=
+  String.join (s.toList.map fun c => if c.isAlphanum || c == '_' then String.singleton c else s!"_{c.toNat}_")
+
+def fnLabel (f : String) : String := s!"f_{sanitize f}"
+
+def areaSym : Area → String
+  | .global g => s!"g_{sanitize g}"
+  | .frame f => s!"fr_{sanitize f}"
+
+def slotVal (s : Slot) : Val := .sym (areaSym s.area) (Int.ofNat s.off)
+
+/-- The operands whose value each register holds (several can be equal:
+a constant just stored into a variable is both). -/
+structure Regs where
+  a : List Opd := []
+  hl : List Opd := []
+  acc : Option (Nat × Opd) := none
+  deriving Inhabited, BEq
+
+/-- What two paths agree on. -/
+def Regs.meet (x y : Regs) : Regs :=
+  { a := x.a.filter y.a.contains, hl := x.hl.filter y.hl.contains,
+    acc := if x.acc == y.acc then x.acc else none }
+
+structure GS where
+  out : Array Item := #[]
+  regs : Regs := {}
+  /-- Temporaries read from their slot. -/
+  missed : Array Bool := #[]
+  /-- Wide constants: bytes and value. -/
+  lits : Array (Nat × Nat) := #[]
+  labels : Nat := 0
+  /-- What the registers hold at the jumps to each label seen so far. -/
+  atLabel : List (Nat × Regs) := []
+  /-- The code being generated cannot be reached by falling through. -/
+  dead : Bool := false
+  /-- Offsets in the function's own frame at which a read from memory
+  starts, and whether the address of anything in that frame is formed. -/
+  reads : Array Bool := #[]
+  addrTaken : Bool := false
+
+structure GEnv where
+  fn : IR.Fn
+  /-- Which temporaries have a slot, and where in the frame. -/
+  spilled : Array Bool
+  tmpOff : Array Nat
+  /-- The instruction after the current one, and (for a branch) the one
+  at its target. -/
+  next : Option IR.Instr := none
+  atTarget : Option IR.Instr := none
+  /-- Second pass: where reads of the own frame start.  A store to a
+  place nothing reads from memory (its value was always at hand in a
+  register) is left out. -/
+  live : Option (Array Bool) := none
+
+abbrev GM := ReaderT GEnv (StateT GS (Except String))
+
+def ins (op : Op) (args : List Arg := []) : GM Unit :=
+  modify fun s => { s with out := s.out.push (.ins { op, args }) }
+
+def call (routine : String) : GM Unit := ins .call [.imm (.sym routine)]
+
+def setRegs (f : Regs → Regs) : GM Unit := modify fun s => { s with regs := f s.regs }
+
+def n8 (v : Nat) : Arg := .imm (.num (Int.ofNat (v % 256)))
+def n16 (v : Nat) : Arg := .imm (.num (Int.ofNat (v % 65536)))
+
+def bits (n : Nat) : Nat := 8 * n
+
+/-- Address of a variable or of a temporary's slot. -/
+def noteRead (s : Slot) : GM Unit := do
+  if s.area == .frame (← read).fn.name then
+    modify fun st => if s.off < st.reads.size then { st with reads := st.reads.set! s.off true } else st
+
+def noteAddr (s : Slot) : GM Unit := do
+  if s.area == .frame (← read).fn.name then modify fun st => { st with addrTaken := true }
+
+/-- Must a store of `n` bytes at `s` be made? -/
+def storeNeeded (s : Slot) (n : Nat) : GM Bool := do
+  let e ← read
+  if s.area != .frame e.fn.name then return true
+  match e.live with
+  | none => return true
+  | some lv => return (List.range n).any fun k => lv.getD (s.off + k) true
+
+def addrOf (o : Opd) : GM Val := do
+  match o with
+  | .slot s => noteRead s; return slotVal s
+  | .tmp t =>
+    let e ← read
+    unless e.spilled[t]! do throw s!"{e.fn.name}: temporary t{t} has no slot and is not at hand"
+    modify fun s => { s with missed := s.missed.set! t true }
+    return .sym (areaSym (.frame e.fn.name)) (Int.ofNat e.tmpOff[t]!)
+  | .const _ => throw "address of a constant"
+
+/-- Address of an operand of `n` bytes; a constant is in the literal pool. -/
+def ptrOf (n : Nat) (o : Opd) : GM Val := do
+  match o with
+  | .const v =>
+    let v := v % 2 ^ bits n
+    modify fun s => if s.lits.contains (n, v) then s else { s with lits := s.lits.push (n, v) }
+    return .sym s!"lit{bits n}_{v}"
+  | o => addrOf o
+
+/-! ### Loading -/
+
+def loadA (o : Opd) : GM Unit := do
+  let r := (← get).regs
+  if r.a.contains o then return
+  -- the low byte of what `HL` holds
+  if r.hl.contains o && (match o with | .slot _ => true | _ => false) then
+    ins .ld [.a, .l]
+    setRegs fun r => { r with a := [o] }
+    return
+  match o with
+  | .const v => if v % 256 == 0 then ins .xor [.a] else ins .ld [.a, n8 v]
+  | o => ins .ld [.a, .mem (← addrOf o)]
+  setRegs fun r => { r with a := [o] }
+
+def loadHL (o : Opd) : GM Unit := do
+  if (← get).regs.hl.contains o then return
+  match o with
+  | .const v => ins .ld [.hl, n16 v]
+  | o => ins .ld [.hl, .mem (← addrOf o)]
+  setRegs fun r => { r with hl := [o] }
+
+def loadDE (o : Opd) : GM Unit := do
+  if (← get).regs.hl.contains o then
+    ins .ld [.d, .h]
+    ins .ld [.e, .l]
+    return
+  match o with
+  | .const v => ins .ld [.de, n16 v]
+  | o => ins .ld [.de, .mem (← addrOf o)]
+
+def loadAcc (n : Nat) (o : Opd) : GM Unit := do
+  if (← get).regs.acc == some (n, o) then return
+  ins .ld [.hl, .imm (← ptrOf n o)]
+  call s!"rt_ld{bits n}"
+  setRegs fun _ => { acc := some (n, o) }
+
+/-! ### Storing -/
+
+def overlaps (o : Opd) (size : Nat) (s : Slot) (n : Nat) : Bool :=
+  match o with
+  | .slot t => t.area == s.area && t.off < s.off + n && s.off < t.off + size
+  | _ => false
+
+/-- A write of `n` bytes at `s`: forget what read them. -/
+def killWrite (s : Slot) (n : Nat) : GM Unit :=
+  setRegs fun r =>
+    { a := r.a.filter fun o => !overlaps o 1 s n,
+      hl := r.hl.filter fun o => !overlaps o 2 s n,
+      acc := r.acc.filter fun (m, o) => !overlaps o m s n }
+
+/-- A write somewhere: forget every variable. -/
+def killSlots : GM Unit :=
+  let keep (o : Opd) : Bool := match o with | .slot _ => false | _ => true
+  setRegs fun r => { a := r.a.filter keep, hl := r.hl.filter keep, acc := r.acc.filter fun (_, o) => keep o }
+
+def killAll : GM Unit := setRegs fun _ => {}
+
+def tmpSlot (t : Nat) : GM (Option Val) := do
+  let e ← read
+  if e.spilled[t]! then return some (.sym (areaSym (.frame e.fn.name)) (Int.ofNat e.tmpOff[t]!))
+  return none
+
+/-- A temporary is assigned: what held its old value no longer does. -/
+def forget (o : Opd) : GM Unit :=
+  setRegs fun r => { a := r.a.filter (· != o), hl := r.hl.filter (· != o), acc := r.acc.filter (·.2 != o) }
+
+def storeA (d : Dst) : GM Unit := do
+  match d with
+  | .slot s => killWrite s 1; if ← storeNeeded s 1 then ins .ld [.mem (slotVal s), .a]
+  | .tmp t =>
+    forget (.tmp t)
+    if let some v ← tmpSlot t then ins .ld [.mem v, .a]
+  setRegs fun r => { r with a := d.opd :: r.a }
+
+def storeHL (d : Dst) : GM Unit := do
+  match d with
+  | .slot s => killWrite s 2; if ← storeNeeded s 2 then ins .ld [.mem (slotVal s), .hl]
+  | .tmp t =>
+    forget (.tmp t)
+    if let some v ← tmpSlot t then ins .ld [.mem v, .hl]
+  setRegs fun r => { r with hl := d.opd :: r.hl }
+
+def storeAcc (n : Nat) (d : Dst) : GM Unit := do
+  match d with
+  | .slot s =>
+    killWrite s n
+    if ← storeNeeded s n then
+      ins .ld [.hl, .imm (slotVal s)]
+      call s!"rt_st{bits n}"
+  | .tmp t =>
+    if let some v ← tmpSlot t then
+      ins .ld [.hl, .imm v]
+      call s!"rt_st{bits n}"
+  -- the same in both passes, whether the temporary has a slot or not
+  setRegs fun _ => { acc := some (n, d.opd) }
+
+def store (n : Nat) (d : Dst) : GM Unit :=
+  if n == 1 then storeA d else if n == 2 then storeHL d else storeAcc n d
+
+def load (n : Nat) (o : Opd) : GM Unit :=
+  if n == 1 then loadA o else if n == 2 then loadHL o else loadAcc n o
+
+/-! ### Operations -/
+
+def newLabel : GM String := do
+  let s ← get
+  set { s with labels := s.labels + 1 }
+  return s!"x_{sanitize (← read).fn.name}_{s.labels}"
+
+def localLabel (l : Nat) : GM String := do return s!"l_{sanitize (← read).fn.name}_{l}"
+
+/-- The 8-bit ALU instruction with its operand. -/
+def alu8 (op : Bin) (x : Arg) : GM Unit :=
+  match op with
+  | .add => ins .add [.a, x]
+  | .sub => ins .sub [x]
+  | .and => ins .and [x]
+  | .or => ins .or [x]
+  | .xor => ins .xor [x]
+  | _ => throw "alu8"
+
+def routine16 : Bin → String
+  | .and => "rt_and16" | .or => "rt_or16" | .xor => "rt_xor16"
+  | .mul => "rt_mul16" | .div => "rt_div16" | _ => "rt_mod16"
+
+def routineW (op : Bin) (n : Nat) : String :=
+  let name := match op with
+    | .add => "add" | .sub => "sub" | .mul => "mul" | .div => "div" | .mod => "mod"
+    | .and => "and" | .or => "or" | .xor => "xor"
+  s!"rt_{name}{bits n}"
+
+def genBin (op : Bin) (n : Nat) (a b : Opd) : GM Unit := do
+  let r := (← get).regs
+  if n == 1 then
+    let bAtHand := r.a.contains b && a != b
+    match op with
+    | .mul | .div | .mod =>
+      if bAtHand then
+        ins .ld [.e, .a]
+        loadA a
+      else
+        loadA a
+        match b with
+        | .const v => ins .ld [.e, n8 v]
+        | b =>
+          if a == b then ins .ld [.e, .a]
+          else
+            ins .ld [.hl, .imm (← addrOf b)]
+            ins .ld [.e, .mhl]
+            setRegs fun r => { r with hl := [] }
+      call (match op with | .mul => "rt_mul8" | .div => "rt_div8" | _ => "rt_mod8")
+    | _ =>
+      if bAtHand then
+        ins .ld [.c, .a]
+        setRegs fun r => { r with a := [] }
+        loadA a
+        alu8 op .c
+      else
+        loadA a
+        match b with
+        | .const v =>
+          let v := v % 256
+          if op == .add && v == 1 then ins .inc [.a]
+          else if op == .sub && v == 1 then ins .dec [.a]
+          else if op == .add && v == 255 then ins .dec [.a]
+          else if op == .sub && v == 255 then ins .inc [.a]
+          else alu8 op (n8 v)
+        | b =>
+          if a == b then alu8 op .a
+          else
+            ins .ld [.hl, .imm (← addrOf b)]
+            alu8 op .mhl
+            setRegs fun r => { r with hl := [] }
+    setRegs fun r => { r with a := [] }
+  else if n == 2 then
+    let bAtHand := r.hl.contains b && a != b
+    if bAtHand then
+      ins .ex [.de, .hl]
+      setRegs fun r => { r with hl := [] }
+      loadHL a
+    else
+      loadHL a
+    let small : Option Nat := match b with
+      | .const v => if bAtHand then none else some (v % 65536)
+      | _ => none
+    match op, small with
+    | .add, some v =>
+      if v ≤ 3 then for _ in [0:v] do ins .inc [.hl]
+      else if v ≥ 65533 then for _ in [0:65536 - v] do ins .dec [.hl]
+      else
+        ins .ld [.de, n16 v]
+        ins .add [.hl, .de]
+    | .sub, some v =>
+      if v ≤ 3 then for _ in [0:v] do ins .dec [.hl]
+      else
+        ins .ld [.de, n16 (65536 - v)]
+        ins .add [.hl, .de]
+    | .and, some v | .or, some v | .xor, some v =>
+      -- byte by byte, and nothing where the constant leaves the byte alone
+      for (reg, m) in [(Arg.l, v % 256), (Arg.h, v / 256)] do
+        let same := if op == .and then m == 255 else m == 0
+        let fixed : Option Nat := if op == .and && m == 0 then some 0 else if op == .or && m == 255 then some 255 else none
+        if same then pure ()
+        else if let some c := fixed then ins .ld [reg, n8 c]
+        else
+          ins .ld [.a, reg]
+          alu8 op (n8 m)
+          ins .ld [reg, .a]
+          setRegs fun r => { r with a := [] }
+    | _, _ =>
+      if !bAtHand then loadDE b
+      match op with
+      | .add => ins .add [.hl, .de]
+      | .sub =>
+        ins .or [.a]
+        ins .sbc [.hl, .de]
+      | .and | .or | .xor =>
+        for (reg, other) in [(Arg.l, Arg.e), (Arg.h, Arg.d)] do
+          ins .ld [.a, reg]
+          alu8 op other
+          ins .ld [reg, .a]
+        setRegs fun r => { r with a := [] }
+      | op =>
+        call (routine16 op)
+        setRegs fun r => { r with a := [] }
+    setRegs fun r => { r with hl := [] }
+  else
+    -- the second operand by its address: a temporary at hand in the
+    -- accumulator is asked for there, and so gets its slot
+    let pb ← ptrOf n b
+    loadAcc n a
+    ins .ld [.hl, .imm pb]
+    call (routineW op n)
+    killAll
+
+/-- Shift count into `B`, from an operand of `m` bytes. -/
+def countToB (m : Nat) (amt : Opd) : GM Unit := do
+  if m == 1 then
+    loadA amt
+  else if m == 2 then
+    loadHL amt
+    call "rt_sat16"
+  else
+    loadAcc m amt
+    call s!"rt_sat{bits m}"
+    setRegs fun r => { r with hl := [] }
+  ins .ld [.b, .a]
+  if m != 1 then setRegs fun r => { r with a := [] }
+
+def genShift (left : Bool) (n : Nat) (a : Opd) (m : Nat) (amt : Opd) : GM Unit := do
+  let name := s!"rt_{if left then "shl" else "shr"}{bits n}"
+  match amt with
+  | .const k =>
+    -- 0 < k < 8n here
+    if n == 1 then
+      loadA a
+      if left && k ≤ 3 then for _ in [0:k] do ins .add [.a, .a]
+      else if !left && k == 1 then ins .srl [.a]
+      else
+        ins .ld [.b, n8 k]
+        call name
+      setRegs fun r => { r with a := [] }
+    else if n == 2 then
+      loadHL a
+      if left && k ≤ 4 then for _ in [0:k] do ins .add [.hl, .hl]
+      else if left && k == 8 then
+        ins .ld [.h, .l]
+        ins .ld [.l, n8 0]
+      else if !left && k == 8 then
+        ins .ld [.l, .h]
+        ins .ld [.h, n8 0]
+      else if !left && k ≤ 2 then
+        for _ in [0:k] do
+          ins .srl [.h]
+          ins .rr [.l]
+      else
+        ins .ld [.b, n8 k]
+        call name
+      setRegs fun r => { r with hl := [] }
+    else if n == 4 && k == 16 then
+      loadAcc n a
+      let lo : Arg := .mem (.sym "rt_acc")
+      let hi : Arg := .mem (.sym "rt_acc" 2)
+      ins .ld [.hl, if left then lo else hi]
+      ins .ld [if left then hi else lo, .hl]
+      ins .ld [.hl, n16 0]
+      ins .ld [if left then lo else hi, .hl]
+      killAll
+    else
+      loadAcc n a
+      ins .ld [.b, n8 k]
+      call name
+      killAll
+  | amt =>
+    countToB m amt
+    if n == 1 then
+      loadA a
+      call name
+      setRegs fun r => { r with a := [] }
+    else if n == 2 then
+      loadHL a
+      call name
+      setRegs fun r => { r with hl := [] }
+    else
+      if (← get).regs.acc != some (n, a) then
+        ins .push [.bc]
+        loadAcc n a
+        ins .pop [.bc]
+      call name
+      killAll
+
+/-- Does the instruction read the operand? -/
+def reads (i : IR.Instr) (o : Opd) : Bool :=
+  let inAddr (p : Addr) : Bool := match p.idx with | some x => x.opd == o | none => false
+  match i with
+  | .mov _ _ s => s == o
+  | .bin _ _ _ a b => a == o || b == o
+  | .shift _ _ _ a _ amt => a == o || amt == o
+  | .not _ _ a | .neg _ _ a => a == o
+  | .ext _ _ _ s => s == o
+  | .cmp _ _ _ a b | .br _ _ a b _ => a == o || b == o
+  | .load _ _ p | .lea _ p => inAddr p
+  | .store _ p s => s == o || inAddr p
+  | .call _ _ reg => (reg.map (·.2 == o)).getD false
+  | .eff _ args _ => args.any (·.2 == o)
+  | .ret v => (v.map (·.2 == o)).getD false
+  | _ => false
+
+/-- Flags of `a − b`: `Z` when equal, `C` when below.  A 16-bit
+comparison subtracts; when `a` is read again right after (here or at the
+branch target), the subtrahend is added back, which leaves both flags. -/
+def genFlags (op : Cmp) (n : Nat) (a b : Opd) : GM Unit := do
+  let r := (← get).regs
+  let zeroTest := b == .const 0 && (op == .eq || op == .ne)
+  if n == 1 then
+    if zeroTest then
+      loadA a
+      ins .or [.a]
+    else if r.a.contains b && a != b then
+      ins .ld [.c, .a]
+      setRegs fun r => { r with a := [] }
+      loadA a
+      ins .cp [.c]
+    else
+      loadA a
+      match b with
+      | .const v => ins .cp [n8 v]
+      | b =>
+        if a == b then ins .cp [.a]
+        else
+          ins .ld [.hl, .imm (← addrOf b)]
+          ins .cp [.mhl]
+          setRegs fun r => { r with hl := [] }
+  else if n == 2 then
+    let eqConst : Option Nat := match b with
+      | .const v => if op == .eq || op == .ne then some (v % 65536) else none
+      | _ => none
+    if zeroTest then
+      loadHL a
+      ins .ld [.a, .h]
+      ins .or [.l]
+      setRegs fun r => { r with a := [] }
+    else if eqConst.isSome && (eqConst.getD 0 == 65535 || eqConst.getD 0 % 256 == 0 || eqConst.getD 0 / 256 == 0) then
+      -- `Z` exactly when equal, and `HL` is kept
+      let v := eqConst.getD 0
+      loadHL a
+      if v == 65535 then
+        ins .ld [.a, .h]
+        ins .and [.l]
+        ins .inc [.a]
+      else if v / 256 == 0 then
+        ins .ld [.a, .l]
+        ins .xor [n8 v]
+        ins .or [.h]
+      else
+        ins .ld [.a, .h]
+        ins .xor [n8 (v / 256)]
+        ins .or [.l]
+      setRegs fun r => { r with a := [] }
+    else
+      if r.hl.contains b && a != b then
+        ins .ex [.de, .hl]
+        setRegs fun r => { r with hl := [] }
+        loadHL a
+      else
+        loadHL a
+        loadDE b
+      ins .or [.a]
+      ins .sbc [.hl, .de]
+      let e ← read
+      let again := (match a with | .const _ => false | _ => true) &&
+        ((e.next.map (reads · a)).getD false || (e.atTarget.map (reads · a)).getD false)
+      if again then ins .add [.hl, .de]
+      else setRegs fun r => { r with hl := [] }
+  else
+    let pb ← ptrOf n b
+    loadAcc n a
+    ins .ld [.hl, .imm pb]
+    call s!"rt_cmp{bits n}"
+    setRegs fun r => { r with a := [], hl := [] }
+
+def condOf : Cmp → Arg
+  | .eq => .z | .ne => .nz | .lt => .c | .ge => .nc
+
+/-- The address into `HL`.  Keeps `A` and `DE`. -/
+def genAddr (p : Addr) : GM Unit := do
+  let addOff (k : Nat) : GM Unit := do
+    if k == 0 then pure ()
+    else if k ≤ 3 then for _ in [0:k] do ins .inc [.hl]
+    else
+      ins .ld [.bc, n16 k]
+      ins .add [.hl, .bc]
+  match p.idx with
+  | none =>
+    match p.root with
+    | .static s =>
+      noteAddr s
+      ins .ld [.hl, .imm (slotVal { s with off := s.off + p.off })]
+    | .ptr q =>
+      noteRead q
+      ins .ld [.hl, .mem (slotVal q)]
+      addOff p.off
+  | some x =>
+    if x.size == 2 then loadHL x.opd
+    else if (← get).regs.a.contains x.opd then
+      ins .ld [.l, .a]
+      ins .ld [.h, n8 0]
+    else
+      match x.opd with
+      | .const v => ins .ld [.hl, n16 (v % 256)]
+      | o =>
+        -- two bytes read, the upper one dropped
+        ins .ld [.hl, .mem (← addrOf o)]
+        ins .ld [.h, n8 0]
+    -- the check: for a fixed array `index − len` carries exactly when the
+    -- index is too large, and the base is then added with `len` on top
+    let inline := match x.len, p.root with
+      | some len, .static _ => if x.scale == 1 then some len else none
+      | _, _ => none
+    match x.len, inline with
+    | some len, some _ =>
+      ins .ld [.bc, n16 (65536 - len)]
+      ins .add [.hl, .bc]
+      ins .jp [.c, .imm (.sym "rt_trap")]
+    | some len, none =>
+      ins .ld [.bc, n16 len]
+      call "rt_bound"
+    | none, _ => pure ()
+    let mut sc := x.scale
+    while sc > 1 do
+      ins .add [.hl, .hl]
+      sc := sc / 2
+    match p.root with
+    | .static s =>
+      noteAddr s
+      ins .ld [.bc, .imm (slotVal { s with off := s.off + p.off + inline.getD 0 })]
+      ins .add [.hl, .bc]
+    | .ptr q =>
+      noteRead q
+      ins .ld [.bc, .mem (slotVal q)]
+      ins .add [.hl, .bc]
+      addOff p.off
+  setRegs fun r => { r with hl := [] }
+
+/-- Record the registers at a jump to `l`. -/
+def jumpTo (l : Nat) : GM Unit :=
+  modify fun s =>
+    let r := match s.atLabel.lookup l with
+      | some old => old.meet s.regs
+      | none => s.regs
+    { s with atLabel := (l, r) :: s.atLabel.filter (·.1 != l) }
+
+def effectRoutine : Effect → String
+  | .inputNext | .ringPop => "rt_input"
+  -- (no Z80 platform has a framed link: the label is not defined)
+  | .inputFrame => "rt_input_frame"
+  | .outByte => "rt_out_byte" | .outEnd => "rt_out_end"
+  | .drop => "rt_drop" | .note => "rt_note"
+  | .mmioRead32 => "rt_mmio_read" | .mmioWrite32 => "rt_mmio_write"
+
+def genInstr (i : IR.Instr) : GM Unit := do
+  match i with
+  | .mov n d src =>
+    load n src
+    store n d
+  | .bin op n d a b =>
+    genBin op n a b
+    store n d
+  | .shift left n d a m amt =>
+    match amt with
+    | .const k =>
+      if k ≥ bits n then load n (.const 0)
+      else if k == 0 then load n a
+      else genShift left n a m amt
+    | _ => genShift left n a m amt
+    store n d
+  | .not n d a =>
+    load n a
+    if n == 1 then ins .cpl
+    else if n == 2 then call "rt_not16"
+    else call s!"rt_not{bits n}"
+    if n == 1 then setRegs fun r => { r with a := [] }
+    else if n == 2 then setRegs fun r => { r with a := [], hl := [] }
+    else killAll
+    store n d
+  | .neg n d a =>
+    load n a
+    if n == 1 then ins .neg
+    else if n == 2 then call "rt_neg16"
+    else call s!"rt_neg{bits n}"
+    if n == 1 then setRegs fun r => { r with a := [] }
+    else if n == 2 then setRegs fun r => { r with a := [], hl := [] }
+    else killAll
+    store n d
+  | .ext n d m src =>
+    let r := (← get).regs
+    if n < m then
+      -- the low bytes: from the register that has the value, or from memory
+      if m == 2 then
+        if r.hl.contains src then ins .ld [.a, .l] else ins .ld [.a, .mem (← addrOf src)]
+        setRegs fun r => { r with a := [] }
+      else if r.acc == some (m, src) then
+        if n == 1 then ins .ld [.a, .mem (.sym "rt_acc")]
+        else if n == 2 then ins .ld [.hl, .mem (.sym "rt_acc")]
+        else pure ()
+        if n == 1 then setRegs fun r => { r with a := [] }
+        else if n == 2 then setRegs fun r => { r with hl := [] }
+        else setRegs fun r => { r with acc := none }
+      else
+        match src with
+        | .const v => load n (.const (v % 2 ^ bits n))
+        | src =>
+          let p ← addrOf src
+          if n == 1 then ins .ld [.a, .mem p]
+          else if n == 2 then ins .ld [.hl, .mem p]
+          else
+            ins .ld [.hl, .imm p]
+            call "rt_ld32"
+          if n == 1 then setRegs fun r => { r with a := [] }
+          else if n == 2 then setRegs fun r => { r with hl := [] }
+          else killAll
+    else if n == 2 then
+      -- from one byte
+      if r.a.contains src then
+        ins .ld [.l, .a]
+        ins .ld [.h, n8 0]
+      else
+        match src with
+        | .const v => ins .ld [.hl, n16 (v % 256)]
+        | src =>
+          ins .ld [.hl, .mem (← addrOf src)]
+          ins .ld [.h, n8 0]
+      setRegs fun r => { r with hl := [] }
+    else
+      if m == 1 then
+        loadA src
+        call "rt_acc_a"
+      else if m == 2 then
+        loadHL src
+        call "rt_acc_hl"
+      else
+        loadAcc 4 src
+        call "rt_zx32"
+      killAll
+    store n d
+  | .cmp op n d a b =>
+    genFlags op n a b
+    match op with
+    | .eq | .ne =>
+      let l ← newLabel
+      ins .ld [.a, n8 0]
+      ins .jr [if op == .eq then .nz else .z, .imm (.sym l)]
+      ins .inc [.a]
+      modify fun s => { s with out := s.out.push (.label l) }
+    | .lt =>
+      ins .ld [.a, n8 0]
+      ins .rla
+    | .ge =>
+      ins .sbc [.a, .a]
+      ins .inc [.a]
+    setRegs fun r => { r with a := [] }
+    storeA d
+  | .br op n a b l =>
+    genFlags op n a b
+    ins .jp [condOf op, .imm (.sym (← localLabel l))]
+    jumpTo l
+  | .jmp l =>
+    ins .jp [.imm (.sym (← localLabel l))]
+    jumpTo l
+    modify fun s => { s with dead := true }
+  | .label l =>
+    let name ← localLabel l
+    modify fun s => { s with out := s.out.push (.label name) }
+    -- what every way here agrees on; a jump from further down is not
+    -- known yet, and then nothing is
+    let st ← get
+    let body := (← read).fn.body
+    let here := (body.findIdx? (· == i)).getD 0
+    let backward := (List.range body.size).any fun k => k > here && (match body[k]! with
+      | .jmp m | .br _ _ _ _ m => m == l
+      | _ => false)
+    let incoming := st.atLabel.lookup l
+    let regs : Regs :=
+      if backward then {}
+      else match incoming, st.dead with
+        | some r, true => r
+        | some r, false => r.meet st.regs
+        | none, false => st.regs
+        | none, true => {}
+    modify fun s => { s with regs, dead := false }
+  | .load n d p =>
+    genAddr p
+    if n == 1 then
+      ins .ld [.a, .mhl]
+      setRegs fun r => { r with a := [] }
+    else if n == 2 then
+      ins .ld [.a, .mhl]
+      ins .inc [.hl]
+      ins .ld [.h, .mhl]
+      ins .ld [.l, .a]
+      setRegs fun r => { r with a := [], hl := [] }
+    else
+      call s!"rt_ld{bits n}"
+      killAll
+    store n d
+  | .store n p src =>
+    let r := (← get).regs
+    if n == 1 then
+      match src with
+      | .const v =>
+        genAddr p
+        ins .ld [.mhl, n8 v]
+      | src =>
+        if r.a.contains src then
+          genAddr p
+          ins .ld [.mhl, .a]
+        else
+          genAddr p
+          ins .ld [.a, .mem (← addrOf src)]
+          ins .ld [.mhl, .a]
+          setRegs fun r => { r with a := [src] }
+    else if n == 2 then
+      if r.hl.contains src then
+        ins .ex [.de, .hl]
+        setRegs fun r => { r with hl := [] }
+        genAddr p
+      else
+        genAddr p
+        loadDE src
+      ins .ld [.mhl, .e]
+      ins .inc [.hl]
+      ins .ld [.mhl, .d]
+    else
+      if r.acc == some (n, src) then
+        genAddr p
+      else
+        genAddr p
+        ins .push [.hl]
+        loadAcc n src
+        ins .pop [.hl]
+      call s!"rt_st{bits n}"
+      setRegs fun r => { r with a := [], hl := [] }
+    killSlots
+  | .lea d p =>
+    genAddr p
+    storeHL d
+  | .zero s n =>
+    if n > 0 then
+      ins .ld [.hl, .imm (slotVal s)]
+      ins .ld [.bc, n16 n]
+      call "rt_zero"
+      setRegs fun r => { r with a := [], hl := [] }
+      killWrite s n
+  | .call f ret reg =>
+    if let some (n, o) := reg then load n o
+    call (fnLabel f)
+    killAll
+    if let some (n, d) := ret then store n d
+  | .eff e args ret =>
+    match e, args with
+    | .outByte, [(_, o)] | .drop, [(_, o)] => loadA o
+    | .note, [(_, code), (_, value)] =>
+      loadAcc 4 value
+      loadA code
+    | .mmioRead32, [(_, addr)] => loadAcc 4 addr
+    | .mmioWrite32, [(_, addr), (_, value)] =>
+      loadAcc 4 addr
+      call "rt_mmio_addr"
+      killAll
+      loadAcc 4 value
+    | _, _ => pure ()
+    call (effectRoutine e)
+    killAll
+    if let some (n, d) := ret then store n d
+  | .ret v =>
+    if let some (n, o) := v then load n o
+    ins .ret
+    modify fun s => { s with dead := true }
+  | .trap =>
+    ins .jp [.imm (.sym "rt_trap")]
+    modify fun s => { s with dead := true }
+
+/-- One function with the given temporaries in slots: its items, and the
+temporaries read from their slot. -/
+def genFn (f : IR.Fn) (spilled : Array Bool) (lits : Array (Nat × Nat)) (isEntry := false)
+    (live : Option (Array Bool) := none) (annotate := false) :
+    Except String (Array Item × Array Bool × Array (Nat × Nat) × Nat × Option (Array Bool)) := do
+  -- slots of the temporaries, above the locals
+  let mut off := f.frame
+  let mut tmpOff := #[]
+  for t in [0:f.tmps.size] do
+    tmpOff := tmpOff.push off
+    if spilled[t]! then off := off + f.tmps[t]!
+  let act : GM Unit := do
+    if isEntry then modify fun s => { s with out := s.out.push (.label "f_entry") }
+    modify fun s => { s with out := s.out.push (.label (fnLabel f.name)) }
+    -- the register parameter goes to its slot, and is at hand
+    if let some (n, sl) := f.regParam then store n (.slot sl)
+    let labelAt (l : Nat) : Option Nat := f.body.findIdx? (· == .label l)
+    for k in [0:f.body.size] do
+      let i := f.body[k]!
+      let atTarget := match i with
+        | .br _ _ _ _ l => (labelAt l).bind fun j => f.body[j + 1]?
+        | _ => none
+      if annotate then modify fun s => { s with out := s.out.push (.comment i.text.trimAscii.toString) }
+      withReader (fun e => { e with next := f.body[k + 1]?, atTarget }) (genInstr i)
+  let ((), st) ← (act.run { fn := f, spilled, tmpOff, live }).run
+    { missed := Array.replicate f.tmps.size false, lits, reads := Array.replicate f.frame false }
+  return (st.out, st.missed, st.lits, off, if st.addrTaken then none else some st.reads)
+
+structure Compiled where
+  items : List Item
+  /-- Frame of every function, temporaries included. -/
+  frames : List (String × Nat)
+  lits : Array (Nat × Nat)
+
+/-- All functions: two passes each. -/
+def genProg (p : IR.Prog) (annotate := false) : Except String Compiled := do
+  let mut items : Array Item := #[]
+  let mut frames := #[]
+  let mut lits : Array (Nat × Nat) := #[]
+  for f in p.fns do
+    if f.dead then
+      frames := frames.push (f.name, f.frame)
+      continue
+    let (_, missed, _, _, live) ← genFn f (Array.replicate f.tmps.size true) lits
+    let (code, missed2, lits2, size, _) ← genFn f missed lits (f.name == p.entry) live annotate
+    for t in [0:f.tmps.size] do
+      if missed2[t]! && !missed[t]! then throw s!"{f.name}: the two passes disagree on t{t}"
+    items := items ++ code
+    lits := lits2
+    frames := frames.push (f.name, size)
+  return { items := items.toList, frames := frames.toList, lits }
+
+/-! ## A whole image -/
+
+def invert : Arg → Option Arg
+  | .z => some .nz | .nz => some .z | .c => some .nc | .nc => some .c
+  | .po => some .pe | .pe => some .po | .p => some .m | .m => some .p
+  | _ => none
+
+/-- `call f` + `ret` is a jump; a jump over a `ret` is a conditional `ret`. -/
+partial def peephole (items : List Item) : List Item :=
+  match items with
+  | .ins { op := .call, args := [.imm v] } :: .ins { op := .ret, args := [] } :: rest =>
+    .ins { op := .jp, args := [.imm v] } :: peephole rest
+  | .ins { op := .call, args := [.imm v] } :: .label l :: rest =>
+    -- labels in between: the `ret` stays for those who jump to it
+    let afterLabels := rest.dropWhile fun it => match it with | .label _ => true | _ => false
+    match afterLabels with
+    | .ins { op := .ret, args := [] } :: _ => .ins { op := .jp, args := [.imm v] } :: peephole (.label l :: rest)
+    | _ => items.head! :: peephole items.tail!
+  | .ins { op := .jp, args := [cc, .imm (.sym l 0)] } :: .ins { op := .ret, args := [] } :: .label m :: rest =>
+    match invert cc, l == m with
+    | some inv, true => .ins { op := .ret, args := [inv] } :: peephole (.label m :: rest)
+    | _, _ => items.head! :: peephole items.tail!
+  | i :: rest => i :: peephole rest
+  | [] => []
+
+/-- Local labels nothing refers to, and what cannot be reached after an
+unconditional `ret`, `jp` or `jr` up to the next label. -/
+partial def sweep (items : List Item) : List Item := Id.run do
+  let used := Runtime.symsOf items
+  let isLocal (l : String) : Bool := l.startsWith "l_" || l.startsWith "x_"
+  let mut out : Array Item := #[]
+  let mut dead := false
+  for it in items do
+    match it with
+    | .label l =>
+      if isLocal l && !used.contains l then continue
+      dead := false
+      out := out.push it
+    | .ins i =>
+      if dead then continue
+      out := out.push it
+      match i.op, i.args with
+      | .ret, [] | .jp, [_] | .jr, [_] => dead := true
+      | _, _ => pure ()
+    -- data and names are never dropped, and what follows data is
+    -- reached some other way (the interrupt vector after the padding)
+    | .db _ | .dw _ | .ds _ => dead := false; out := out.push it
+    | _ => out := out.push it
+  if out.size < items.length then sweep out.toList else out.toList
+
+/-- A byte zero-extended into `HL` and then moved up: straight into `H`. -/
+partial def packHigh : List Item → List Item
+  | .ins { op := .ld, args := [.l, .a] } :: .ins { op := .ld, args := [.h, .imm (.num 0)] } ::
+    .ins { op := .ld, args := [.h, .l] } :: .ins { op := .ld, args := [.l, .imm (.num 0)] } :: rest =>
+    .ins { op := .ld, args := [.h, .a] } :: .ins { op := .ld, args := [.l, .imm (.num 0)] } :: packHigh rest
+  | i :: rest => i :: packHigh rest
+  | [] => []
+
+/-- A jump whose target is a `ret` returns itself. -/
+def retThreading (items : List Item) : List Item := Id.run do
+  let arr := items.toArray
+  let mut atRet : List String := []
+  for k in [0:arr.size] do
+    if let .label l := arr[k]! then
+      -- past further labels at the same place
+      let mut j := k + 1
+      while (match arr[j]? with | some (.label _) => true | _ => false) do j := j + 1
+      if arr[j]? == some (.ins { op := .ret, args := [] }) then atRet := l :: atRet
+  return items.map fun it => match it with
+    | .ins { op := .jp, args := [.imm (.sym l 0)] } =>
+      if atRet.contains l then .ins { op := .ret, args := [] } else it
+    | .ins { op := .jp, args := [cc, .imm (.sym l 0)] } =>
+      if atRet.contains l && (invert cc).isSome then .ins { op := .ret, args := [cc] } else it
+    | it => it
+
+structure Image where
+  bytes : ByteArray
+  origin : Nat := 0
+  labels : List (String × Nat)
+  items : List Item
+  layout : Layout
+  /-- Bytes of code and constants; bytes of RAM. -/
+  codeSize : Nat
+  ramSize : Nat
+
+def litItems (lits : Array (Nat × Nat)) : List Item :=
+  lits.toList.flatMap fun (n, v) =>
+    [.label s!"lit{bits n}_{v}", .db (bytesLE v n |>.map fun b => .num (Int.ofNat b.toNat))]
+
+/-- Program + runtime pieces + data, RAM from `ramStart`.  `platform` is
+the start-up code and the effects (`Runtime.harness`, or a board's);
+`head` comes first in the image (reset and interrupt vectors). -/
+def build (p : IR.Prog) (platform : List Runtime.Piece) (head : List Item := [.ins { op := .jp, args := [.imm (.sym "rt_start")] }])
+    (ramStart : Nat := 0x8000) (ramEnd : Nat := 0xFF00) (shorten := true) (reserved : Nat := 0)
+    (annotate := false) : Except String Image := do
+  let c ← genProg p annotate
+  let entry : List Item := []
+  -- constants stay in ROM
+  let roData : List Item := p.globals.filter (·.const) |>.flatMap fun g =>
+    let bytes := (g.init.getD (ByteArray.mk (Array.replicate g.size 0))).toList
+    [.label (areaSym (.global g.name)), .db (bytes.map fun b => .num (Int.ofNat b.toNat))]
+  let initData : List Item := p.globals.filter (fun g => !g.const && g.init.isSome) |>.flatMap fun g =>
+    [.label s!"init_{sanitize g.name}", .db ((g.init.getD .empty).toList.map fun b => .num (Int.ofNat b.toNat))]
+  let user := head ++ entry ++ c.items
+  -- start-up: clear the RAM in use, copy the initial values (`rt_init`
+  -- is completed below, once the size of the RAM is known)
+  let initCopy : List Item := p.globals.filter (fun g => !g.const && g.init.isSome) |>.flatMap fun g =>
+    [.ins { op := .ld, args := [.hl, .imm (.sym s!"init_{sanitize g.name}")] },
+     .ins { op := .ld, args := [.de, .imm (.sym (areaSym (.global g.name)))] },
+     .ins { op := .ld, args := [.bc, n16 g.size] },
+     .ins { op := .ldir }]
+  let initCode : List Item :=
+    [.label "rt_init",
+     .ins { op := .ld, args := [.hl, .imm (.sym "rt_ram")] },
+     .ins { op := .ld, args := [.bc, .imm (.sym "rt_ram_size")] },
+     .ins { op := .call, args := [.imm (.sym "rt_zero")] }] ++ initCopy ++ [.ins { op := .ret }]
+  let (rt, cells) ← Runtime.select (platform ++ Runtime.pieces) (user ++ initCode)
+  -- RAM: the runtime's cells, then globals and frames
+  -- (`reserved` bytes at the start of the RAM are the platform's own)
+  let mut at_ := ramStart + reserved
+  let mut equs : List Item := []
+  for (n, sz) in cells do
+    equs := equs ++ [.equ n at_]
+    at_ := at_ + sz
+  let frameSize (f : String) : Nat := (c.frames.lookup f).getD 0
+  let layout := IR.layout p frameSize at_ (fun g => !g.const)
+  validate p layout frameSize at_ ramEnd
+  for (g, a) in layout.globals do equs := equs ++ [.equ (areaSym (.global g)) a]
+  for (f, a) in layout.frames do equs := equs ++ [.equ (areaSym (.frame f)) a]
+  equs := equs ++ [.equ "rt_ram" ramStart, .equ "rt_ram_size" (Nat.max 1 (layout.top - ramStart))]
+  let all := equs ++ user ++ initCode ++ rt ++ litItems c.lits ++ roData ++ initData
+  -- only the generated code and the runtime: data follows and stays
+  let all := packHigh (peephole (sweep (retThreading all)))
+  let all ← if shorten then Asm.relax all else pure all
+  let a ← Asm.assemble all
+  if a.bytes.size > ramStart then throw s!"the image is {a.bytes.size} bytes: it does not fit below {ramStart}"
+  return { bytes := a.bytes, labels := a.labels, items := all, layout,
+           codeSize := a.bytes.size, ramSize := layout.top - ramStart }
+
+end Ember.Z80.Codegen

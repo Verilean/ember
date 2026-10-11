@@ -92,6 +92,16 @@ def CUnit.print (u : CUnit) : String := Id.run do
     ls := ls.push (f.signature ++ " {")
     for s in f.body do ls := ls ++ (s.print 1).toArray
     ls := ls.push "}"
-  return "\n".intercalate ls.toList ++ "\n"
+  -- the guarded division helpers of the SDCC profile, those in use
+  let body := "\n".intercalate (ls.toList.drop u.header.length)
+  let mut helpers : Array String := #[]
+  for w in [8, 16, 32, 64] do
+    for (n, sym) in [("div", "/"), ("mod", "%")] do
+      if (body.splitOn s!"ember_{n}{w}(").length > 1 then
+        helpers := helpers.push
+          (s!"static uint{w}_t ember_{n}{w}(uint{w}_t a, uint{w}_t d) " ++ "{ " ++
+           s!"return (uint{w}_t)((d == 0) ? 0 : (a {sym} d));" ++ " }")
+  if !helpers.isEmpty then helpers := helpers.push ""
+  return "\n".intercalate (u.header ++ helpers.toList ++ ls.toList.drop u.header.length) ++ "\n"
 
 end Ember.C

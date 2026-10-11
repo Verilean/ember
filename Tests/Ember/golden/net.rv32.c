@@ -106,6 +106,7 @@ bool g_esc;
 bool g_over;
 struct s_Seg g_sg;
 bool g_booted;
+bool g_tick_due;
 
 uint16_t e_get16(uint16_t v_o);
 uint32_t e_get32(uint16_t v_o);
@@ -1820,39 +1821,71 @@ void e_tcp_tick(void) {
 }
 
 void e_main(void) {
-#line 15 "Ember/Net/Main.lean"
-#line 16 "Ember/Net/Main.lean"
+#line 19 "Ember/Net/Main.lean"
+#line 20 "Ember/Net/Main.lean"
   if ((!g_booted)) {
-#line 17 "Ember/Net/Main.lean"
+#line 21 "Ember/Net/Main.lean"
     e_tcb_reset();
-#line 18 "Ember/Net/Main.lean"
+#line 22 "Ember/Net/Main.lean"
     g_booted = true;
   }
-#line 19 "Ember/Net/Main.lean"
+#line 23 "Ember/Net/Main.lean"
   uint16_t v_k = ((uint16_t)0u);
   ((void)v_k);
-#line 19 "Ember/Net/Main.lean"
-  v_k = ember_input_next();
-#line 20 "Ember/Net/Main.lean"
-  if ((v_k == ((uint16_t)65535u))) {
-#line 21 "Ember/Net/Main.lean"
-    return;
-  }
-#line 22 "Ember/Net/Main.lean"
-  if ((v_k == ((uint16_t)256u))) {
 #line 23 "Ember/Net/Main.lean"
-    e_tcp_tick();
+  v_k = ember_input_next();
 #line 24 "Ember/Net/Main.lean"
+  if ((v_k == ((uint16_t)65535u))) {
+#line 25 "Ember/Net/Main.lean"
     return;
   }
-#line 25 "Ember/Net/Main.lean"
+#line 26 "Ember/Net/Main.lean"
+  if ((v_k == ((uint16_t)256u))) {
+#line 28 "Ember/Net/Main.lean"
+    if ((g_len == ((uint16_t)0u))) {
+#line 29 "Ember/Net/Main.lean"
+      e_tcp_tick();
+#line 30 "Ember/Net/Main.lean"
+      return;
+    }
+#line 31 "Ember/Net/Main.lean"
+    if ((!g_tick_due)) {
+#line 32 "Ember/Net/Main.lean"
+      g_tick_due = true;
+#line 33 "Ember/Net/Main.lean"
+      return;
+    }
+#line 35 "Ember/Net/Main.lean"
+    g_over = true;
+#line 36 "Ember/Net/Main.lean"
+    g_len = ((uint16_t)0u);
+#line 37 "Ember/Net/Main.lean"
+    g_esc = false;
+#line 38 "Ember/Net/Main.lean"
+    g_tick_due = false;
+#line 39 "Ember/Net/Main.lean"
+    e_tcp_tick();
+#line 40 "Ember/Net/Main.lean"
+    e_tcp_tick();
+#line 41 "Ember/Net/Main.lean"
+    return;
+  }
+#line 42 "Ember/Net/Main.lean"
   e_slip_rx(((uint8_t)v_k));
+#line 43 "Ember/Net/Main.lean"
+  if ((g_tick_due && (g_len == ((uint16_t)0u)))) {
+#line 44 "Ember/Net/Main.lean"
+    g_tick_due = false;
+#line 45 "Ember/Net/Main.lean"
+    e_tcp_tick();
+  }
 }
 
 void entry(void) {
   e_main();
 }
 
+#ifndef EMBER_NO_NAMES
 extern const char *const drop_names[];
 extern const unsigned drop_names_count;
 extern const char *const note_names[];
@@ -1861,3 +1894,6 @@ const char *const drop_names[] = {"oversize-frame", "short-packet", "bad-version
 const unsigned drop_names_count = 37u;
 const char *const note_names[] = {"connection-reset-by-peer"};
 const unsigned note_names_count = 1u;
+extern const unsigned framed;
+const unsigned framed = 0u;
+#endif

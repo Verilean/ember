@@ -42,3 +42,6 @@ lean_exe «ember-fixtures» where
 
 lean_exe «ember-gen» where
   root := `Tests.Ember.Drivers.GenMain
+
+lean_exe «ember-z80» where
+  root := `Tests.Ember.Drivers.Z80Main

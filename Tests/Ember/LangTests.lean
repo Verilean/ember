@@ -7,6 +7,10 @@ import Ember.Spec.Slip
 import Ember.Tools.Cc
 import Ember.Tools.Emit
 import Ember.Tools.Fuzz
+import Ember.Tools.NetCheck
+import Ember.Tools.Lockstep
+import Ember.Lang.Sem
+import Ember.C.Sem
 import Tests.Ember.LangPrograms
 
 /-!
@@ -128,9 +132,10 @@ def profileTests : TestSeq :=
   test "u64 on rv32: uint64_t" (Profile.rv32.opType .w64 == "uint64_t") $
   test "u8 * u8 emitted with unsigned operands and a truncating cast" mulEmitted
 
-/-- Each regression: the drop comes before the trap in the interpreter. -/
+/-- Each of the trapping regressions (the first two): the drop comes
+before the trap in the interpreter. -/
 def regressionsKeepOrder : Bool :=
-  Regress.progs.all fun (_, p, ins) =>
+  (Regress.progs.take 2).all fun (_, p, ins) =>
     match p.run ins with
     | .ok r =>
       let kinds := r.trace.lines.toList.map (·.ev.kind)
@@ -306,8 +311,121 @@ def fuzz (count : Nat) : IO Nat := do
   IO.println s!"fuzz: {count} random programs, -O0 and -O2 with UBSan/ASan: {if rc == 0 then "no divergence" else "DIVERGENCE"}"
   return if rc == 0 then 0 else 1
 
+/-- M5.4: the total semantics (`Ember.Lang.Sem`, the one proofs unfold)
+against the interpreter: random programs, the examples and regressions,
+and the stack — all its builds — on the corpus. -/
+def semantics (count : Nat) : IO Nat := do
+  let mut bad := 0
+  let mut runs := 0
+  let check (name : String) (p : Prog) (ins : Array Input) : IO Nat := do
+    match p.check with
+    | .error e => IO.println s!"FAIL sem {name}: {e}"; return 1
+    | .ok q =>
+      let it := (runMachine (Machine.init q ins) { impl := "interp" }).trace
+      let st := Sem.run q ins
+      if Tools.Fuzz.agree it st then return 0
+      IO.println s!"FAIL {name}: interpreter vs Sem\n{(diff it st { observable := false }).report}"
+      return 1
+  for i in [0:count] do
+    let (p, ins) := Gen.sample (90000 + i)
+    bad := bad + (← check s!"p{90000 + i}" p ins)
+    runs := runs + 1
+  for (n, p) in Examples.all do
+    let ins := if n == "constructs" then constructsInputs
+      else if n == "slip" then #[.rx ((randBytes 400).run' (Rng.ofSeed 3))]
+      else roundInputs (rounds 3 4 40)
+    bad := bad + (← check n p ins)
+    runs := runs + 1
+  for (n, p, ins) in (Regress.progs : List (String × Prog × Array Input)) do
+    bad := bad + (← check n p ins)
+    runs := runs + 1
+  for (n, p) in Guard.progs do
+    for ins in Guard.inputs do
+      bad := bad + (← check n p ins)
+      runs := runs + 1
+  let mut fixtures := 0
+  for d in ["Tests/Ember/corpus", "Tests/Ember/regress"] do
+    for f in ← Tools.Lockstep.traceFiles d do
+      let t ← Trace.readFile f
+      if Tools.NetCheck.implemented t.header then
+        bad := bad + (← check f.toString (Tools.NetCheck.progFor t.header) t.inputs)
+        fixtures := fixtures + 1
+  IO.println s!"semantics: {runs} runs of random programs and examples, the stack on {fixtures} fixtures: interpreter = Sem (the total semantics); {bad} failures"
+  return bad
+
+/-- M5.7: the emitted C under the C semantics of `Ember.C.Sem` against
+`Ember.Lang.Sem`, for every profile: the same trace, and never
+"undefined". -/
+def csemantics (count : Nat) : IO Nat := do
+  let mut bad := 0
+  let mut runs := 0
+  let check (name : String) (p : Prog) (ins : Array Input) : IO Nat := do
+    match p.check with
+    | .error e => IO.println s!"FAIL csem {name}: {e}"; return 1
+    | .ok q =>
+      let st := Sem.run q ins
+      let mut bad := 0
+      for prof in Profile.all do
+        let o : C.Opts := { profile := prof }
+        match C.compile q o with
+        | .error e => IO.println s!"FAIL csem {name} ({prof.name}): {e}"; bad := bad + 1
+        | .ok u =>
+          let cp := C.Sem.CProg.ofUnit u prof o.entryName q.dropReasons q.notes
+          let ct := C.Sem.run cp ins q.framed (fuel := 1000000)
+          let undef := ct.lines.any fun l => match l.ev with
+            | .note m => m.startsWith "undefined"
+            | _ => false
+          unless Tools.Fuzz.agree st ct && !undef do
+            IO.println s!"FAIL {name} ({prof.name}): Sem vs C semantics\n{(diff st ct { observable := false }).report}"
+            bad := bad + 1
+      return bad
+  for i in [0:count] do
+    let (p, ins) := Gen.sample (95000 + i)
+    bad := bad + (← check s!"p{95000 + i}" p ins)
+    runs := runs + 1
+  for (n, p) in Examples.all do
+    let ins := if n == "constructs" then constructsInputs
+      else if n == "slip" then #[.rx ((randBytes 400).run' (Rng.ofSeed 3))]
+      else roundInputs (rounds 3 4 40)
+    bad := bad + (← check n p ins)
+    runs := runs + 1
+  for (n, p, ins) in (Regress.progs : List (String × Prog × Array Input)) do
+    bad := bad + (← check n p ins)
+    runs := runs + 1
+  for (n, p) in Guard.progs do
+    for ins in Guard.inputs do
+      bad := bad + (← check n p ins)
+      runs := runs + 1
+  let mut fixtures := 0
+  for d in ["Tests/Ember/corpus", "Tests/Ember/regress"] do
+    for f in ← Tools.Lockstep.traceFiles d do
+      let t ← Trace.readFile f
+      if Tools.NetCheck.implemented t.header then
+        bad := bad + (← check f.toString (Tools.NetCheck.progFor t.header) t.inputs)
+        fixtures := fixtures + 1
+  -- self-test: a planted bug (the truncating cast of `+` dropped) must show
+  let mut caught := 0
+  let mut tried := 0
+  for i in [0:1000] do
+    if caught > 0 then break
+    tried := tried + 1
+    let (p, ins) := Gen.sample (1 + i)
+    if let .ok q := p.check then
+      let o : C.Opts := { profile := .host64, bugDropCast := true }
+      if let .ok u := C.compile q o then
+        let ct := C.Sem.run (C.Sem.CProg.ofUnit u .host64 o.entryName q.dropReasons q.notes) ins q.framed (fuel := 1000000)
+        unless Tools.Fuzz.agree (Sem.run q ins) ct do caught := caught + 1
+  if caught == 0 then
+    IO.println "FAIL C semantics: the planted bug (dropped cast) was not noticed"
+    bad := bad + 1
+  IO.println s!"C semantics: planted bug noticed after {tried} random programs"
+  IO.println s!"C semantics: {runs} runs of random programs and examples, the stack on {fixtures} fixtures, {Profile.all.length} profiles: Sem = the emitted C under Ember.C.Sem, nothing undefined; {bad} failures"
+  return bad
+
 def main (fuzzCount : Nat := 1000) : IO UInt32 := do
   let mut bad := 0
+  bad := bad + (← semantics fuzzCount)
+  bad := bad + (← csemantics fuzzCount)
   bad := bad + (← golden)
   bad := bad + (← referenceTests)
   bad := bad + (← differential)

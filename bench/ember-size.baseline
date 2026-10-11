@@ -1,6 +1,16 @@
 # Ember stack size baseline: tools/ember/size-report.py --update
-host64.code 5361
-host64.ram 935
-host64.rodata 1019
-z80.code 24797
-z80.ram 622
+host64.code 5449
+host64.ram 936
+host64.rodata 1023
+z80.code 7547
+z80.ram 888
+esp32c3.code 7076
+esp32c3.rodata 844
+esp32c3.ram 5028
+esp32c3.ping_instructions 16892
+z80.ping_tstates 188314
+z80.stack 181
+z80own.code 5920
+z80own.ram 1052
+z80own.stack 16
+z80own.ping_tstates 186146

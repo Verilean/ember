@@ -75,6 +75,7 @@ void entry(void) {
   e_main();
 }
 
+#ifndef EMBER_NO_NAMES
 extern const char *const drop_names[];
 extern const unsigned drop_names_count;
 extern const char *const note_names[];
@@ -83,3 +84,6 @@ const char *const drop_names[] = {""};
 const unsigned drop_names_count = 0u;
 const char *const note_names[] = {""};
 const unsigned note_names_count = 0u;
+extern const unsigned framed;
+const unsigned framed = 0u;
+#endif
