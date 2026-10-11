@@ -42,6 +42,7 @@ import Ember.Proof.CFn
 import Ember.Proof.CProgram
 import Ember.Proof.CCheck
 import Ember.Proof.CNet
+import Ember.Proof.Z80Frame
 
 /-!
 # Ember.Proof — proofs (plan M5): about the reference stack (P1), and that Ember code refines it (P2)
@@ -104,6 +105,12 @@ P3, the emitted C (M5.8) — `Ember.C.Sem` is the semantics of the C subset:
   together; the checker accepts every build of the stack, for every profile.
 
 By-reference parameters are outside M5.8 (the stack has none).
+
+The Z80 back end (M7, begun) — `Ember.Z80.IR.Sem` is the semantics of its IR:
+
+* `Z80Frame`: **the frame validator is right** (M7.2) — a layout `IR.validate` accepts keeps every
+  function's frame apart from the globals and from the frame of every function it can reach through
+  calls (`validate_sound`).
 
 Every statement is about the definitions of `Ember.Spec` as they are;
 `Ember/Proof/README.md` lists the theorems, the hypotheses they need and

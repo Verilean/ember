@@ -102,6 +102,7 @@ def ownExamples : IO Nat := do
     | .ok it =>
       if Tools.Cc.trapped it then traps := traps + 1
       for (what, r) in [("IR", IR.run p ins), ("IR with inlining", IR.run p ins (inline := true)),
+                        ("IR semantics", IR.Sem.run p ins), ("IR semantics with inlining", IR.Sem.run p ins (inline := true)),
                         ("own back end", Tools.Z80.ownRun p ins)] do
         match r with
         | .ok t =>
@@ -109,7 +110,7 @@ def ownExamples : IO Nat := do
             bad := bad + 1
             IO.println s!"FAIL {n}: interpreter vs {what}\n{(diff it t { observable := false }).report}"
         | .error e => bad := bad + 1; IO.println s!"FAIL {n}: {what}: {e}"
-  IO.println s!"z80 own back end: {cases.size} runs of the examples, regressions and index-check programs ({traps} of them trap): interpreter = IR = generated code; {bad} failures"
+  IO.println s!"z80 own back end: {cases.size} runs of the examples, regressions and index-check programs ({traps} of them trap): interpreter = IR = IR semantics = generated code; {bad} failures"
   return bad
 
 def main : IO UInt32 := do

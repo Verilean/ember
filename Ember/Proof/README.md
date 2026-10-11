@@ -63,6 +63,7 @@ specifies) is at the end of this file: "Refinement".
 | `CProgram.lean` | `compile_unit`, `init_rel`, `entry_sim`, `iter_sim`: the unit, the initial state, the entry function again and again; `hygU_of_prefix` | M5.8 (programs) |
 | `CCheck.lean` | the checker `progOkB` and `progOkB_sound` | M5.8 |
 | `CNet.lean` | `stack_c`: the emitted C of the SLIP build against the Spec; the `#guard`s that the builds of the stack are covered | M5.6 + M5.8 |
+| `Z80Frame.lean` | `validate_sound`: a frame layout the validator accepts keeps frames apart from globals and from the frames of reachable functions | M7.2 |
 
 ## Theorems
 
@@ -599,7 +600,7 @@ emitted checks; `compileFn` and `compile` are built from named functions
   ARP, DHCP) has no refinement proofs;
 * lines other than transmissions and drops (`pkt`, `tcb`, notes) are
   not compared;
-* the Z80 back end (M7), and what "The emitted C" above lists as not covered;
+* the Z80 back end (M7) apart from its frame validator (`validate_sound`): the translation to the IR and from the IR to machine code are tested, not proved — `Ember/Z80/IRSem.lean` is the semantics those proofs will be about; and what "The emitted C" above lists as not covered;
 * that a function *traps* exactly when the Spec rejects: the theorems
   are for states that satisfy their invariants, and show that from those
   no call traps (the fuel given is enough and every index is in range).

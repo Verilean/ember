@@ -3,6 +3,7 @@ import Ember.Z80.Asm
 import Ember.Net.Loop
 import Ember.Net.Main
 import Ember.Z80.IRInterp
+import Ember.Z80.IRSem
 import Ember.Z80.Codegen
 import Ember.Z80.RtCheck
 import Ember.Z80.Target
@@ -442,10 +443,12 @@ def asmCheck : IO UInt32 := do
 def irDiverges (p : Lang.Prog) (ins : Array Input) : Bool :=
   -- as lowered, and with calls replaced by bodies (`IR.inlineCalls`)
   [false, true].any fun inline =>
-    match Fuzz.interp p ins, IR.run p ins (inline := inline) with
-    | .ok a, .ok b => !Fuzz.agree a b
-    | .ok _, .error _ => true
-    | .error _, _ => false
+    -- the IR interpreter, and the IR's total semantics (`IR.Sem`, what the proofs of M7 unfold)
+    [IR.run p ins (inline := inline), IR.Sem.run p ins (inline := inline)].any fun r =>
+      match Fuzz.interp p ins, r with
+      | .ok a, .ok b => !Fuzz.agree a b
+      | .ok _, .error _ => true
+      | .error _, _ => false
 
 /-- M6.3: random programs, Ember interpreter = IR interpreter (which also
 runs the frame layout and its validator). -/
@@ -465,7 +468,7 @@ def irFuzz (count seed : Nat) : IO UInt32 := do
         match IR.run small ins with
         | .ok t => IO.println s!"IR:\n{t.print}"
         | .error e => IO.println s!"IR: {e}"
-  IO.println s!"z80 IR: {count} random programs: Ember interpreter = IR interpreter; {bad} failures"
+  IO.println s!"z80 IR: {count} random programs: Ember interpreter = IR interpreter = IR semantics (IR.Sem); {bad} failures"
   return if bad == 0 then 0 else 1
 
 /-- The stack (`Ember.Net`) on the IR interpreter: fixtures. -/
@@ -477,14 +480,18 @@ def irReplay (paths : List String) : IO UInt32 := do
       let t ← Trace.readFile f
       if !NetCheck.supported t.header then continue
       ran := ran + 1
-      match IR.run Net.prog t.inputs { t.header with impl := "ir" } with
-      | .error e => bad := bad + 1; IO.println s!"FAIL {f}: {e}"
-      | .ok r =>
-        let d := diff t r { observable := true, drops := true }
-        if !d.equal then
-          bad := bad + 1
-          IO.println s!"FAIL {f}\n{d.report}"
-  IO.println s!"z80 IR replay: {ran - bad} of {ran} fixtures: IR interpreter's trace = fixture"
+      let mut ok := true
+      for (what, r) in [("IR interpreter", IR.run Net.prog t.inputs { t.header with impl := "ir" }),
+                        ("IR semantics", IR.Sem.run Net.prog t.inputs { t.header with impl := "irsem" })] do
+        match r with
+        | .error e => ok := false; IO.println s!"FAIL {f}: {what}: {e}"
+        | .ok r =>
+          let d := diff t r { observable := true, drops := true }
+          if !d.equal then
+            ok := false
+            IO.println s!"FAIL {f}: {what}\n{d.report}"
+      unless ok do bad := bad + 1
+  IO.println s!"z80 IR replay: {ran - bad} of {ran} fixtures: the trace of the IR interpreter and of the IR semantics (IR.Sem) = fixture"
   return if bad == 0 then 0 else 1
 
 /-! ## The own back end (plan M6) -/

@@ -32,18 +32,21 @@ def Layout.areaAddr (l : Layout) : Area → Option Nat
 
 def Layout.addr (l : Layout) (s : Slot) : Nat := (l.areaAddr s.area).getD 0 + s.off
 
+/-- The functions `f` calls or has inlined (none for an unknown name). -/
+def calleesOf (p : Prog) (f : String) : List String := ((p.fn? f).map Fn.callees).getD []
+
+/-- Add callees until nothing is new, at most `n` times. -/
+def reachN (p : Prog) : Nat → List String → List String
+  | 0, s => s
+  | n + 1, s =>
+    let new := ((s.flatMap (calleesOf p)).filter fun g => !s.contains g).eraseDups
+    if new.isEmpty then s else reachN p n (s ++ new)
+
 /-- Every function reachable from `f` through calls (not `f` itself:
-there is no recursion). -/
-partial def reach (p : Prog) (f : String) : List String := Id.run do
-  let mut seen : List String := []
-  let mut work := ((p.fn? f).map Fn.callees).getD []
-  while !work.isEmpty do
-    let g := work.head!
-    work := work.tail!
-    if seen.contains g then continue
-    seen := g :: seen
-    work := work ++ ((p.fn? g).map Fn.callees).getD []
-  return seen
+there is no recursion).  `valid` checks that the list is closed, so the
+bound on the rounds is not trusted. -/
+def reach (p : Prog) (f : String) : List String :=
+  reachN p (p.fns.foldl (fun n g => n + g.callees.length) 1) (calleesOf p f).eraseDups
 
 /-- Globals from `start` on (those `inRam` selects), then the frames.
 `frameSize` is a function's frame with its temporaries. -/
@@ -74,9 +77,38 @@ def layout (p : Prog) (frameSize : String → Nat) (start : Nat)
 
 def disjoint (a an b bn : Nat) : Bool := an == 0 || bn == 0 || a + an ≤ b || b + bn ≤ a
 
-/-- The check of a layout (does not look at how it was made). -/
-def validate (p : Prog) (l : Layout) (frameSize : String → Nat) (lo hi : Nat) : Except String Unit := do
-  let globals := p.globals.filterMap fun g => (l.globals.lookup g.name).map fun a => (g.name, a, g.size)
+/-- The globals the layout places: name, address, size. -/
+def placed (p : Prog) (l : Layout) : List (String × Nat × Nat) :=
+  p.globals.filterMap fun g => (l.globals.lookup g.name).map fun a => (g.name, a, g.size)
+
+/-- **The check of a layout** (does not look at how it was made):
+globals and frames lie in `[lo, hi)`; globals do not overlap each other
+or a frame; and for every function, the list `reach` gives contains its
+callees and the callees of its members, does not contain the function,
+and no frame in it overlaps the function's. -/
+def valid (p : Prog) (l : Layout) (frameSize : String → Nat) (lo hi : Nat) : Bool :=
+  let globals := placed p l
+  (globals.all fun g => decide (lo ≤ g.2.1) && decide (g.2.1 + g.2.2 ≤ hi)) &&
+  (globals.all fun g => globals.all fun h => g.1 == h.1 || disjoint g.2.1 g.2.2 h.2.1 h.2.2) &&
+  p.fns.all fun f =>
+    match l.frames.lookup f.name with
+    | none => false
+    | some a =>
+      let sz := frameSize f.name
+      let r := reach p f.name
+      decide (lo ≤ a) && decide (a + sz ≤ hi) &&
+      (globals.all fun g => disjoint a sz g.2.1 g.2.2) &&
+      (calleesOf p f.name).all r.contains &&
+      (r.all fun g => (calleesOf p g).all r.contains) &&
+      r.all fun g =>
+        g != f.name &&
+          match l.frames.lookup g with
+          | some b => disjoint a sz b (frameSize g)
+          | none => false
+
+/-- What is wrong with a layout, for the message. -/
+def explain (p : Prog) (l : Layout) (frameSize : String → Nat) (lo hi : Nat) : Except String Unit := do
+  let globals := placed p l
   for (n, a, sz) in globals do
     unless lo ≤ a && a + sz ≤ hi do throw s!"global {n} at {a} (+{sz}) outside [{lo}, {hi})"
   for (n, a, sz) in globals do
@@ -93,5 +125,12 @@ def validate (p : Prog) (l : Layout) (frameSize : String → Nat) (lo hi : Nat) 
       let some b := l.frames.lookup g | throw s!"no frame for {g}"
       if !disjoint a sz b (frameSize g) then
         throw s!"frames of {f.name} and {g} overlap, and {f.name} can call {g}"
+
+def validate (p : Prog) (l : Layout) (frameSize : String → Nat) (lo hi : Nat) : Except String Unit :=
+  if valid p l frameSize lo hi then .ok ()
+  else
+    match explain p l frameSize lo hi with
+    | .error e => .error e
+    | .ok () => .error "the call graph was not closed in the rounds given"
 
 end Ember.Z80.IR

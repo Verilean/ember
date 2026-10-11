@@ -212,11 +212,19 @@ def Prog.text (p : Prog) : String := "\n".intercalate (p.fns.map Fn.text)
 
 /-! ## Layout of types -/
 
-partial def sizeOf (p : Lang.Prog) : Ty → Nat
+/-- Bytes of a type without records. -/
+def sizeOf0 : Ty → Nat
+  | .int w => w.bits / 8
+  | .bool => 1
+  | .arr el n => n * sizeOf0 el
+  | .record _ => 0
+
+/-- Bytes of a type (records do not nest). -/
+def sizeOf (p : Lang.Prog) : Ty → Nat
   | .int w => w.bits / 8
   | .bool => 1
   | .arr el n => n * sizeOf p el
-  | .record r => ((p.struct? r).map (·.fields)).getD [] |>.foldl (fun acc (_, t) => acc + sizeOf p t) 0
+  | .record r => ((p.struct? r).map (·.fields)).getD [] |>.foldl (fun acc (_, t) => acc + sizeOf0 t) 0
 
 def fieldOff (p : Lang.Prog) (r f : String) : Option (Nat × Ty) := Id.run do
   let mut off := 0
@@ -305,31 +313,52 @@ def trapLabel : LM Nat := do
   modify fun s => { s with trapLabel := some l }
   return l
 
-def varInfo (x : String) : LM VarInfo := do
-  let e ← read
-  if let some v := e.vars.lookup x then return v
-  match e.prog.global? x with
-  | some g => return { ty := g.ty, at_ := .static { area := .global x } }
-  | none => err s!"unknown variable {x}"
+/-- What only reads the environment, as an action. -/
+def pureE (m : Env → Except String α) : LM α := fun e s =>
+  match m e with
+  | .ok a => .ok (a, s)
+  | .error msg => .error msg
 
-partial def tyOf (e : Expr) : LM Ty := do
-  match e with
-  | .lit _ (some w) => return .int w
-  | .lit _ none => err "untyped literal (program not checked)"
-  | .blit _ => return .bool
-  | .var x => return (← varInfo x).ty
+def Env.err (e : Env) (msg : String) : Except String α := .error s!"{e.fn}: {msg}"
+
+def Env.varInfo (e : Env) (x : String) : Except String VarInfo :=
+  match e.vars.lookup x with
+  | some v => .ok v
+  | none =>
+    match e.prog.global? x with
+    | some g => .ok { ty := g.ty, at_ := .static { area := .global x } }
+    | none => e.err s!"unknown variable {x}"
+
+def varInfo (x : String) : LM VarInfo := pureE (·.varInfo x)
+
+/-- Type of an expression of a checked program. -/
+def Env.tyOf (g : Env) : Expr → Except String Ty
+  | .lit _ (some w) => .ok (.int w)
+  | .lit _ none => g.err "untyped literal (program not checked)"
+  | .blit _ => .ok .bool
+  | .var x =>
+    match g.varInfo x with
+    | .ok v => .ok v.ty
+    | .error m => .error m
   | .field b f =>
-    let .record r ← tyOf b | err "field of a non-record"
-    match fieldOff (← read).prog r f with
-    | some (_, t) => return t
-    | none => err s!"no field {f}"
+    match g.tyOf b with
+    | .ok (.record r) =>
+      match fieldOff g.prog r f with
+      | some (_, t) => .ok t
+      | none => g.err s!"no field {f}"
+    | .ok _ => g.err "field of a non-record"
+    | .error m => .error m
   | .index b _ =>
-    let .arr el _ ← tyOf b | err "index of a non-array"
-    return el
-  | .bin op a _ => if op.isCompare || op.isLogic then return .bool else tyOf a
-  | .un _ a => tyOf a
-  | .cast w _ => return .int w
-  | .cond _ a _ => tyOf a
+    match g.tyOf b with
+    | .ok (.arr el _) => .ok el
+    | .ok _ => g.err "index of a non-array"
+    | .error m => .error m
+  | .bin op a _ => if op.isCompare || op.isLogic then .ok .bool else g.tyOf a
+  | .un _ a => g.tyOf a
+  | .cast w _ => .ok (.int w)
+  | .cond _ a _ => g.tyOf a
+
+def tyOf (e : Expr) : LM Ty := pureE (·.tyOf e)
 
 def size (t : Ty) : LM Nat := do return sizeOf (← read).prog t
 
@@ -341,7 +370,7 @@ def closed? (e : Expr) : Option Nat :=
   | _ => none
 
 /-- Can evaluating the expression trap?  (An index that is not a constant.) -/
-partial def canTrap : Expr → Bool
+def canTrap : Expr → Bool
   | .index b i => (closed? i).isNone || canTrap b
   | .field b _ => canTrap b
   | .bin _ a b => canTrap a || canTrap b
@@ -354,16 +383,49 @@ def isSimple : Opd → Bool
   | .tmp _ => false
   | _ => true
 
+/-- Where a variable is. -/
+def placeVar (x : String) : LM (Addr × Ty) := do
+  let v ← varInfo x
+  match v.at_ with
+  | .static s => return ({ root := .static s }, v.ty)
+  | .ref p => return ({ root := .ptr p }, v.ty)
+
+/-- The value of a constant global, when `x` is one. -/
+def constVar? (x : String) : LM (Option Nat) := do
+  let env ← read
+  if (env.vars.lookup x).isNone then
+    if let some g := env.prog.global? x then
+      if g.const && g.ty.isScalar then
+        return some (match g.init with | [v] => v % 2 ^ (8 * sizeOf env.prog g.ty) | _ => 0)
+  return none
+
+/-- A place as an operand: its slot, or a temporary loaded from it. -/
+def loadPlace (r : Addr × Ty) : LM Opd := do
+  let (a, t) := r
+  match a.root, a.idx with
+  | .static s, none => return .slot { s with off := s.off + a.off }
+  | _, _ =>
+    let d ← newTmp (← size t)
+    emit (.load (← size t) (.tmp d) a)
+    return .tmp d
+
+/-- A place's value into `dst`. -/
+def movPlace (n : Nat) (dst : Dst) (r : Addr × Ty) : LM Unit :=
+  match r.1.root, r.1.idx with
+  | .static s, none => emit (.mov n dst (.slot { s with off := s.off + r.1.off }))
+  | _, _ => emit (.load n dst r.1)
+
+/-- A variable as an operand. -/
+def varOpd (x : String) : LM Opd := do
+  if let some v ← constVar? x then return .const v
+  loadPlace (← placeVar x)
+
 mutual
 
 /-- Where a place is. -/
-partial def place (e : Expr) : LM (Addr × Ty) := do
+def place (e : Expr) : LM (Addr × Ty) := do
   match e with
-  | .var x =>
-    let v ← varInfo x
-    match v.at_ with
-    | .static s => return ({ root := .static s }, v.ty)
-    | .ref p => return ({ root := .ptr p }, v.ty)
+  | .var x => placeVar x
   | .field b f =>
     let (a, t) ← place b
     let .record r := t | err "field of a non-record"
@@ -395,27 +457,17 @@ partial def place (e : Expr) : LM (Addr × Ty) := do
         pure (.tmp t)
     return ({ a with idx := some { opd := lowOpd, size := 2, scale, len := none } }, el)
   | _ => err "not a place"
+termination_by 3 * SizeOf.sizeOf e
 
 /-- The expression as an operand: a constant or a variable as it is,
 anything else in a new temporary. -/
-partial def expr (e : Expr) : LM Opd := do
+def expr (e : Expr) : LM Opd := do
   if let some v := closed? e then return .const v
-  -- a constant is its value
-  if let .var x := e then
-    let env ← read
-    if (env.vars.lookup x).isNone then
-      if let some g := env.prog.global? x then
-        if g.const && g.ty.isScalar then
-          return .const (match g.init with | [v] => v % 2 ^ (8 * sizeOf env.prog g.ty) | _ => 0)
   match e with
-  | .var _ | .field _ _ | .index _ _ =>
-    let (a, t) ← place e
-    match a.root, a.idx with
-    | .static s, none => return .slot { s with off := s.off + a.off }
-    | _, _ =>
-      let d ← newTmp (← size t)
-      emit (.load (← size t) (.tmp d) a)
-      return .tmp d
+  -- a constant is its value
+  | .var x => varOpd x
+  | .field b f => loadPlace (← place (.field b f))
+  | .index b i => loadPlace (← place (.index b i))
   | .cast w a =>
     let n := w.bits / 8
     let m ← size (← tyOf a)
@@ -433,24 +485,23 @@ partial def expr (e : Expr) : LM Opd := do
     let d ← newTmp n
     emit (.ext n (.tmp d) m o)
     return .tmp d
-  | _ =>
-    let d ← newTmp (← size (← tyOf e))
-    exprTo (.tmp d) e
+  | e' =>
+    let d ← newTmp (← size (← tyOf e'))
+    exprTo (.tmp d) e'
     return .tmp d
+termination_by 3 * SizeOf.sizeOf e + 2
 
 /-- Evaluate into `dst`. -/
-partial def exprTo (dst : Dst) (e : Expr) : LM Unit := do
+def exprTo (dst : Dst) (e : Expr) : LM Unit := do
   let n ← size (← tyOf e)
   if let some v := closed? e then emit (.mov n dst (.const v)); return
-  if let .const v ← (match e with | .var _ => expr e | _ => pure (Opd.tmp 0)) then
+  if let .const v ← (match e with | .var x => varOpd x | _ => pure (Opd.tmp 0)) then
     emit (.mov n dst (.const v)); return
   match e with
   | .lit .. | .blit _ => err "literal not closed"
-  | .var _ | .field _ _ | .index _ _ =>
-    let (a, _) ← place e
-    match a.root, a.idx with
-    | .static s, none => emit (.mov n dst (.slot { s with off := s.off + a.off }))
-    | _, _ => emit (.load n dst a)
+  | .var x => movPlace n dst (← placeVar x)
+  | .field b f => movPlace n dst (← place (.field b f))
+  | .index b i => movPlace n dst (← place (.index b i))
   | .bin op a b =>
     let m ← size (← tyOf a)
     -- the right operand first: the left one is then the value computed last
@@ -512,11 +563,12 @@ partial def exprTo (dst : Dst) (e : Expr) : LM Unit := do
     emit (.br .eq 1 oc (.const 0) l)
     emit (.mov n dst oa)
     emit (.label l)
+termination_by 3 * SizeOf.sizeOf e + 1
 
 end
 
 /-- Jump to `target` when the condition is `sense`. -/
-partial def condJump (e : Expr) (sense : Bool) (target : Nat) : LM Unit := do
+def condJump (e : Expr) (sense : Bool) (target : Nat) : LM Unit := do
   if let some v := closed? e then
     if (v != 0) == sense then emit (.jmp target)
     return
@@ -558,7 +610,7 @@ partial def condJump (e : Expr) (sense : Bool) (target : Nat) : LM Unit := do
 
 /-- A conditional expression must not write its destination before its
 operands are read; anything else may compute straight into a variable. -/
-partial def hasCond : Expr → Bool
+def hasCond : Expr → Bool
   | .cond .. => true
   | .bin _ a b => hasCond a || hasCond b
   | .un _ a => hasCond a
@@ -599,7 +651,7 @@ def withResult (dst : Option Expr) (n : Option Nat) (mk : Option (Nat × Dst) �
       | _, _ => emit (.store n a (.tmp t))
   | _, _ => emit (mk none)
 
-partial def mentions (x : String) : Expr → Bool
+def mentions (x : String) : Expr → Bool
   | .var y => x == y
   | .field b _ => mentions x b
   | .index b i => mentions x b || mentions x i
@@ -609,22 +661,26 @@ partial def mentions (x : String) : Expr → Bool
   | .cond c a b => mentions x c || mentions x a || mentions x b
   | _ => false
 
+/-- The declaration `s` is assigned by the statement after it (a call or
+an effect that does not read it): no need to zero it. -/
+def noZeroFor (s : Stmt) (next : Option Stmt) : Bool :=
+  match s.core, next.map Stmt.core with
+  | .decl x ty none, some (.call (some (.var y)) _ args) => ty.isScalar && x == y && !args.any (mentions x)
+  | .decl x ty none, some (.eff (some (.var y)) _ args) => ty.isScalar && x == y && !args.any (mentions x)
+  | _, _ => false
+
 mutual
 
-partial def block (ss : List Stmt) : LM Unit := inScope do
-  let mut env ← read
-  let mut rest := ss
-  while !rest.isEmpty do
-    let s := rest.head!
-    rest := rest.tail!
-    let noZero := match s.core, rest.head?.map Stmt.core with
-      | .decl x ty none, some (.call (some (.var y)) _ args) => ty.isScalar && x == y && !args.any (mentions x)
-      | .decl x ty none, some (.eff (some (.var y)) _ args) => ty.isScalar && x == y && !args.any (mentions x)
-      | _, _ => false
-    env ← withReader (fun _ => { env with noZero }) (stmt s)
+/-- The statements of a block, in the environment `env` (each statement
+yields the environment of the next). -/
+def blockFrom (env : Env) : List Stmt → LM Unit
+  | [] => pure ()
+  | s :: rest => do
+    let env' ← withReader (fun _ => { env with noZero := noZeroFor s rest.head? }) (stmt s)
+    blockFrom env' rest
 
 /-- One statement; returns the environment for what follows. -/
-partial def stmt (s : Stmt) : LM Env := do
+def stmt (s : Stmt) : LM Env := do
   let env ← read
   match s with
   | .at _ s => stmt s
@@ -666,14 +722,14 @@ partial def stmt (s : Stmt) : LM Env := do
   | .ite c t e =>
     let lElse ← newLabel
     condJump c false lElse
-    block t
+    inScope (blockFrom env t)
     if e.isEmpty then
       emit (.label lElse)
     else
       let lEnd ← newLabel
       emit (.jmp lEnd)
       emit (.label lElse)
-      block e
+      inScope (blockFrom env e)
       emit (.label lEnd)
     return env
   | .forRange x w lo hi body =>
@@ -693,7 +749,7 @@ partial def stmt (s : Stmt) : LM Env := do
       emit (.label top)
       emit (.br .ge n (.slot i) limit done)
       let inner : Env := { env with vars := (x, { ty := .int w, at_ := .static i }) :: env.vars, loopEnd := some done }
-      withReader (fun _ => inner) (block body)
+      withReader (fun _ => inner) (inScope (blockFrom inner body))
       emit (.bin .add n (.slot i) (.slot i) (.const 1))
       emit (.jmp top)
       emit (.label done)
@@ -707,7 +763,7 @@ partial def stmt (s : Stmt) : LM Env := do
       let top ← newLabel
       let done ← newLabel
       emit (.label top)
-      withReader (fun _ => { env with loopEnd := some done }) (block body)
+      withReader (fun _ => { env with loopEnd := some done }) (inScope (blockFrom { env with loopEnd := some done } body))
       emit (.bin .sub n (.slot k) (.slot k) (.const 1))
       emit (.br .ne n (.slot k) (.const 0) top)
       emit (.label done)
@@ -749,9 +805,12 @@ partial def stmt (s : Stmt) : LM Env := do
 
 end
 
+/-- A block: its locals give their bytes back at its end. -/
+def block (ss : List Stmt) : LM Unit := inScope do blockFrom (← read) ss
+
 /-- Drop what cannot run (after a `ret`, `jmp` or `trap`, up to the next
 label), jumps to the next instruction, and labels nothing jumps to. -/
-partial def cleanup (body : Array Instr) : Array Instr := Id.run do
+def cleanupPass (body : Array Instr) : Array Instr := Id.run do
   let mut out : Array Instr := #[]
   let mut dead := false
   for i in body do
@@ -775,7 +834,16 @@ partial def cleanup (body : Array Instr) : Array Instr := Id.run do
   let out3 := out2.filter fun i => match i with
     | .label l => targets.contains l
     | _ => true
-  if out3.size < body.size then cleanup out3 else out3
+  return out3
+
+/-- `cleanupPass` until nothing more goes (every round that goes on is shorter). -/
+def cleanupN : Nat → Array Instr → Array Instr
+  | 0, body => body
+  | n + 1, body =>
+    let out := cleanupPass body
+    if out.size < body.size then cleanupN n out else out
+
+def cleanup (body : Array Instr) : Array Instr := cleanupN (body.size + 1) body
 
 def slotsOverlap (a : Slot) (an : Nat) (b : Slot) (bn : Nat) : Bool :=
   a.area == b.area && a.off < b.off + bn && b.off < a.off + an

@@ -244,7 +244,7 @@ def Prog.global? (p : Prog) (g : String) : Option Global := p.globals.find? (·.
 def Prog.struct? (p : Prog) (s : String) : Option StructDef := p.structs.find? (·.name == s)
 
 /-- Strip span wrappers. -/
-partial def Stmt.core : Stmt → Stmt
+def Stmt.core : Stmt → Stmt
   | .at _ s => s.core
   | s => s
 
