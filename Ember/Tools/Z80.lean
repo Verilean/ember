@@ -1,4 +1,5 @@
 import Ember.Z80.Check
+import Ember.Lang.Examples
 import Ember.Z80.Asm
 import Ember.Net.Loop
 import Ember.Net.Main
@@ -494,6 +495,28 @@ def irReplay (paths : List String) : IO UInt32 := do
   IO.println s!"z80 IR replay: {ran - bad} of {ran} fixtures: the trace of the IR interpreter and of the IR semantics (IR.Sem) = fixture"
   return if bad == 0 then 0 else 1
 
+/-- The IR of the stack, the examples and `count` random programs, with
+and without inlining: to compare two versions of the lowering. -/
+def irDump (count seed : Nat) : IO UInt32 := do
+  let mut progs : List (String × Lang.Prog) :=
+    [("net", Net.prog), ("sliploop", Net.Loop.prog), ("eth", Net.Eth.prog), ("dhcp", Net.Eth.progDhcp)] ++
+      Lang.Examples.all
+  for i in [0:count] do progs := progs ++ [(s!"p{seed + i}", (Lang.Gen.sample (seed + i)).1)]
+  for (n, p) in progs do
+    match p.check with
+    | .error e => IO.println s!"== {n}: {e}"
+    | .ok q =>
+      for inline in [false, true] do
+        match IR.lower q inline with
+        | .error e => IO.println s!"== {n} inline={inline}: {e}"
+        | .ok ir =>
+          IO.println s!"== {n} inline={inline}"
+          for f in ir.fns do
+            IO.println s!"{f.text}  frame={f.frame} tmps={f.tmps} reg={repr f.regParam} inl={f.inlined} dead={f.dead}"
+          for g in ir.globals do
+            IO.println s!"  global {g.name} {g.size} {g.const} {(g.init.map (·.toList)).getD []}"
+  return 0
+
 /-! ## The own back end (plan M6) -/
 
 /-- Compile with the own back end for the test harness. -/
@@ -777,6 +800,7 @@ def main (args : List String) : IO UInt32 := do
       return 0
   | "own-fuzz" :: rest => ownFuzz ((rest.head?.bind (·.toNat?)).getD 500) o.seed o.verbose
   | "ir-replay" :: paths => irReplay paths
+  | "ir-dump" :: rest => irDump ((rest.head?.bind (·.toNat?)).getD 400) o.seed
   | "ir-fuzz" :: rest => irFuzz ((rest.head?.bind (·.toNat?)).getD 1000) o.seed
   | "fuzz" :: rest => fuzz ((rest.head?.bind (·.toNat?)).getD 50) o.seed o.u64 o.verbose
   | ["run", image, fixture] =>

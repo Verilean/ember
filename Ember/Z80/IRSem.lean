@@ -88,70 +88,90 @@ def effect (c : Ctx) (w : World) (e : Effect) (vs : List Nat) : Option Nat × Wo
   | .mmioWrite32 =>
     (none, { w with mmio := w.mmio.insert (UInt32.ofNat (vs.getD 0 0)) (UInt32.ofNat (vs.getD 1 0)) })
 
+/-- What one instruction does. -/
+inductive Step where
+  /-- On to the next instruction. -/
+  | next (st : St) (tmps : Array Nat)
+  | goto (l : Nat)
+  /-- Call `g` from the state `st`, the result to `ret`. -/
+  | call (g : String) (st : St) (ret : Option (Nat × Dst))
+  /-- The function ends. -/
+  | stop (r : Res)
+  deriving Inhabited
+
+def Step.set (r : St × Array Nat) : Step := .next r.1 r.2
+
+/-- The state after a call or an effect: its result stored. -/
+def setRet (c : Ctx) (st : St) (tmps : Array Nat) (ret : Option (Nat × Dst)) (r : Option Nat) : St × Array Nat :=
+  match ret with
+  | some (n, d) => setDst c st tmps n d (r.getD 0)
+  | none => (st, tmps)
+
+def step (c : Ctx) (st : St) (tmps : Array Nat) : Instr → Step
+  | .mov n d src => .set (setDst c st tmps n d (opd c st tmps n src))
+  | .bin op n d a b => .set (setDst c st tmps n d (binOp op n (opd c st tmps n a) (opd c st tmps n b)))
+  | .shift left n d a m amt =>
+    .set (setDst c st tmps n d
+      (if opd c st tmps m amt ≥ 8 * n then 0
+       else if left then modN n (opd c st tmps n a <<< opd c st tmps m amt)
+       else opd c st tmps n a >>> opd c st tmps m amt))
+  | .not n d a => .set (setDst c st tmps n d (2 ^ (8 * n) - 1 - opd c st tmps n a))
+  | .neg n d a => .set (setDst c st tmps n d (modN n (2 ^ (8 * n) - opd c st tmps n a)))
+  | .ext n d m src => .set (setDst c st tmps n d (modN n (opd c st tmps m src)))
+  | .cmp op n d a b =>
+    .set (setDst c st tmps 1 d (if cmpOp op (opd c st tmps n a) (opd c st tmps n b) then 1 else 0))
+  | .br op n a b l => if cmpOp op (opd c st tmps n a) (opd c st tmps n b) then .goto l else .next st tmps
+  | .jmp l => .goto l
+  | .label _ => .next st tmps
+  | .load n d p =>
+    match addr c st tmps p with
+    | some a => .set (setDst c st tmps n d (rd st.mem a n))
+    | none => .stop (.trap st)
+  | .store n p src =>
+    match addr c st tmps p with
+    | some a => .next { st with mem := wr st.mem a n (opd c st tmps n src) } tmps
+    | none => .stop (.trap st)
+  | .lea d p =>
+    match addr c st tmps p with
+    | some a => .set (setDst c st tmps 2 d (a % 65536))
+    | none => .stop (.trap st)
+  | .zero sl n => .next { st with mem := wr st.mem (c.layout.addr sl) n 0 } tmps
+  | .call g ret reg =>
+    .call g
+      (match reg, c.prog.fn? g with
+       | some (n, o), some gf =>
+         match gf.regParam with
+         | some (_, sl) => { st with mem := wr st.mem (c.layout.addr sl) n (opd c st tmps n o) }
+         | none => st
+       | _, _ => st) ret
+  | .eff e args ret =>
+    .set (setRet c { st with world := (effect c st.world e (args.map fun a => opd c st tmps a.1 a.2)).2 } tmps ret
+      (effect c st.world e (args.map fun a => opd c st tmps a.1 a.2)).1)
+  | .ret v => .stop (.ok (v.map fun a => opd c st tmps a.1 a.2) st)
+  | .trap => .stop (.trap st)
+
 mutual
 
 /-- Run `f` from instruction `pc`. -/
 def exec : Nat → Ctx → Fn → Nat → Array Nat → St → Res
   | 0, _, _, _, _, _ => .fuel
   | k + 1, c, f, pc, tmps, st =>
-    let next (r : St × Array Nat) : Res := exec k c f (pc + 1) r.2 r.1
-    let jump (l : Nat) : Res :=
-      match labelAt f l with
-      | some i => exec k c f i tmps st
-      | none => .bad
     match f.body[pc]? with
     | none => .ok none st
     | some ins =>
-      match ins with
-      | .mov n d src => next (setDst c st tmps n d (opd c st tmps n src))
-      | .bin op n d a b => next (setDst c st tmps n d (binOp op n (opd c st tmps n a) (opd c st tmps n b)))
-      | .shift left n d a m amt =>
-        let x := opd c st tmps n a
-        let s := opd c st tmps m amt
-        next (setDst c st tmps n d (if s ≥ 8 * n then 0 else if left then modN n (x <<< s) else x >>> s))
-      | .not n d a => next (setDst c st tmps n d (2 ^ (8 * n) - 1 - opd c st tmps n a))
-      | .neg n d a => next (setDst c st tmps n d (modN n (2 ^ (8 * n) - opd c st tmps n a)))
-      | .ext n d m src => next (setDst c st tmps n d (modN n (opd c st tmps m src)))
-      | .cmp op n d a b =>
-        next (setDst c st tmps 1 d (if cmpOp op (opd c st tmps n a) (opd c st tmps n b) then 1 else 0))
-      | .br op n a b l => if cmpOp op (opd c st tmps n a) (opd c st tmps n b) then jump l else next (st, tmps)
-      | .jmp l => jump l
-      | .label _ => next (st, tmps)
-      | .load n d p =>
-        match addr c st tmps p with
-        | some a => next (setDst c st tmps n d (rd st.mem a n))
-        | none => .trap st
-      | .store n p src =>
-        match addr c st tmps p with
-        | some a => next ({ st with mem := wr st.mem a n (opd c st tmps n src) }, tmps)
-        | none => .trap st
-      | .lea d p =>
-        match addr c st tmps p with
-        | some a => next (setDst c st tmps 2 d (a % 65536))
-        | none => .trap st
-      | .zero sl n => next ({ st with mem := wr st.mem (c.layout.addr sl) n 0 }, tmps)
-      | .call g ret reg =>
-        let st1 : St :=
-          match reg, c.prog.fn? g with
-          | some (n, o), some gf =>
-            match gf.regParam with
-            | some (_, sl) => { st with mem := wr st.mem (c.layout.addr sl) n (opd c st tmps n o) }
-            | none => st
-          | _, _ => st
+      match step c st tmps ins with
+      | .next st' tmps' => exec k c f (pc + 1) tmps' st'
+      | .goto l =>
+        match labelAt f l with
+        | some i => exec k c f i tmps st
+        | none => .bad
+      | .call g st1 ret =>
         match callF k c g st1 with
-        | .ok r st2 =>
-          match ret with
-          | some (n, d) => next (setDst c st2 tmps n d (r.getD 0))
-          | none => next (st2, tmps)
-        | r => r
-      | .eff e args ret =>
-        let r := effect c st.world e (args.map fun a => opd c st tmps a.1 a.2)
-        let st2 : St := { st with world := r.2 }
-        match ret with
-        | some (n, d) => next (setDst c st2 tmps n d (r.1.getD 0))
-        | none => next (st2, tmps)
-      | .ret v => .ok (v.map fun a => opd c st tmps a.1 a.2) st
-      | .trap => .trap st
+        | .ok r st2 => exec k c f (pc + 1) (setRet c st2 tmps ret r).2 (setRet c st2 tmps ret r).1
+        | .trap st2 => .trap st2
+        | .fuel => .fuel
+        | .bad => .bad
+      | .stop r => r
 
 def callF : Nat → Ctx → String → St → Res
   | 0, _, _, _ => .fuel

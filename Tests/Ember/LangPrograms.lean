@@ -184,10 +184,29 @@ ember def call_changes_index := do
 def p3 : Prog :=
   { globals := [big, gi], fns := [bump, call_changes_index], entry := "call_changes_index" }
 
+ember global g3 : [u8; 3]
+
+/-- Found proving the lowering to the Z80 back end's IR (M7.1): `&&` is
+strict, so an operand that traps must trap even when the other one
+decides.  The lowering jumped past an operand it took for one that
+cannot trap: an index that is constant but not a literal (here `1 + 2`,
+out of range). -/
+ember def strict_and := do
+  let k : u16 ← input.next()
+  if k == 0xFFFF then
+    return
+  if (k == 0) && (g3[(1 : u8) + 2] == 0) then
+    out.byte(1)
+  out.byte(2)
+  out.end()
+
+def p4 : Prog := { globals := [g3], fns := [strict_and], entry := "strict_and" }
+
 def progs : List (String × Prog × Array Ember.Trace.Input) :=
   [("regress_trap_after_event", p1, #[.rx (ByteArray.mk #[0xf1])]),
    ("regress_call_then_trap", p2, #[.rx (ByteArray.mk #[0x5c])]),
-   ("regress_call_changes_index", p3, #[.rx (ByteArray.mk #[0x64])])]
+   ("regress_call_changes_index", p3, #[.rx (ByteArray.mk #[0x64])]),
+   ("regress_strict_and", p4, #[.rx (ByteArray.mk #[0x64])])]
 
 end Regress
 

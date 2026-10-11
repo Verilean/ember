@@ -226,29 +226,35 @@ def sizeOf (p : Lang.Prog) : Ty → Nat
   | .arr el n => n * sizeOf p el
   | .record r => ((p.struct? r).map (·.fields)).getD [] |>.foldl (fun acc (_, t) => acc + sizeOf0 t) 0
 
-def fieldOff (p : Lang.Prog) (r f : String) : Option (Nat × Ty) := Id.run do
-  let mut off := 0
-  for (g, t) in ((p.struct? r).map (·.fields)).getD [] do
-    if g == f then return some (off, t)
-    off := off + sizeOf p t
-  return none
+/-- Offset and type of the field `f` among `fs`, the first of which is at `off`. -/
+def fieldOffIn (p : Lang.Prog) : List (String × Ty) → String → Nat → Option (Nat × Ty)
+  | [], _, _ => none
+  | (g, t) :: rest, f, off => if g == f then some (off, t) else fieldOffIn p rest f (off + sizeOf p t)
+
+def fieldOff (p : Lang.Prog) (r f : String) : Option (Nat × Ty) :=
+  fieldOffIn p (((p.struct? r).map (·.fields)).getD []) f 0
 
 /-- The parameter that travels in a register: the last one that is one or
 two bytes by value. -/
 def regParamOf (p : Lang.Prog) (f : Lang.Fn) : Option String :=
   (f.params.reverse.find? fun prm => !prm.byRef && sizeOf p prm.ty ≤ 2).map (·.name)
 
-/-- Offsets of the parameters in the frame, and the bytes they take: a
+/-- Offsets of parameters from `off` on, and the first byte after them: a
 by-reference parameter is an address. -/
-def paramSlots (p : Lang.Prog) (f : Lang.Fn) : List (Lang.Param × Nat) × Nat := Id.run do
-  let mut off := 0
-  let mut out := #[]
-  for prm in f.params do
-    out := out.push (prm, off)
-    off := off + (if prm.byRef then 2 else sizeOf p prm.ty)
-  return (out.toList, off)
+def paramSlotsFrom (p : Lang.Prog) : List Lang.Param → Nat → List (Lang.Param × Nat) × Nat
+  | [], off => ([], off)
+  | prm :: rest, off =>
+    let r := paramSlotsFrom p rest (off + (if prm.byRef then 2 else sizeOf p prm.ty))
+    ((prm, off) :: r.1, r.2)
 
-/-! ## Lowering -/
+/-- Offsets of the parameters in the frame, and the bytes they take. -/
+def paramSlots (p : Lang.Prog) (f : Lang.Fn) : List (Lang.Param × Nat) × Nat := paramSlotsFrom p f.params 0
+
+/-! ## Lowering
+
+The functions below are written so that they can be reasoned about
+(`Ember/Proof/IR*.lean`): the primitives of the monad are plain
+functions, and every `match` and `if` is in tail position. -/
 
 inductive Storage where
   | static (s : Slot)
@@ -266,9 +272,6 @@ structure Env where
   vars : List (String × VarInfo) := []
   /-- Label of the end of the innermost loop. -/
   loopEnd : Option Nat := none
-  /-- The declaration being lowered is assigned by the next statement (a
-  call or an effect that does not read it): no need to zero it. -/
-  noZero : Bool := false
 
 structure LS where
   out : Array Instr := #[]
@@ -281,45 +284,35 @@ structure LS where
 
 abbrev LM := ReaderT Env (StateT LS (Except String))
 
-def err (msg : String) : LM α := do throw s!"{(← read).fn}: {msg}"
-def emit (i : Instr) : LM Unit := modify fun s => { s with out := s.out.push i }
+def err {α : Type} (msg : String) : LM α := fun e _ => .error s!"{e.fn}: {msg}"
 
-def newTmp (n : Nat) : LM Nat := do
-  let s ← get
-  set { s with tmps := s.tmps.push n }
-  return s.tmps.size
+def emit (i : Instr) : LM Unit := fun _ s => .ok ((), { s with out := s.out.push i })
 
-def newLabel : LM Nat := do
-  let s ← get
-  set { s with labels := s.labels + 1 }
-  return s.labels
+def newTmp (n : Nat) : LM Nat := fun _ s => .ok (s.tmps.size, { s with tmps := s.tmps.push n })
 
-def allocLocal (n : Nat) : LM Slot := do
-  let s ← get
-  let cur := s.cur + n
-  set { s with cur, max := Nat.max s.max cur }
-  return { area := .frame (← read).fn, off := s.cur }
+def newLabel : LM Nat := fun _ s => .ok (s.labels, { s with labels := s.labels + 1 })
+
+def allocLocal (n : Nat) : LM Slot := fun e s =>
+  .ok ({ area := .frame e.fn, off := s.cur }, { s with cur := s.cur + n, max := Nat.max s.max (s.cur + n) })
 
 /-- Locals of a block give their bytes back at its end. -/
-def inScope (m : LM α) : LM α := do
-  let mark := (← get).cur
-  let r ← m
-  modify fun s => { s with cur := mark }
-  return r
+def inScope {α : Type} (m : LM α) : LM α := fun e s =>
+  match m e s with
+  | .ok (r, s') => .ok (r, { s' with cur := s.cur })
+  | .error msg => .error msg
 
-def trapLabel : LM Nat := do
-  if let some l := (← get).trapLabel then return l
-  let l ← newLabel
-  modify fun s => { s with trapLabel := some l }
-  return l
+def trapLabel : LM Nat := fun _ s =>
+  match s.trapLabel with
+  | some l => .ok (l, s)
+  | none => .ok (s.labels, { s with labels := s.labels + 1, trapLabel := some s.labels })
 
 /-- What only reads the environment, as an action. -/
-def pureE (m : Env → Except String α) : LM α := fun e s =>
+def pureE {α : Type} (m : Env → Except String α) : LM α := fun e s =>
   match m e with
   | .ok a => .ok (a, s)
   | .error msg => .error msg
 
-def Env.err (e : Env) (msg : String) : Except String α := .error s!"{e.fn}: {msg}"
+def Env.err {α : Type} (e : Env) (msg : String) : Except String α := .error s!"{e.fn}: {msg}"
 
 def Env.varInfo (e : Env) (x : String) : Except String VarInfo :=
   match e.vars.lookup x with
@@ -360,7 +353,7 @@ def Env.tyOf (g : Env) : Expr → Except String Ty
 
 def tyOf (e : Expr) : LM Ty := pureE (·.tyOf e)
 
-def size (t : Ty) : LM Nat := do return sizeOf (← read).prog t
+def size (t : Ty) : LM Nat := fun e s => .ok (sizeOf e.prog t, s)
 
 /-- The value of a closed expression (no variables), as its bytes. -/
 def closed? (e : Expr) : Option Nat :=
@@ -369,9 +362,10 @@ def closed? (e : Expr) : Option Nat :=
   | some (.bool b) => some (if b then 1 else 0)
   | _ => none
 
-/-- Can evaluating the expression trap?  (An index that is not a constant.) -/
+/-- Can evaluating the expression trap?  (An index that is not a literal:
+the checker has a literal index within the array.) -/
 def canTrap : Expr → Bool
-  | .index b i => (closed? i).isNone || canTrap b
+  | .index b i => (match i with | .lit _ _ => false | _ => true) || canTrap b
   | .field b _ => canTrap b
   | .bin _ a b => canTrap a || canTrap b
   | .un _ a => canTrap a
@@ -387,27 +381,35 @@ def isSimple : Opd → Bool
 def placeVar (x : String) : LM (Addr × Ty) := do
   let v ← varInfo x
   match v.at_ with
-  | .static s => return ({ root := .static s }, v.ty)
-  | .ref p => return ({ root := .ptr p }, v.ty)
+  | .static s => pure ({ root := .static s }, v.ty)
+  | .ref p => pure ({ root := .ptr p }, v.ty)
 
 /-- The value of a constant global, when `x` is one. -/
-def constVar? (x : String) : LM (Option Nat) := do
-  let env ← read
-  if (env.vars.lookup x).isNone then
-    if let some g := env.prog.global? x then
+def Env.constVar? (env : Env) (x : String) : Option Nat :=
+  match env.vars.lookup x with
+  | some _ => none
+  | none =>
+    match env.prog.global? x with
+    | some g =>
       if g.const && g.ty.isScalar then
-        return some (match g.init with | [v] => v % 2 ^ (8 * sizeOf env.prog g.ty) | _ => 0)
-  return none
+        some (match g.init with | [v] => v % 2 ^ (8 * sizeOf env.prog g.ty) | _ => 0)
+      else none
+    | none => none
+
+def constVar? (x : String) : LM (Option Nat) := fun e s => .ok (e.constVar? x, s)
+
+/-- A place loaded into a new temporary. -/
+def loadTmp (r : Addr × Ty) : LM Opd := do
+  let n ← size r.2
+  let d ← newTmp n
+  emit (.load n (.tmp d) r.1)
+  pure (.tmp d)
 
 /-- A place as an operand: its slot, or a temporary loaded from it. -/
-def loadPlace (r : Addr × Ty) : LM Opd := do
-  let (a, t) := r
-  match a.root, a.idx with
-  | .static s, none => return .slot { s with off := s.off + a.off }
-  | _, _ =>
-    let d ← newTmp (← size t)
-    emit (.load (← size t) (.tmp d) a)
-    return .tmp d
+def loadPlace (r : Addr × Ty) : LM Opd :=
+  match r.1.root, r.1.idx with
+  | .static s, none => pure (.slot { s with off := s.off + r.1.off })
+  | _, _ => loadTmp r
 
 /-- A place's value into `dst`. -/
 def movPlace (n : Nat) (dst : Dst) (r : Addr × Ty) : LM Unit :=
@@ -417,196 +419,290 @@ def movPlace (n : Nat) (dst : Dst) (r : Addr × Ty) : LM Unit :=
 
 /-- A variable as an operand. -/
 def varOpd (x : String) : LM Opd := do
-  if let some v ← constVar? x then return .const v
-  loadPlace (← placeVar x)
+  match (← constVar? x) with
+  | some v => pure (.const v)
+  | none => do loadPlace (← placeVar x)
+
+/-- `o` (of `m` bytes) in a new temporary of `n`. -/
+def extTmp (n m : Nat) (o : Opd) : LM Opd := do
+  let d ← newTmp n
+  emit (.ext n (.tmp d) m o)
+  pure (.tmp d)
+
+/-- The low two bytes of a wide index. -/
+def lowIdx (m : Nat) (o : Opd) : LM Opd :=
+  match o with
+  | .slot s => pure (.slot s)
+  | .const v => extTmp 2 m (.const v)
+  | .tmp t => extTmp 2 m (.tmp t)
+
+/-- A cast of an operand: the low bytes of a variable are the variable
+(little-endian). -/
+def castOpd (n m : Nat) (o : Opd) : LM Opd :=
+  match o with
+  | .slot s => if n ≤ m then pure (.slot s) else extTmp n m (.slot s)
+  | .tmp t => if n == m then pure (.tmp t) else extTmp n m (.tmp t)
+  | .const v => extTmp n m (.const v)
+
+def pow2? : Opd → Option Nat
+  | .const v => if v == 2 ^ v.log2 then some v.log2 else none
+  | _ => none
+
+/-- A temporary on the left, where the code generator has it at hand. -/
+def arithI (k : Bin) (n : Nat) (dst : Dst) (oa ob : Opd) : Instr :=
+  if k.commutes && isSimple oa && !isSimple ob then .bin k n dst ob oa else .bin k n dst oa ob
+
+/-- By a power of two: a shift or a mask. -/
+def scaledI (k : Bin) (n : Nat) (dst : Dst) (oa ob : Opd) : Instr :=
+  match k, pow2? oa, pow2? ob with
+  | .mul, _, some s => .shift true n dst oa 1 (.const s)
+  | .mul, some s, none => .shift true n dst ob 1 (.const s)
+  | .div, _, some s => .shift false n dst oa 1 (.const s)
+  | .mod, _, some s => .bin .and n dst oa (.const (2 ^ s - 1))
+  | k, _, _ => arithI k n dst oa ob
+
+/-- The instruction of a binary operator: the result has `n` bytes, the
+operands of a comparison `m`, a shift amount `sm`. -/
+def binI (op : BinOp) (n m sm : Nat) (dst : Dst) (oa ob : Opd) : Instr :=
+  match op with
+  | .add => arithI .add n dst oa ob
+  | .sub => arithI .sub n dst oa ob
+  | .mul => scaledI .mul n dst oa ob
+  | .div => scaledI .div n dst oa ob
+  | .mod => scaledI .mod n dst oa ob
+  | .band => arithI .and n dst oa ob
+  | .land => arithI .and n dst oa ob
+  | .bor => arithI .or n dst oa ob
+  | .lor => arithI .or n dst oa ob
+  | .bxor => arithI .xor n dst oa ob
+  | .shl => .shift true n dst oa sm ob
+  | .shr => .shift false n dst oa sm ob
+  | .eq => .cmp .eq m dst oa ob
+  | .ne => .cmp .ne m dst oa ob
+  | .lt => .cmp .lt m dst oa ob
+  | .ge => .cmp .ge m dst oa ob
+  | .le => .cmp .ge m dst ob oa
+  | .gt => .cmp .lt m dst ob oa
+
+def unI (op : UnOp) (n : Nat) (dst : Dst) (o : Opd) : Instr :=
+  match op with
+  | .lnot => .bin .xor 1 dst o (.const 1)
+  | .bnot => .not n dst o
+  | .neg => .neg n dst o
+
+def castI (n m : Nat) (dst : Dst) (o : Opd) : Instr :=
+  if n == m then .mov n dst o
+  else if n < m then
+    match o with
+    | .slot s => .mov n dst (.slot s)
+    | o => .ext n dst m o
+  else .ext n dst m o
 
 mutual
 
 /-- Where a place is. -/
-def place (e : Expr) : LM (Addr × Ty) := do
+def place (e : Expr) : LM (Addr × Ty) :=
   match e with
   | .var x => placeVar x
-  | .field b f =>
-    let (a, t) ← place b
-    let .record r := t | err "field of a non-record"
-    let some (off, ft) := fieldOff (← read).prog r f | err s!"no field {f}"
-    return ({ a with off := a.off + off }, ft)
-  | .index b i =>
-    let (a, t) ← place b
-    let .arr el n := t | err "index of a non-array"
-    let scale ← size el
-    if a.idx.isSome then err "nested arrays"
-    if let some v := closed? i then
-      if v < n then return ({ a with off := a.off + v * scale }, el)
-      -- a constant index out of range: the trap, and any address after it
-      emit .trap
-      return (a, el)
-    let .int iw ← tyOf i | err "non-integer index"
-    let m := iw.bits / 8
-    let o ← expr i
-    if m ≤ 2 then
-      let len := if n ≥ 2 ^ iw.bits then none else some n
-      return ({ a with idx := some { opd := o, size := m, scale, len } }, el)
-    -- a wide index: compared as it is, then its low two bytes
-    emit (.br .ge m o (.const n) (← trapLabel))
-    let lowOpd ← match o with
-      | .slot s => pure (Opd.slot s)
-      | o =>
-        let t ← newTmp 2
-        emit (.ext 2 (.tmp t) m o)
-        pure (.tmp t)
-    return ({ a with idx := some { opd := lowOpd, size := 2, scale, len := none } }, el)
-  | _ => err "not a place"
+  | .field b f => do
+    let r ← place b
+    match r.2 with
+    | .record rn => do
+      let env ← read
+      match fieldOff env.prog rn f with
+      | some (off, ft) => pure ({ r.1 with off := r.1.off + off }, ft)
+      | none => err s!"no field {f}"
+    | _ => err "field of a non-record"
+  | .index b i => do
+    let r ← place b
+    match r.2 with
+    | .arr el n => do
+      let scale ← size el
+      if r.1.idx.isSome then err "nested arrays"
+      else
+        match closed? i with
+        | some v =>
+          if v < n then pure ({ r.1 with off := r.1.off + v * scale }, el)
+          else do
+            -- a constant index out of range: the trap, and any address after it
+            emit .trap
+            pure (r.1, el)
+        | none => do
+          let it ← tyOf i
+          match it with
+          | .int iw => do
+            let o ← expr i
+            if iw.bits / 8 ≤ 2 then
+              pure ({ r.1 with idx := some { opd := o, size := iw.bits / 8, scale,
+                                             len := if n ≥ 2 ^ iw.bits then none else some n } }, el)
+            else do
+              -- a wide index: compared as it is, then its low two bytes
+              let tl ← trapLabel
+              emit (.br .ge (iw.bits / 8) o (.const n) tl)
+              let low ← lowIdx (iw.bits / 8) o
+              pure ({ r.1 with idx := some { opd := low, size := 2, scale, len := none } }, el)
+          | _ => err "non-integer index"
+    | _ => err "index of a non-array"
+  | .lit _ _ => err "not a place"
+  | .blit _ => err "not a place"
+  | .bin _ _ _ => err "not a place"
+  | .un _ _ => err "not a place"
+  | .cast _ _ => err "not a place"
+  | .cond _ _ _ => err "not a place"
 termination_by 3 * SizeOf.sizeOf e
 
 /-- The expression as an operand: a constant or a variable as it is,
 anything else in a new temporary. -/
-def expr (e : Expr) : LM Opd := do
-  if let some v := closed? e then return .const v
-  match e with
+def expr (e : Expr) : LM Opd :=
+  match closed? e with
   -- a constant is its value
-  | .var x => varOpd x
-  | .field b f => loadPlace (← place (.field b f))
-  | .index b i => loadPlace (← place (.index b i))
-  | .cast w a =>
-    let n := w.bits / 8
-    let m ← size (← tyOf a)
-    -- `(x >>> 8k : narrower)` of a variable is its bytes from `k` on
-    if let .bin .shr x k := a then
-      if let some kv := closed? k then
-        if kv % 8 == 0 && kv / 8 + n ≤ m then
-          if let .slot s ← expr x then return .slot { s with off := s.off + kv / 8 }
-    let o ← expr a
-    -- the low bytes of a variable are the variable (little-endian)
-    match o with
-    | .slot s => if n ≤ m then return .slot s
-    | .tmp _ => if n == m then return o
-    | _ => pure ()
-    let d ← newTmp n
-    emit (.ext n (.tmp d) m o)
-    return .tmp d
-  | e' =>
-    let d ← newTmp (← size (← tyOf e'))
-    exprTo (.tmp d) e'
-    return .tmp d
+  | some v => pure (.const v)
+  | none =>
+    match e with
+    | .var x => varOpd x
+    | .field b f => do loadPlace (← place (.field b f))
+    | .index b i => do loadPlace (← place (.index b i))
+    | .cast w a => do
+      let m ← size (← tyOf a)
+      -- `(x >>> 8k : narrower)` of a variable is its bytes from `k` on
+      let short ← (match a with
+        | .bin .shr x k =>
+          match closed? k with
+          | some kv =>
+            if kv % 8 == 0 && kv / 8 + w.bits / 8 ≤ m then do
+              let o ← expr x
+              match o with
+              | .slot s => pure (some (Opd.slot { s with off := s.off + kv / 8 }))
+              | _ => pure none
+            else pure none
+          | none => pure none
+        | _ => pure none)
+      match short with
+      | some o => pure o
+      | none => do
+        let o ← expr a
+        castOpd (w.bits / 8) m o
+    | .lit v w => do
+      let d ← newTmp (← size (← tyOf (.lit v w)))
+      exprTo (.tmp d) (.lit v w)
+      pure (.tmp d)
+    | .blit b => do
+      let d ← newTmp (← size (← tyOf (.blit b)))
+      exprTo (.tmp d) (.blit b)
+      pure (.tmp d)
+    | .bin op a b => do
+      let d ← newTmp (← size (← tyOf (.bin op a b)))
+      exprTo (.tmp d) (.bin op a b)
+      pure (.tmp d)
+    | .un op a => do
+      let d ← newTmp (← size (← tyOf (.un op a)))
+      exprTo (.tmp d) (.un op a)
+      pure (.tmp d)
+    | .cond c a b => do
+      let d ← newTmp (← size (← tyOf (.cond c a b)))
+      exprTo (.tmp d) (.cond c a b)
+      pure (.tmp d)
 termination_by 3 * SizeOf.sizeOf e + 2
 
 /-- Evaluate into `dst`. -/
 def exprTo (dst : Dst) (e : Expr) : LM Unit := do
   let n ← size (← tyOf e)
-  if let some v := closed? e then emit (.mov n dst (.const v)); return
-  if let .const v ← (match e with | .var x => varOpd x | _ => pure (Opd.tmp 0)) then
-    emit (.mov n dst (.const v)); return
-  match e with
-  | .lit .. | .blit _ => err "literal not closed"
-  | .var x => movPlace n dst (← placeVar x)
-  | .field b f => movPlace n dst (← place (.field b f))
-  | .index b i => movPlace n dst (← place (.index b i))
-  | .bin op a b =>
-    let m ← size (← tyOf a)
-    -- the right operand first: the left one is then the value computed last
-    let ob ← expr b
-    let oa ← expr a
-    let arith (k : Bin) : LM Unit :=
-      -- a temporary on the left, where the code generator has it at hand
-      if k.commutes && isSimple oa && !isSimple ob then emit (.bin k n dst ob oa) else emit (.bin k n dst oa ob)
-    -- by a power of two: a shift or a mask
-    let pow2 (o : Opd) : Option Nat := match o with
-      | .const v => if v > 0 && v &&& (v - 1) == 0 then some v.log2 else none
-      | _ => none
-    let scaled (k : Bin) : LM Unit :=
-      match k, pow2 oa, pow2 ob with
-      | .mul, _, some s => emit (.shift true n dst oa 1 (.const s))
-      | .mul, some s, none => emit (.shift true n dst ob 1 (.const s))
-      | .div, _, some s => emit (.shift false n dst oa 1 (.const s))
-      | .mod, _, some s => emit (.bin .and n dst oa (.const (2 ^ s - 1)))
-      | k, _, _ => arith k
-    match op with
-    | .add => arith .add | .sub => arith .sub | .mul => scaled .mul
-    | .div => scaled .div | .mod => scaled .mod
-    | .band | .land => arith .and
-    | .bor | .lor => arith .or
-    | .bxor => arith .xor
-    | .shl | .shr =>
-      let sm ← size (← tyOf b)
-      emit (.shift (op == .shl) n dst oa sm ob)
-    | .eq => emit (.cmp .eq m dst oa ob)
-    | .ne => emit (.cmp .ne m dst oa ob)
-    | .lt => emit (.cmp .lt m dst oa ob)
-    | .ge => emit (.cmp .ge m dst oa ob)
-    | .le => emit (.cmp .ge m dst ob oa)
-    | .gt => emit (.cmp .lt m dst ob oa)
-  | .un op a =>
-    let o ← expr a
-    match op with
-    | .lnot => emit (.bin .xor 1 dst o (.const 1))
-    | .bnot => emit (.not n dst o)
-    | .neg => emit (.neg n dst o)
-  | .cast _ a =>
-    let m ← size (← tyOf a)
-    let o ← expr a
-    if n == m then emit (.mov n dst o)
-    else if n < m then
+  match closed? e with
+  | some v => emit (.mov n dst (.const v))
+  | none =>
+    match e with
+    | .lit _ _ => err "literal not closed"
+    | .blit _ => err "literal not closed"
+    | .var x => do
+      let o ← varOpd x
       match o with
-      | .slot s => emit (.mov n dst (.slot s))
-      | o => emit (.ext n dst m o)
-    else emit (.ext n dst m o)
-  | .cond c a b =>
-    -- strict: all three are evaluated
-    let oc ← expr c
-    let oa ← expr a
-    let ob ← expr b
-    let l ← newLabel
-    -- `dst` may be one of the operands' places only if it is a temporary
-    -- of its own, which it is: conditionals into variables go through one
-    emit (.mov n dst ob)
-    emit (.br .eq 1 oc (.const 0) l)
-    emit (.mov n dst oa)
-    emit (.label l)
+      | .const v => emit (.mov n dst (.const v))
+      | _ => do movPlace n dst (← placeVar x)
+    | .field b f => do movPlace n dst (← place (.field b f))
+    | .index b i => do movPlace n dst (← place (.index b i))
+    | .bin op a b => do
+      let m ← size (← tyOf a)
+      -- the right operand first: the left one is then the value computed last
+      let ob ← expr b
+      let oa ← expr a
+      let sm ← (if op.isShift then (do size (← tyOf b)) else pure 0)
+      emit (binI op n m sm dst oa ob)
+    | .un op a => do
+      let o ← expr a
+      emit (unI op n dst o)
+    | .cast _ a => do
+      let m ← size (← tyOf a)
+      let o ← expr a
+      emit (castI n m dst o)
+    | .cond c a b => do
+      -- strict: all three are evaluated
+      let oc ← expr c
+      let oa ← expr a
+      let ob ← expr b
+      let l ← newLabel
+      -- `dst` may be one of the operands' places only if it is a temporary
+      -- of its own, which it is: conditionals into variables go through one
+      emit (.mov n dst ob)
+      emit (.br .eq 1 oc (.const 0) l)
+      emit (.mov n dst oa)
+      emit (.label l)
 termination_by 3 * SizeOf.sizeOf e + 1
 
 end
 
+/-- Jump to `target` when the value of `e` (a `bool`) is `sense`. -/
+def boolJump (e : Expr) (sense : Bool) (target : Nat) : LM Unit := do
+  let o ← expr e
+  emit (.br (if sense then .ne else .eq) 1 o (.const 0) target)
+
+/-- The branch of a comparison; `0 < y` is `y ≠ 0`, `0 ≥ y` is `y = 0`. -/
+def cmpBr (op : BinOp) (sense : Bool) (m : Nat) (oa ob : Opd) (target : Nat) : Instr :=
+  let r : Cmp × Opd × Opd := match op with
+    | .eq => (.eq, oa, ob) | .ne => (.ne, oa, ob)
+    | .lt => (.lt, oa, ob) | .ge => (.ge, oa, ob)
+    | .le => (.ge, ob, oa) | _ => (.lt, ob, oa)
+  let r : Cmp × Opd × Opd := match r.1, r.2.1 with
+    | .lt, .const 0 => (Cmp.ne, r.2.2, Opd.const 0)
+    | .ge, .const 0 => (Cmp.eq, r.2.2, Opd.const 0)
+    | _, _ => r
+  .br (if sense then r.1 else r.1.negate) m r.2.1 r.2.2 target
+
 /-- Jump to `target` when the condition is `sense`. -/
-def condJump (e : Expr) (sense : Bool) (target : Nat) : LM Unit := do
-  if let some v := closed? e then
-    if (v != 0) == sense then emit (.jmp target)
-    return
-  match e with
-  | .un .lnot a => condJump a (!sense) target
-  | .bin op a b =>
-    if op.isCompare then
-      let m ← size (← tyOf a)
-      let ob ← expr b
-      let oa ← expr a
-      let (k, x, y) : Cmp × Opd × Opd := match op with
-        | .eq => (.eq, oa, ob) | .ne => (.ne, oa, ob)
-        | .lt => (.lt, oa, ob) | .ge => (.ge, oa, ob)
-        | .le => (.ge, ob, oa) | _ => (.lt, ob, oa)
-      -- `0 < y` is `y ≠ 0`, `0 ≥ y` is `y = 0`
-      let (k, x, y) := match k, x with
-        | .lt, .const 0 => (Cmp.ne, y, Opd.const 0)
-        | .ge, .const 0 => (Cmp.eq, y, Opd.const 0)
-        | _, _ => (k, x, y)
-      emit (.br (if sense then k else k.negate) m x y target)
-    else if op.isLogic && !canTrap b then
-      -- skipping `b` is not observable
-      let isAnd := op == .land
-      if isAnd != sense then
-        -- and/false, or/true: either operand decides
-        condJump a sense target
-        condJump b sense target
-      else
-        let skip ← newLabel
-        condJump a (!sense) skip
-        condJump b sense target
-        emit (.label skip)
-    else
-      let o ← expr e
-      emit (.br (if sense then .ne else .eq) 1 o (.const 0) target)
-  | _ =>
-    let o ← expr e
-    emit (.br (if sense then .ne else .eq) 1 o (.const 0) target)
+def condJump (e : Expr) (sense : Bool) (target : Nat) : LM Unit :=
+  match closed? e with
+  | some v => if (v != 0) == sense then emit (.jmp target) else pure ()
+  | none =>
+    match e with
+    | .un op a =>
+      match op with
+      | .lnot => condJump a (!sense) target
+      | .bnot => boolJump (.un .bnot a) sense target
+      | .neg => boolJump (.un .neg a) sense target
+    | .bin op a b =>
+      if op.isCompare then do
+        let m ← size (← tyOf a)
+        let ob ← expr b
+        let oa ← expr a
+        emit (cmpBr op sense m oa ob target)
+      else if op.isLogic && !canTrap b then
+        -- skipping `b` is not observable
+        if (op == .land) != sense then do
+          -- and/false, or/true: either operand decides
+          condJump a sense target
+          condJump b sense target
+        else do
+          let skip ← newLabel
+          condJump a (!sense) skip
+          condJump b sense target
+          emit (.label skip)
+      else boolJump (.bin op a b) sense target
+    | .lit v w => boolJump (.lit v w) sense target
+    | .blit b => boolJump (.blit b) sense target
+    | .var x => boolJump (.var x) sense target
+    | .field b f => boolJump (.field b f) sense target
+    | .index b i => boolJump (.index b i) sense target
+    | .cast w a => boolJump (.cast w a) sense target
+    | .cond c a b => boolJump (.cond c a b) sense target
 
 /-- A conditional expression must not write its destination before its
 operands are read; anything else may compute straight into a variable. -/
@@ -620,8 +716,8 @@ def hasCond : Expr → Bool
   | _ => false
 
 /-- Evaluate into a variable's slot. -/
-def exprToSlot (s : Slot) (e : Expr) : LM Unit := do
-  if hasCond e then
+def exprToSlot (s : Slot) (e : Expr) : LM Unit :=
+  if hasCond e then do
     let n ← size (← tyOf e)
     let o ← expr e
     emit (.mov n (.slot s) o)
@@ -629,26 +725,36 @@ def exprToSlot (s : Slot) (e : Expr) : LM Unit := do
 
 def counterSize (n : Nat) : Nat := if n < 256 then 1 else if n < 65536 then 2 else 4
 
+/-- The slot of a place that is a variable with an address of its own. -/
+def plainSlot (e : Expr) : LM (Option Slot) :=
+  match e with
+  | .var x => do
+    let v ← varInfo x
+    match v.at_ with
+    | .static s => pure (some s)
+    | .ref _ => pure none
+  | _ => pure none
+
+/-- `o` to the place `a`. -/
+def storeTo (n : Nat) (a : Addr) (o : Opd) : LM Unit :=
+  match a.root, a.idx with
+  | .static s, none => emit (.mov n (.slot { s with off := s.off + a.off }) o)
+  | _, _ => emit (.store n a o)
+
 /-- Store a call's or an effect's result: the destination is evaluated
 after the call, as the interpreter does. -/
-def withResult (dst : Option Expr) (n : Option Nat) (mk : Option (Nat × Dst) → Instr) : LM Unit := do
+def withResult (dst : Option Expr) (n : Option Nat) (mk : Option (Nat × Dst) → Instr) : LM Unit :=
   match dst, n with
-  | some d, some n =>
+  | some d, some n => do
     -- only the address of a plain variable is known before the call
-    let simple ← match d with
-      | .var x => match (← varInfo x).at_ with
-        | .static s => pure (some s)
-        | _ => pure none
-      | _ => pure none
+    let simple ← plainSlot d
     match simple with
     | some s => emit (mk (some (n, .slot s)))
-    | none =>
+    | none => do
       let t ← newTmp n
       emit (mk (some (n, .tmp t)))
-      let (a, _) ← place d
-      match a.root, a.idx with
-      | .static s, none => emit (.mov n (.slot { s with off := s.off + a.off }) (.tmp t))
-      | _, _ => emit (.store n a (.tmp t))
+      let r ← place d
+      storeTo n r.1 (.tmp t)
   | _, _ => emit (mk none)
 
 def mentions (x : String) : Expr → Bool
@@ -661,13 +767,143 @@ def mentions (x : String) : Expr → Bool
   | .cond c a b => mentions x c || mentions x a || mentions x b
   | _ => false
 
-/-- The declaration `s` is assigned by the statement after it (a call or
-an effect that does not read it): no need to zero it. -/
-def noZeroFor (s : Stmt) (next : Option Stmt) : Bool :=
-  match s.core, next.map Stmt.core with
-  | .decl x ty none, some (.call (some (.var y)) _ args) => ty.isScalar && x == y && !args.any (mentions x)
-  | .decl x ty none, some (.eff (some (.var y)) _ args) => ty.isScalar && x == y && !args.any (mentions x)
-  | _, _ => false
+/-- A declaration with its value. -/
+def declStmt (x : String) (ty : Ty) (init : Option Expr) : LM Env := do
+  let env ← read
+  let n ← size ty
+  let slot ← allocLocal n
+  let _ ← (match init with
+    | some e => exprToSlot slot e
+    | none => if ty.isScalar then emit (.mov n (.slot slot) (.const 0)) else emit (.zero slot n))
+  pure { env with vars := (x, { ty, at_ := .static slot }) :: env.vars }
+
+def assign (l r : Expr) : LM Unit := do
+  let n ← size (← tyOf r)
+  -- the value first, then the place (its index may trap)
+  let plain ← plainSlot l
+  match plain with
+  | some s => exprToSlot s r
+  | none =>
+    if !canTrap l then do
+      -- a fixed place (a field, a constant index): forming it cannot
+      -- trap, so the value may be computed straight into it
+      let a ← place l
+      match a.1.root, a.1.idx with
+      | .static s, none => exprToSlot { s with off := s.off + a.1.off } r
+      | _, _ => do
+        let o ← expr r
+        emit (.store n a.1 o)
+    else do
+      let o ← expr r
+      let a ← place l
+      storeTo n a.1 o
+
+/-- The upper bound of a `for`: a constant, or a slot of its own. -/
+def forLimit (n : Nat) (hi : Expr) : LM Opd :=
+  match closed? hi with
+  | some v => pure (.const v)
+  | none => do
+    let h ← allocLocal n
+    exprToSlot h hi
+    pure (.slot h)
+
+def brkStmt : LM Env := do
+  let env ← read
+  match env.loopEnd with
+  | some l => do
+    emit (.jmp l)
+    pure env
+  | none => err "break outside a loop"
+
+def retStmt (v : Option Expr) : LM Env :=
+  match v with
+  | none => do
+    emit (.ret none)
+    read
+  | some e => do
+    let n ← size (← tyOf e)
+    let o ← expr e
+    emit (.ret (some (n, o)))
+    read
+
+/-- The arguments of a call, into the callee's frame; the one that
+travels in a register is returned (`reg`: found so far). -/
+def callArgs (f : String) (inReg : Option String) : List ((Lang.Param × Nat) × Expr) → Option Expr →
+    LM (Option Expr)
+  | [], reg => pure reg
+  | ((prm, off), a) :: rest, reg =>
+    if prm.byRef then do
+      let r ← place a
+      emit (.lea (.slot { area := .frame f, off }) r.1)
+      callArgs f inReg rest reg
+    else if inReg == some prm.name then callArgs f inReg rest (some a)
+    else do
+      exprToSlot { area := .frame f, off } a
+      callArgs f inReg rest reg
+
+/-- A call up to its instruction, which is still to be given the place
+of the result (whose size is returned). -/
+def callInstr (f : String) (args : List Expr) : LM (Option Nat × (Option (Nat × Dst) → Instr)) := do
+  let env ← read
+  match env.prog.fn? f with
+  | none => err s!"unknown function {f}"
+  | some fd => do
+    let regArg ← callArgs f (regParamOf env.prog fd) ((paramSlots env.prog fd).1.zip args) none
+    -- the register argument last: nothing is computed after it
+    let reg ← (match regArg with
+      | some a => do
+        let n ← size (← tyOf a)
+        let o ← expr a
+        pure (some (n, o))
+      | none => pure none)
+    let rn ← (match fd.ret with
+      | some t => do pure (some (← size t))
+      | none => pure none)
+    pure (rn, fun r => Instr.call f r reg)
+
+def effArgs : List (Ty × Expr) → LM (List (Nat × Opd))
+  | [] => pure []
+  | (t, a) :: rest => do
+    let n ← size t
+    let o ← expr a
+    let os ← effArgs rest
+    pure ((n, o) :: os)
+
+def effInstr (e : Effect) (args : List Expr) : LM (Option Nat × (Option (Nat × Dst) → Instr)) := do
+  let os ← effArgs (e.sig.1.zip args)
+  let rn ← (match e.sig.2 with
+    | some t => do pure (some (← size t))
+    | none => pure none)
+  pure (rn, Instr.eff e os)
+
+/-- A call or an effect whose result goes to a variable declared just before. -/
+inductive Init where
+  | call (f : String) (args : List Expr)
+  | eff (e : Effect) (args : List Expr)
+
+/-- `s` declares a variable without a value and `next` assigns it from a
+call or an effect that does not read it: the two are one declaration
+with that value, and the variable need not be zeroed first. -/
+def declCall? (s : Stmt) (next : Stmt) : Option (String × Ty × Init) :=
+  match s.core, next.core with
+  | .decl x ty none, .call (some (.var y)) f args =>
+    if ty.isScalar && x == y && !args.any (mentions x) then some (x, ty, .call f args) else none
+  | .decl x ty none, .eff (some (.var y)) e args =>
+    if ty.isScalar && x == y && !args.any (mentions x) then some (x, ty, .eff e args) else none
+  | _, _ => none
+
+/-- A declaration with a call's or an effect's result as its value. -/
+def declCall (x : String) (ty : Ty) (i : Init) : LM Env := do
+  let env ← read
+  let n ← size ty
+  let slot ← allocLocal n
+  let r ← (match i with
+    | .call f args => callInstr f args
+    | .eff e args => effInstr e args)
+  let _ ← (match r.1 with
+    | some rn => emit (r.2 (some (rn, .slot slot)))
+    | none => emit (r.2 none))
+  pure { env with vars := (x, { ty, at_ := .static slot }) :: env.vars }
 
 mutual
 
@@ -675,138 +911,86 @@ mutual
 yields the environment of the next). -/
 def blockFrom (env : Env) : List Stmt → LM Unit
   | [] => pure ()
-  | s :: rest => do
-    let env' ← withReader (fun _ => { env with noZero := noZeroFor s rest.head? }) (stmt s)
-    blockFrom env' rest
+  | [s] => do
+    let _ ← withReader (fun _ => env) (stmt s)
+    pure ()
+  | s :: s2 :: rest =>
+    match declCall? s s2 with
+    | some (x, ty, i) => do
+      let env' ← withReader (fun _ => env) (declCall x ty i)
+      blockFrom env' rest
+    | none => do
+      let env' ← withReader (fun _ => env) (stmt s)
+      blockFrom env' (s2 :: rest)
 
 /-- One statement; returns the environment for what follows. -/
-def stmt (s : Stmt) : LM Env := do
-  let env ← read
-  match s with
+def stmt : Stmt → LM Env
   | .at _ s => stmt s
-  | .decl x ty init =>
-    let n ← size ty
-    let slot ← allocLocal n
-    match init, ty.isScalar with
-    | some e, _ => exprToSlot slot e
-    | none, true => unless env.noZero do emit (.mov n (.slot slot) (.const 0))
-    | none, false => emit (.zero slot n)
-    return { env with vars := (x, { ty, at_ := .static slot }) :: env.vars, noZero := false }
-  | .assign l r =>
-    let n ← size (← tyOf r)
-    -- the value first, then the place (its index may trap)
-    let plain ← match l with
-      | .var x => match (← varInfo x).at_ with
-        | .static s => pure (some s)
-        | _ => pure none
-      | _ => pure none
-    match plain with
-    | some s => exprToSlot s r
-    | none =>
-      if !canTrap l then
-        -- a fixed place (a field, a constant index): forming it cannot
-        -- trap, so the value may be computed straight into it
-        let (a, _) ← place l
-        match a.root, a.idx with
-        | .static s, none => exprToSlot { s with off := s.off + a.off } r
-        | _, _ =>
-          let o ← expr r
-          emit (.store n a o)
-      else
-        let o ← expr r
-        let (a, _) ← place l
-        match a.root, a.idx with
-        | .static s, none => emit (.mov n (.slot { s with off := s.off + a.off }) o)
-        | _, _ => emit (.store n a o)
-    return env
-  | .ite c t e =>
+  | .decl x ty init => declStmt x ty init
+  | .assign l r => do
+    assign l r
+    read
+  | .ite c t e => do
+    let env ← read
     let lElse ← newLabel
     condJump c false lElse
     inScope (blockFrom env t)
-    if e.isEmpty then
+    if e.isEmpty then do
       emit (.label lElse)
-    else
+      pure env
+    else do
       let lEnd ← newLabel
       emit (.jmp lEnd)
       emit (.label lElse)
       inScope (blockFrom env e)
       emit (.label lEnd)
-    return env
-  | .forRange x w lo hi body =>
-    let w := w.getD .w32
-    let n := w.bits / 8
-    inScope do
-      let i ← allocLocal n
+      pure env
+  | .forRange x w lo hi body => do
+    let env ← read
+    inScope (do
+      let i ← allocLocal ((w.getD .w32).bits / 8)
       exprToSlot i lo
-      let limit ← match closed? hi with
-        | some v => pure (Opd.const v)
-        | none =>
-          let h ← allocLocal n
-          exprToSlot h hi
-          pure (.slot h)
+      let limit ← forLimit ((w.getD .w32).bits / 8) hi
       let top ← newLabel
       let done ← newLabel
       emit (.label top)
-      emit (.br .ge n (.slot i) limit done)
-      let inner : Env := { env with vars := (x, { ty := .int w, at_ := .static i }) :: env.vars, loopEnd := some done }
-      withReader (fun _ => inner) (inScope (blockFrom inner body))
-      emit (.bin .add n (.slot i) (.slot i) (.const 1))
+      emit (.br .ge ((w.getD .w32).bits / 8) (.slot i) limit done)
+      inScope (blockFrom { env with vars := (x, { ty := .int (w.getD .w32), at_ := .static i }) :: env.vars,
+                                    loopEnd := some done } body)
+      emit (.bin .add ((w.getD .w32).bits / 8) (.slot i) (.slot i) (.const 1))
       emit (.jmp top)
-      emit (.label done)
-    return env
-  | .loop max body =>
-    if max == 0 then return env
-    let n := counterSize max
-    inScope do
-      let k ← allocLocal n
-      emit (.mov n (.slot k) (.const max))
-      let top ← newLabel
-      let done ← newLabel
-      emit (.label top)
-      withReader (fun _ => { env with loopEnd := some done }) (inScope (blockFrom { env with loopEnd := some done } body))
-      emit (.bin .sub n (.slot k) (.slot k) (.const 1))
-      emit (.br .ne n (.slot k) (.const 0) top)
-      emit (.label done)
-    return env
-  | .brk =>
-    let some l := env.loopEnd | err "break outside a loop"
-    emit (.jmp l)
-    return env
-  | .ret none => emit (.ret none); return env
-  | .ret (some e) =>
-    let n ← size (← tyOf e)
-    let o ← expr e
-    emit (.ret (some (n, o)))
-    return env
-  | .call dst f args =>
-    let some fd := env.prog.fn? f | err s!"unknown function {f}"
-    let (slots, _) := paramSlots env.prog fd
-    let inReg := regParamOf env.prog fd
-    let mut regArg : Option Expr := none
-    for ((prm, off), a) in slots.zip args do
-      let ps : Slot := { area := .frame f, off }
-      if prm.byRef then
-        let (addr, _) ← place a
-        emit (.lea (.slot ps) addr)
-      else if inReg == some prm.name then regArg := some a
-      else exprToSlot ps a
-    -- the register argument last: nothing is computed after it
-    let reg ← regArg.mapM fun a => do return (← size (← tyOf a), ← expr a)
-    let rn ← fd.ret.mapM size
-    withResult dst rn (fun r => Instr.call f r reg)
-    return env
-  | .eff dst e args =>
-    let mut os := #[]
-    for (t, a) in e.sig.1.zip args do
-      os := os.push (← size t, ← expr a)
-    let rn ← e.sig.2.mapM size
-    withResult dst rn (Instr.eff e os.toList)
-    return env
+      emit (.label done))
+    pure env
+  | .loop max body => do
+    let env ← read
+    if max == 0 then pure env
+    else do
+      inScope (do
+        let k ← allocLocal (counterSize max)
+        emit (.mov (counterSize max) (.slot k) (.const max))
+        let top ← newLabel
+        let done ← newLabel
+        emit (.label top)
+        inScope (blockFrom { env with loopEnd := some done } body)
+        emit (.bin .sub (counterSize max) (.slot k) (.slot k) (.const 1))
+        emit (.br .ne (counterSize max) (.slot k) (.const 0) top)
+        emit (.label done))
+      pure env
+  | .brk => brkStmt
+  | .ret v => retStmt v
+  | .call dst f args => do
+    let r ← callInstr f args
+    withResult dst r.1 r.2
+    read
+  | .eff dst e args => do
+    let r ← effInstr e args
+    withResult dst r.1 r.2
+    read
 
 end
 
 /-- A block: its locals give their bytes back at its end. -/
-def block (ss : List Stmt) : LM Unit := inScope do blockFrom (← read) ss
+def block (ss : List Stmt) : LM Unit := inScope fun e => blockFrom e ss e
 
 /-- Drop what cannot run (after a `ret`, `jmp` or `trap`, up to the next
 label), jumps to the next instruction, and labels nothing jumps to. -/
@@ -891,23 +1075,51 @@ def dropChecks (body : Array Instr) : Array Instr := Id.run do
         (match r with | some (n, d) => written d n fs | none => fs)
   return out
 
-def lowerFn (p : Lang.Prog) (f : Lang.Fn) : Except String Fn := do
-  let (slots, psize) := paramSlots p f
-  let vars := slots.map fun (prm, off) =>
-    let s : Slot := { area := .frame f.name, off }
-    (prm.name, ({ ty := prm.ty, at_ := if prm.byRef then .ref s else .static s } : VarInfo))
-  let env : Env := { prog := p, fn := f.name, vars := vars.reverse }
-  let act : LM Unit := do
-    block f.body
-    -- a function without a result may run off its end
-    emit (.ret none)
-    if let some l := (← get).trapLabel then
-      emit (.label l)
-      emit .trap
-  let ((), st) ← (act.run env).run { cur := psize, max := psize }
-  let regParam := (regParamOf p f).bind fun x =>
-    (slots.find? (·.1.name == x)).map fun (prm, off) => (sizeOf p prm.ty, ({ area := .frame f.name, off } : Slot))
-  return { name := f.name, regParam, frame := st.max, body := dropChecks (cleanup st.out), tmps := st.tmps }
+/-- The trap that index checks jump to, when there is one. -/
+def trapEpilogue : LM Unit := fun _ s =>
+  match s.trapLabel with
+  | some l => .ok ((), { s with out := (s.out.push (.label l)).push .trap })
+  | none => .ok ((), s)
+
+/-- The body of a function; one without a result may run off its end. -/
+def lowerBody (ss : List Stmt) : LM Unit := do
+  block ss
+  emit (.ret none)
+  trapEpilogue
+
+def paramVars (fn : String) (slots : List (Lang.Param × Nat)) : List (String × VarInfo) :=
+  slots.map fun (prm, off) =>
+    (prm.name, { ty := prm.ty,
+                 at_ := if prm.byRef then .ref { area := .frame fn, off } else .static { area := .frame fn, off } })
+
+/-- The environment a function's body is lowered in. -/
+def fnEnv (p : Lang.Prog) (f : Lang.Fn) : Env :=
+  { prog := p, fn := f.name, vars := (paramVars f.name (paramSlots p f).1).reverse }
+
+def regParamSlot (p : Lang.Prog) (f : Lang.Fn) : Option (Nat × Slot) :=
+  (regParamOf p f).bind fun x =>
+    ((paramSlots p f).1.find? (·.1.name == x)).map fun (prm, off) =>
+      (sizeOf p prm.ty, ({ area := .frame f.name, off } : Slot))
+
+/-- A function as it is lowered, before `cleanup` and `dropChecks`. -/
+def lowerFnRaw (p : Lang.Prog) (f : Lang.Fn) : Except String Fn :=
+  match lowerBody f.body (fnEnv p f) { cur := (paramSlots p f).2, max := (paramSlots p f).2 } with
+  | .ok (_, st) =>
+    .ok { name := f.name, regParam := regParamSlot p f, frame := st.max, body := st.out, tmps := st.tmps }
+  | .error e => .error e
+
+/-- The labels a body defines. -/
+def labelsOf (body : Array Instr) : List Nat :=
+  body.toList.filterMap fun i => match i with | .label l => some l | _ => none
+
+/-- The body is tidied once it is checked that no label is defined
+twice (which the lowering never does; the proofs take it from here). -/
+def lowerFn (p : Lang.Prog) (f : Lang.Fn) : Except String Fn :=
+  match lowerFnRaw p f with
+  | .ok r =>
+    if (labelsOf r.body).Nodup then .ok { r with body := dropChecks (cleanup r.body) }
+    else .error s!"{f.name}: a label is defined twice"
+  | .error e => .error e
 
 /-! ## Inlining
 
