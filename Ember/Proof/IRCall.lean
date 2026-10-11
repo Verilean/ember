@@ -388,6 +388,8 @@ end
 /-- The context's program is the lowering of `lp`, as emitted. -/
 structure Lowered (lp : Prog) (c : Ctx) : Prop where
   fns : ∀ g fd, lp.fn? g = some fd → ∃ gf, c.prog.fn? g = some gf ∧ lowerFnRaw lp fd = .ok gf
+  /-- No label is defined twice (`IR.lowerFn` checks it). -/
+  uniq : ∀ g gf, c.prog.fn? g = some gf → (labelsOf gf.body).Nodup
   drops : c.dropReasons = lp.dropReasons
   notes : c.notes = lp.notes
 
