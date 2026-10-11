@@ -1122,13 +1122,19 @@ def lowerFnRaw (p : Lang.Prog) (f : Lang.Fn) : Except String Fn :=
 def labelsOf (body : Array Instr) : List Nat :=
   body.toList.filterMap fun i => match i with | .label l => some l | _ => none
 
-/-- The body is tidied once it is checked that no label is defined
+/-- The function as lowered, once it is checked that no label is defined
 twice (which the lowering never does; the proofs take it from here). -/
-def lowerFn (p : Lang.Prog) (f : Lang.Fn) : Except String Fn :=
+def lowerFnChecked (p : Lang.Prog) (f : Lang.Fn) : Except String Fn :=
   match lowerFnRaw p f with
-  | .ok r =>
-    if (labelsOf r.body).Nodup then .ok { r with body := dropChecks (cleanup r.body) }
-    else .error s!"{f.name}: a label is defined twice"
+  | .ok r => if (labelsOf r.body).Nodup then .ok r else .error s!"{f.name}: a label is defined twice"
+  | .error e => .error e
+
+/-- The body, tidied. -/
+def tidy (r : Fn) : Fn := { r with body := dropChecks (cleanup r.body) }
+
+def lowerFn (p : Lang.Prog) (f : Lang.Fn) : Except String Fn :=
+  match lowerFnChecked p f with
+  | .ok r => .ok (tidy r)
   | .error e => .error e
 
 /-! ## Inlining
@@ -1230,6 +1236,13 @@ def lowerGlobal (p : Lang.Prog) (g : Lang.Global) : Global :=
   let init := if bytes.all (· == 0) then none
     else some (ByteArray.mk (bytes ++ List.replicate (size - bytes.length) 0).toArray)
   { name := g.name, size, init, const := g.const }
+
+/-- The program as lowered, before the bodies are tidied (what
+`Ember/Proof/IRSim.lean` is about). -/
+def lowerRaw (p : Lang.Prog) : Except String Prog :=
+  match p.fns.mapM (lowerFnChecked p) with
+  | .ok fns => .ok { globals := p.globals.map (lowerGlobal p), fns, entry := p.entry }
+  | .error e => .error e
 
 /-- Lower a checked program. -/
 def lower (p : Lang.Prog) (inline := false) : Except String Prog := do

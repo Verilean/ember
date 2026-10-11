@@ -303,7 +303,8 @@ structure LayOK (lp : Prog) (c : Ctx) : Prop where
   names : (lp.globals.map (·.name)).Nodup
   gbound : ∀ g, g ∈ lp.globals → gaddr c g.name + sizeOf lp g.ty ≤ 65536
   gapart : ∀ g h, g ∈ lp.globals → h ∈ lp.globals → g.name ≠ h.name →
-    gaddr c g.name + sizeOf lp g.ty ≤ gaddr c h.name ∨ gaddr c h.name + sizeOf lp h.ty ≤ gaddr c g.name
+    sizeOf lp g.ty = 0 ∨ sizeOf lp h.ty = 0 ∨
+      gaddr c g.name + sizeOf lp g.ty ≤ gaddr c h.name ∨ gaddr c h.name + sizeOf lp h.ty ≤ gaddr c g.name
   /-- A `bool` starts as 0 or 1. -/
   ginit : ∀ g, g ∈ lp.globals → g.ty = .bool → ∀ v, v ∈ g.init → v ≤ 1
   fbound : ∀ fn f, c.prog.fn? fn = some f → fbase c fn + f.frame ≤ 65536
