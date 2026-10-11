@@ -154,6 +154,12 @@ theorem wp_trapLabel' {E : Env} {s : LS} {Q : Nat → LS → Prop}
     exact h _ _ ⟨fun _ _ => rfl, Nat.le_refl _, Nat.le_refl _, fun t h' => (by rw [ht] at h'; cases h'),
       Nat.le_refl _⟩ rfl rfl rfl rfl
 
+/-- A state with the same code, temporaries, trap label and frame size comes before the same states. -/
+theorem Ext.of_out {a b sF : LS} (h : Ext a sF) (ho : b.out = a.out) (ht : b.tmps = a.tmps)
+    (htr : b.trapLabel = a.trapLabel) (hm : b.max = a.max) : Ext b sF :=
+  ⟨by rw [ho]; exact h.out, by rw [ho]; exact h.osz, by rw [ht]; exact h.tmps, by rw [htr]; exact h.trap,
+    by rw [hm]; exact h.max⟩
+
 /-! ## The function at the end -/
 
 /-- `f` is what the lowering that ended in `sF` made, for the function `fn`. -/

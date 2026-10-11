@@ -1440,6 +1440,7 @@ theorem declCall_ok (F : Final c fn f sF) {E : Env} (L : LayOK E.prog c) (hE : E
       simp only [hact] at hR ⊢
       obtain ⟨ist2, t1, r1, sz1, hrel', hkeep, xv, rfl, hxv⟩ := hR
       rw [setRet_some, setDst_slot, addr_frame] at r1
+      simp only [Option.map_some, Option.getD_some] at r1
       obtain ⟨f', hf', hfit⟩ := F.fit hfn (hx2.trans hxF2) (k := s.cur + sizeOf E.prog ty) (Nat.le_max_right _ _)
       have hfb := L.fbound _ _ hf'
       have hms := hrel'.size
