@@ -116,30 +116,32 @@ structure Ext (s s' : LS) : Prop where
   tmps : s.tmps.size ≤ s'.tmps.size
   trap : ∀ t, s.trapLabel = some t → s'.trapLabel = some t
   max : s.max ≤ s'.max
-  inv : s.cur ≤ s.max → s'.cur ≤ s'.max
 
-theorem Ext.refl (s : LS) : Ext s s := ⟨fun _ _ => rfl, Nat.le_refl _, Nat.le_refl _, fun _ h => h, Nat.le_refl _, id⟩
+theorem Ext.refl (s : LS) : Ext s s := ⟨fun _ _ => rfl, Nat.le_refl _, Nat.le_refl _, fun _ h => h, Nat.le_refl _⟩
 
 theorem Ext.trans {a b c : LS} (h1 : Ext a b) (h2 : Ext b c) : Ext a c :=
   ⟨fun i hi => by rw [h2.out i (by have := h1.osz; omega), h1.out i hi], Nat.le_trans h1.osz h2.osz,
-    Nat.le_trans h1.tmps h2.tmps, fun t h => h2.trap t (h1.trap t h), Nat.le_trans h1.max h2.max,
-    fun h => h2.inv (h1.inv h)⟩
+    Nat.le_trans h1.tmps h2.tmps, fun t h => h2.trap t (h1.trap t h), Nat.le_trans h1.max h2.max⟩
 
 theorem Ext.emit (s : LS) (i : Instr) : Ext s { s with out := s.out.push i } :=
-  ⟨fun j hj => by simp only [Array.getElem?_push]; rw [if_neg (by omega)], by simp, Nat.le_refl _, fun _ h => h, Nat.le_refl _, id⟩
+  ⟨fun j hj => by simp only [Array.getElem?_push]; rw [if_neg (by omega)], by simp, Nat.le_refl _, fun _ h => h, Nat.le_refl _⟩
 
 theorem Ext.newTmp (s : LS) (n : Nat) : Ext s { s with tmps := s.tmps.push n } :=
-  ⟨fun _ _ => rfl, Nat.le_refl _, by simp, fun _ h => h, Nat.le_refl _, id⟩
+  ⟨fun _ _ => rfl, Nat.le_refl _, by simp, fun _ h => h, Nat.le_refl _⟩
 
 theorem Ext.newLabel (s : LS) : Ext s { s with labels := s.labels + 1 } :=
-  ⟨fun _ _ => rfl, Nat.le_refl _, Nat.le_refl _, fun _ h => h, Nat.le_refl _, id⟩
+  ⟨fun _ _ => rfl, Nat.le_refl _, Nat.le_refl _, fun _ h => h, Nat.le_refl _⟩
 
 theorem Ext.alloc (s : LS) (n : Nat) : Ext s { s with cur := s.cur + n, max := Nat.max s.max (s.cur + n) } :=
-  ⟨fun _ _ => rfl, Nat.le_refl _, Nat.le_refl _, fun _ h => h, Nat.le_max_left _ _, fun _ => Nat.le_max_right _ _⟩
+  ⟨fun _ _ => rfl, Nat.le_refl _, Nat.le_refl _, fun _ h => h, Nat.le_max_left _ _⟩
 
 /-- A scope closes: the frame in use is what it was. -/
 theorem Ext.scope {s s' : LS} (h : Ext s s') : Ext s { s' with cur := s.cur } :=
-  ⟨h.out, h.osz, h.tmps, h.trap, h.max, fun hc => Nat.le_trans hc h.max⟩
+  ⟨h.out, h.osz, h.tmps, h.trap, h.max⟩
+
+/-- The frame in use does not matter to what comes later. -/
+theorem Ext.unscope {s' sF : LS} {k : Nat} (h : Ext { s' with cur := k } sF) : Ext s' sF :=
+  ⟨h.out, h.osz, h.tmps, h.trap, h.max⟩
 
 /-- The trap label, whichever case `trapLabel` is in. -/
 theorem wp_trapLabel' {E : Env} {s : LS} {Q : Nat → LS → Prop}
@@ -150,7 +152,7 @@ theorem wp_trapLabel' {E : Env} {s : LS} {Q : Nat → LS → Prop}
   | some l => exact h l s (Ext.refl s) rfl rfl rfl ht
   | none =>
     exact h _ _ ⟨fun _ _ => rfl, Nat.le_refl _, Nat.le_refl _, fun t h' => (by rw [ht] at h'; cases h'),
-      Nat.le_refl _, id⟩ rfl rfl rfl rfl
+      Nat.le_refl _⟩ rfl rfl rfl rfl
 
 /-! ## The function at the end -/
 

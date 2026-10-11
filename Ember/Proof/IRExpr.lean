@@ -453,7 +453,7 @@ theorem index_ok (F : Final c fn f sF) {E : Env} (L : LayOK E.prog c) (b i : Exp
     (ihi : ∀ ti s1, E.tyOf i = .ok ti → ti.isScalar = true → wp (expr i) E (EPost c f sF E i ti s1) s1) :
     wp (place (.index b i)) E (PPost c f sF E (.index b i) ty s) s := by
   rw [place]
-  obtain ⟨hwb, hwi, ⟨iw, hti⟩, hn⟩ := hw
+  obtain ⟨hwb, hwi, ⟨iw, hti⟩, hn, _⟩ := hw
   simp only [Env.tyOf] at hty
   cases htb : E.tyOf b with
   | error m => simp [htb] at hty
@@ -1256,7 +1256,7 @@ theorem varOpd_ok (F : Final c fn f sF) {E : Env} (L : LayOK E.prog c) (hE : Env
     simp only [wp_pure]
     refine ⟨Ext.refl s, rfl, ⟨by simp, fun v hv' => by cases hv'; exact hklt⟩, ?_⟩
     intro cur lst env ist tmps hxF hrel hsz
-    obtain ⟨top, hl, _⟩ := hrel.loc
+    obtain ⟨hl, _⟩ := hrel.loc
     obtain ⟨v, h1, _, _, _, h5⟩ := hrel.glob.lookup hg
     simp only [Lang.Sem.evalE, Lang.Sem.lookup, hl.lookup_none hv, h1]
     refine Runs.done ?_

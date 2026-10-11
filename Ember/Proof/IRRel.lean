@@ -365,57 +365,89 @@ end
 
 /-! ## The variables in scope -/
 
+/-- The first byte above the variables. -/
+def topOf (lp : Prog) : List (String × VarInfo) → Nat
+  | [] => 0
+  | (_, info) :: rest =>
+    Nat.max (topOf lp rest) ((match info.at_ with | .static s => s.off | .ref s => s.off) + sizeOf lp info.ty)
+
+/-- An offset in the frame that belongs to a variable in scope. -/
+def InVars (lp : Prog) (vars : List (String × VarInfo)) (o : Nat) : Prop :=
+  ∃ x info sl, (x, info) ∈ vars ∧ info.at_ = .static sl ∧ sl.off ≤ o ∧ o < sl.off + sizeOf lp info.ty
+
+theorem InVars.tail {lp : Prog} {a : String × VarInfo} {vars : List (String × VarInfo)} {o : Nat}
+    (h : InVars lp vars o) : InVars lp (a :: vars) o := by
+  obtain ⟨x, info, sl, h1, h2, h3, h4⟩ := h
+  exact ⟨x, info, sl, List.mem_cons_of_mem _ h1, h2, h3, h4⟩
+
+theorem inVars_lt_top {lp : Prog} : ∀ {vars : List (String × VarInfo)} {o : Nat}, InVars lp vars o →
+    o < topOf lp vars
+  | [], _, h => by obtain ⟨_, _, _, h1, _⟩ := h; simp at h1
+  | (y, i) :: rest, o, h => by
+    obtain ⟨x, info, sl, h1, h2, h3, h4⟩ := h
+    simp only [topOf]
+    rcases List.mem_cons.mp h1 with he | hr
+    · cases he
+      simp only [h2]
+      exact Nat.lt_of_lt_of_le h4 (Nat.le_max_right _ _)
+    · exact Nat.lt_of_lt_of_le (inVars_lt_top ⟨x, info, sl, hr, h2, h3, h4⟩) (Nat.le_max_left _ _)
+
 /-- The variables of the lowering's environment and of `Lang.Sem`'s, one
-for one, innermost first: each in the frame, above those declared before
-it, holding its value.  The last index is the first byte above them. -/
+for one, innermost first: each in the frame, apart from the others,
+holding its value. -/
 inductive LRel (lp : Prog) (c : Ctx) (fn : String) (m : ByteArray) :
-    List (String × VarInfo) → Lang.Sem.Env → Nat → Prop
-  | nil : LRel lp c fn m [] [] 0
-  | cons {vars : List (String × VarInfo)} {env : Lang.Sem.Env} {top : Nat} (x : String) (ty : Ty) (off : Nat)
-      (v : Val) : LRel lp c fn m vars env top → top ≤ off → TyOK lp ty → HasTy lp ty v →
-      Holds lp m (fbase c fn + off) ty v →
+    List (String × VarInfo) → Lang.Sem.Env → Prop
+  | nil : LRel lp c fn m [] []
+  | cons {vars : List (String × VarInfo)} {env : Lang.Sem.Env} (x : String) (ty : Ty) (off : Nat)
+      (v : Val) : LRel lp c fn m vars env → (∀ o, off ≤ o → o < off + sizeOf lp ty → ¬ InVars lp vars o) →
+      TyOK lp ty → HasTy lp ty v → Holds lp m (fbase c fn + off) ty v →
       LRel lp c fn m ((x, { ty, at_ := .static { area := .frame fn, off } }) :: vars) ((x, v) :: env)
-        (off + sizeOf lp ty)
 
 section
 variable {lp : Prog} {c : Ctx} {fn : String} {m m' : ByteArray} {vars : List (String × VarInfo)}
-  {env : Lang.Sem.Env} {top : Nat}
+  {env : Lang.Sem.Env}
 
-theorem LRel.length (h : LRel lp c fn m vars env top) : env.length = vars.length := by
+theorem LRel.length (h : LRel lp c fn m vars env) : env.length = vars.length := by
   induction h with
   | nil => rfl
   | cons x ty off v _ _ _ _ _ ih => simp [ih]
 
-theorem LRel.frame (h : LRel lp c fn m vars env top) (hb : fbase c fn + top ≤ 65536)
-    (hm : ∀ A, fbase c fn ≤ A → A < fbase c fn + top → m'.get! A = m.get! A) : LRel lp c fn m' vars env top := by
+/-- Memory changed outside the variables. -/
+theorem LRel.frame (h : LRel lp c fn m vars env) (hb : fbase c fn + topOf lp vars ≤ 65536)
+    (hm : ∀ o, InVars lp vars o → m'.get! (fbase c fn + o) = m.get! (fbase c fn + o)) : LRel lp c fn m' vars env := by
   induction h with
   | nil => exact .nil
-  | cons x ty off v hrest hle hty hv hh ih =>
-    exact .cons x ty off v (ih (by omega) (fun A h1 h2 => hm A h1 (by omega))) hle hty hv
-      (Holds.frame hty hv (by omega) hh (fun A h1 h2 => hm A (by omega) (by omega)))
+  | @cons vars0 env0 x ty off v hrest hdis hty hv hh ih =>
+    simp only [topOf] at hb
+    have h1 : topOf lp vars0 ≤ Nat.max (topOf lp vars0) (off + sizeOf lp ty) := Nat.le_max_left _ _
+    have h2 : off + sizeOf lp ty ≤ Nat.max (topOf lp vars0) (off + sizeOf lp ty) := Nat.le_max_right _ _
+    refine .cons x ty off v (ih (by omega) (fun o ho => hm o ho.tail)) hdis hty hv
+      (Holds.frame hty hv (by omega) hh (fun A a1 a2 => ?_))
+    have := hm (A - fbase c fn) ⟨x, _, _, List.mem_cons_self, rfl, by simp only; omega, by simp only; omega⟩
+    rwa [show fbase c fn + (A - fbase c fn) = A by omega] at this
 
-theorem LRel.lookup (h : LRel lp c fn m vars env top) {x : String} {info : VarInfo}
+theorem LRel.lookup (h : LRel lp c fn m vars env) {x : String} {info : VarInfo}
     (hx : vars.lookup x = some info) :
     ∃ off v, info.at_ = .static { area := .frame fn, off } ∧ env.lookup x = some v ∧ TyOK lp info.ty ∧
-      HasTy lp info.ty v ∧ Holds lp m (fbase c fn + off) info.ty v ∧ off + sizeOf lp info.ty ≤ top := by
+      HasTy lp info.ty v ∧ Holds lp m (fbase c fn + off) info.ty v ∧ off + sizeOf lp info.ty ≤ topOf lp vars := by
   induction h with
   | nil => simp at hx
-  | cons y ty off v hrest hle hty hv hh ih =>
+  | cons y ty off v hrest hdis hty hv hh ih =>
     cases hxy : x == y with
     | true =>
       simp only [List.lookup, hxy, Option.some.injEq] at hx ⊢
       subst hx
-      exact ⟨off, v, rfl, rfl, hty, hv, hh, Nat.le_refl _⟩
+      exact ⟨off, v, rfl, rfl, hty, hv, hh, Nat.le_max_right _ _⟩
     | false =>
       simp only [List.lookup, hxy] at hx ⊢
       obtain ⟨o, w, h1, h2, h3, h4, h5, h6⟩ := ih hx
-      exact ⟨o, w, h1, h2, h3, h4, h5, by omega⟩
+      exact ⟨o, w, h1, h2, h3, h4, h5, Nat.le_trans h6 (Nat.le_max_left _ _)⟩
 
-theorem LRel.lookup_none (h : LRel lp c fn m vars env top) {x : String} (hx : vars.lookup x = none) :
+theorem LRel.lookup_none (h : LRel lp c fn m vars env) {x : String} (hx : vars.lookup x = none) :
     env.lookup x = none := by
   induction h with
   | nil => rfl
-  | cons y ty off v hrest hle hty hv hh ih =>
+  | cons y ty off v hrest hdis hty hv hh ih =>
     cases hxy : x == y with
     | true => simp [List.lookup, hxy] at hx
     | false =>
@@ -423,14 +455,18 @@ theorem LRel.lookup_none (h : LRel lp c fn m vars env top) {x : String} (hx : va
       exact ih hx
 
 /-- A variable given a new value, where memory changes inside it only. -/
-theorem LRel.set (h : LRel lp c fn m vars env top) (hb : fbase c fn + top ≤ 65536) {x : String} {info : VarInfo}
-    {off : Nat} (hx : vars.lookup x = some info) (hat : info.at_ = .static { area := .frame fn, off })
+theorem LRel.set (h : LRel lp c fn m vars env) (hb : fbase c fn + topOf lp vars ≤ 65536) {x : String}
+    {info : VarInfo} {off : Nat} (hx : vars.lookup x = some info)
+    (hat : info.at_ = .static { area := .frame fn, off })
     {v' : Val} (hv' : HasTy lp info.ty v') (hh : Holds lp m' (fbase c fn + off) info.ty v')
     (hm : ∀ A, A < fbase c fn + off ∨ fbase c fn + off + sizeOf lp info.ty ≤ A → m'.get! A = m.get! A) :
-    LRel lp c fn m' vars (Lang.Sem.setFirst env x v') top := by
+    LRel lp c fn m' vars (Lang.Sem.setFirst env x v') := by
   induction h with
   | nil => simp at hx
-  | cons y ty o v hrest hle hty hv hho ih =>
+  | @cons vars0 env0 y ty o v hrest hdis hty hv hho ih =>
+    simp only [topOf] at hb
+    have t1 : topOf lp vars0 ≤ Nat.max (topOf lp vars0) (o + sizeOf lp ty) := Nat.le_max_left _ _
+    have t2 : o + sizeOf lp ty ≤ Nat.max (topOf lp vars0) (o + sizeOf lp ty) := Nat.le_max_right _ _
     simp only [Lang.Sem.setFirst]
     cases hxy : x == y with
     | true =>
@@ -440,7 +476,10 @@ theorem LRel.set (h : LRel lp c fn m vars env top) (hb : fbase c fn + top ≤ 65
       subst hat
       have hyx : (y == x) = true := by rw [beq_iff_eq] at hxy ⊢; exact hxy.symm
       rw [if_pos hyx]
-      exact .cons y ty _ v' (hrest.frame (by omega) (fun A h1 h2 => hm A (by omega))) hle hty hv' hh
+      refine .cons y ty _ v' (hrest.frame (by omega) (fun a ha => hm _ ?_)) hdis hty hv' hh
+      have hc : ¬ (o ≤ a ∧ a < o + sizeOf lp ty) := fun hc => hdis a hc.1 hc.2 ha
+      show fbase c fn + a < fbase c fn + o ∨ fbase c fn + o + sizeOf lp ty ≤ fbase c fn + a
+      omega
     | false =>
       simp only [List.lookup, hxy] at hx
       have hyx : ¬ (y == x) = true := by
@@ -453,35 +492,24 @@ theorem LRel.set (h : LRel lp c fn m vars env top) (hb : fbase c fn + top ≤ 65
       rw [hat] at h1
       simp only [Storage.static.injEq, Slot.mk.injEq, true_and] at h1
       subst h1
-      exact .cons y ty o v (ih (by omega) hx) hle hty hv
-        (Holds.frame hty hv (by omega) hho (fun A h1 h2 => hm A (by omega)))
+      refine .cons y ty o v (ih (by omega) hx) hdis hty hv
+        (Holds.frame hty hv (by omega) hho (fun A a1 a2 => hm A ?_))
+      have := hdis (A - fbase c fn) (by omega) (by omega)
+      have hin : ¬ (off ≤ A - fbase c fn ∧ A - fbase c fn < off + sizeOf lp info.ty) := fun hc =>
+        this ⟨x, info, _, lookup_mem _ _ _ hx, hat, hc.1, hc.2⟩
+      omega
 
 /-- The variables below the innermost ones (the end of a block). -/
-theorem LRel.drop : ∀ (pre : List (String × VarInfo)) {env : Lang.Sem.Env} {top : Nat},
-    LRel lp c fn m (pre ++ vars) env top → ∃ top', LRel lp c fn m vars (env.drop pre.length) top' ∧ top' ≤ top
-  | [], env, top, h => ⟨top, by simpa using h, Nat.le_refl _⟩
-  | _ :: pre, _, _, h => by
+theorem LRel.drop : ∀ (pre : List (String × VarInfo)) {env : Lang.Sem.Env},
+    LRel lp c fn m (pre ++ vars) env → LRel lp c fn m vars (env.drop pre.length)
+  | [], env, h => by simpa using h
+  | _ :: pre, _, h => by
     cases h with
-    | cons x ty off v hrest hle hty hv hh =>
-      obtain ⟨top', h1, h2⟩ := LRel.drop pre hrest
-      exact ⟨top', by simpa using h1, by omega⟩
+    | cons x ty off v hrest hdis hty hv hh => simpa using LRel.drop pre hrest
 
 end
 
 /-! ## The whole state -/
-
-/-- The first byte above the variables. -/
-def topOf (lp : Prog) : List (String × VarInfo) → Nat
-  | [] => 0
-  | (_, info) :: _ => (match info.at_ with | .static s => s.off | .ref s => s.off) + sizeOf lp info.ty
-
-theorem LRel.top {lp : Prog} {c : Ctx} {fn : String} {m : ByteArray} {vars : List (String × VarInfo)}
-    {env : Lang.Sem.Env} {top : Nat} (h : LRel lp c fn m vars env top) : top = topOf lp vars := by
-  cases h <;> rfl
-
-/-- An offset in the frame that belongs to a variable in scope. -/
-def InVars (lp : Prog) (vars : List (String × VarInfo)) (o : Nat) : Prop :=
-  ∃ x info sl, (x, info) ∈ vars ∧ info.at_ = .static sl ∧ sl.off ≤ o ∧ o < sl.off + sizeOf lp info.ty
 
 /-- What a statement leaves alone: everything outside the globals and
 the frames of this function and of those it can reach, and in its own
@@ -498,7 +526,7 @@ structure SRel (c : Ctx) (E : Env) (cur : Nat) (lst : Lang.Sem.St) (env : Lang.S
   size : ist.mem.size = 65536
   world : ist.world = lst.world
   glob : GRel E.prog c ist.mem lst.globals
-  loc : ∃ top, LRel E.prog c E.fn ist.mem E.vars env top ∧ top ≤ cur
+  loc : LRel E.prog c E.fn ist.mem E.vars env ∧ topOf E.prog E.vars ≤ cur
   fit : ∃ f, c.prog.fn? E.fn = some f ∧ cur ≤ f.frame
 
 /-- The variable a place is rooted at is not a constant. -/
@@ -526,10 +554,7 @@ theorem Keep.weaken {E' : Env} {cur' : Nat} {m m' : ByteArray} (hk : Keep c E' c
   · exact .inl h
   · exact .inr ⟨h1, by omega, fun hin => h3 (hv _ (by omega) hin)⟩
 
-theorem SRel.top_le (h : SRel c E cur lst env ist) : topOf E.prog E.vars ≤ cur := by
-  obtain ⟨top, hl, htop⟩ := h.loc
-  rw [← hl.top]
-  exact htop
+theorem SRel.top_le (h : SRel c E cur lst env ist) : topOf E.prog E.vars ≤ cur := h.loc.2
 
 /-- A variable of the lowering's environment: where it is, and that its
 value is there. -/
@@ -538,7 +563,7 @@ theorem SRel.var (L : LayOK E.prog c) (h : SRel c E cur lst env ist) {x : String
     ∃ sl v, info.at_ = .static sl ∧ Lang.Sem.lookup lst env x = some v ∧ TyOK E.prog info.ty ∧
       HasTy E.prog info.ty v ∧ Holds E.prog ist.mem (c.layout.addr sl) info.ty v ∧
       c.layout.addr sl + sizeOf E.prog info.ty ≤ 65536 := by
-  obtain ⟨top, hl, htop⟩ := h.loc
+  obtain ⟨hl, htop⟩ := h.loc
   obtain ⟨f, hf, hfit⟩ := h.fit
   unfold Env.varInfo at hx
   cases hv : E.vars.lookup x with
@@ -575,11 +600,12 @@ theorem SRel.typed (L : LayOK E.prog c) (h : SRel c E cur lst env ist) : VarsTyp
 theorem SRel.frame (L : LayOK E.prog c) (h : SRel c E cur lst env ist) {m' : ByteArray} (hsz : m'.size = 65536)
     (hm : ∀ A, InGlobals E.prog c A ∨ (fbase c E.fn ≤ A ∧ A < fbase c E.fn + cur) →
       m'.get! A = ist.mem.get! A) : SRel c E cur lst env { ist with mem := m' } := by
-  obtain ⟨top, hl, htop⟩ := h.loc
+  obtain ⟨hl, htop⟩ := h.loc
   obtain ⟨f, hf, hfit⟩ := h.fit
   have hb := L.fbound _ _ hf
   exact ⟨hsz, h.world, h.glob.frame L (fun A hA => hm A (.inl hA)),
-    ⟨top, hl.frame (by omega) (fun A h1 h2 => hm A (.inr ⟨h1, by omega⟩)), htop⟩, ⟨f, hf, hfit⟩⟩
+    ⟨hl.frame (by omega) (fun o ho => hm _ (.inr ⟨Nat.le_add_right _ _, by have := inVars_lt_top ho; omega⟩)), htop⟩,
+    ⟨f, hf, hfit⟩⟩
 
 /-- The world moved on, on both sides. -/
 theorem SRel.setWorld (h : SRel c E cur lst env ist) (w : World) :
@@ -594,8 +620,8 @@ theorem SRel.congr {E' : Env} (h : SRel c E cur lst env ist) (hp : E'.prog = E.p
 /-- More of the frame in use. -/
 theorem SRel.grow (h : SRel c E cur lst env ist) {cur' : Nat} (hc : cur ≤ cur')
     (hfit : ∃ f, c.prog.fn? E.fn = some f ∧ cur' ≤ f.frame) : SRel c E cur' lst env ist := by
-  obtain ⟨top, hl, htop⟩ := h.loc
-  exact ⟨h.size, h.world, h.glob, ⟨top, hl, by omega⟩, hfit⟩
+  obtain ⟨hl, htop⟩ := h.loc
+  exact ⟨h.size, h.world, h.glob, ⟨hl, by omega⟩, hfit⟩
 
 /-- **A variable is given a new value**, memory changing inside it only. -/
 theorem SRel.setVar (L : LayOK E.prog c) (h : SRel c E cur lst env ist) {x : String} {info : VarInfo} {sl : Slot}
@@ -605,7 +631,7 @@ theorem SRel.setVar (L : LayOK E.prog c) (h : SRel c E cur lst env ist) {x : Str
     (hh : Holds E.prog m' (c.layout.addr sl) info.ty v') :
     ∃ lst' env', Lang.Sem.update E.prog lst env (.var x) (fun _ => some v') = some (lst', env') ∧
       SRel c E cur lst' env' { ist with mem := m' } ∧ Keep c E cur ist.mem m' ∧ lst'.world = lst.world := by
-  obtain ⟨top, hl, htop⟩ := h.loc
+  obtain ⟨hl, htop⟩ := h.loc
   obtain ⟨f, hf, hfit⟩ := h.fit
   have hfb := L.fbound _ _ hf
   unfold Env.varInfo at hx
@@ -626,7 +652,7 @@ theorem SRel.setVar (L : LayOK E.prog c) (h : SRel c E cur lst env ist) {x : Str
       by_cases hc : A < fbase c E.fn + off ∨ fbase c E.fn + off + sizeOf E.prog i.ty ≤ A
       · exact hm A hc
       · exact absurd hA (L.fglob _ A (hin A hc))
-    · exact ⟨top, hl.set (by omega) hv hat hv' hh hm, htop⟩
+    · exact ⟨hl.set (by omega) hv hat hv' hh hm, htop⟩
     · intro A hA
       by_cases hc : A < fbase c E.fn + off ∨ fbase c E.fn + off + sizeOf E.prog i.ty ≤ A
       · exact hm A hc
@@ -652,10 +678,11 @@ theorem SRel.setVar (L : LayOK E.prog c) (h : SRel c E cur lst env ist) {x : Str
       refine ⟨{ lst with globals := Lang.Sem.setFirst lst.globals g.name v' }, env,
         by simp [Lang.Sem.update, hl.lookup_none hv, h1], ⟨hsz, h.world, ?_, ?_, ⟨f, hf, hfit⟩⟩, ?_, rfl⟩
       · exact h.glob.set L hmem hc hv' hh hm
-      · refine ⟨top, hl.frame (by omega) (fun A a1 a2 => ?_), htop⟩
-        by_cases hcA : A < gaddr c g.name ∨ gaddr c g.name + sizeOf E.prog g.ty ≤ A
-        · exact hm A hcA
-        · exact absurd (hin A hcA) (L.fglob _ A ⟨f, hf, a1, by omega⟩)
+      · refine ⟨hl.frame (by omega) (fun o ho => ?_), htop⟩
+        have hlt := inVars_lt_top ho
+        by_cases hcA : fbase c E.fn + o < gaddr c g.name ∨ gaddr c g.name + sizeOf E.prog g.ty ≤ fbase c E.fn + o
+        · exact hm _ hcA
+        · exact absurd (hin _ hcA) (L.fglob _ _ ⟨f, hf, Nat.le_add_right _ _, by omega⟩)
       · intro A hA
         by_cases hcA : A < gaddr c g.name ∨ gaddr c g.name + sizeOf E.prog g.ty ≤ A
         · exact hm A hcA
@@ -671,11 +698,13 @@ theorem SRel.push (L : LayOK E.prog c) (h : SRel c E cur lst env ist) (x : Strin
     (hh : Holds E.prog m' (fbase c E.fn + cur) ty v) :
     SRel c { E with vars := (x, { ty, at_ := .static { area := .frame E.fn, off := cur } }) :: E.vars }
       (cur + sizeOf E.prog ty) lst ((x, v) :: env) { ist with mem := m' } := by
-  obtain ⟨top, hl, htop⟩ := h.loc
+  obtain ⟨hl, htop⟩ := h.loc
   obtain ⟨f, hf, hfit'⟩ := hfit
   have hfb := L.fbound _ _ hf
-  refine ⟨hsz, h.world, h.glob.frame L (fun A hA => ?_), ⟨_, .cons x ty cur v
-    (hl.frame (by omega) (fun A a1 a2 => hm A (by omega))) htop hty hv hh, Nat.le_refl _⟩, ⟨f, hf, hfit'⟩⟩
+  refine ⟨hsz, h.world, h.glob.frame L (fun A hA => ?_), ⟨.cons x ty cur v
+    (hl.frame (by omega) (fun o ho => hm _ (by have := inVars_lt_top ho; omega)))
+    (fun o h1 _ hin => by have : o < topOf E.prog E.vars := inVars_lt_top hin; omega) hty hv hh,
+    Nat.max_le.mpr ⟨Nat.le_trans htop (Nat.le_add_right _ _), Nat.le_refl _⟩⟩, ⟨f, hf, hfit'⟩⟩
   by_cases hc : A < fbase c E.fn + cur ∨ fbase c E.fn + cur + sizeOf E.prog ty ≤ A
   · exact hm A hc
   · exact absurd hA (L.fglob _ A ⟨f, hf, by omega, by omega⟩)
@@ -685,10 +714,9 @@ theorem SRel.pop (h : SRel c { E with vars := pre ++ E.vars } cur' lst env ist) 
     (hpre : pre' = pre.length) (htop : topOf E.prog E.vars ≤ cur) (hcur : cur ≤ cur') :
     SRel c E cur lst (env.drop pre') ist := by
   subst hpre
-  obtain ⟨top, hl, _⟩ := h.loc
+  obtain ⟨hl, _⟩ := h.loc
   obtain ⟨f, hf, hfit⟩ := h.fit
-  obtain ⟨top', hl', _⟩ := LRel.drop pre hl
-  exact ⟨h.size, h.world, h.glob, ⟨top', hl', by rw [hl'.top]; exact htop⟩, ⟨f, hf, by omega⟩⟩
+  exact ⟨h.size, h.world, h.glob, ⟨LRel.drop pre hl, htop⟩, ⟨f, hf, by omega⟩⟩
 
 end
 

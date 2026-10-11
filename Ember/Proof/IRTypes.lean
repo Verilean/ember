@@ -68,7 +68,9 @@ def WT (g : IR.Env) : Expr → Prop
   | .var _ => True
   | .field b _ => WT g b
   | .index b i => WT g b ∧ WT g i ∧ (∃ w, g.tyOf i = .ok (.int w)) ∧
-      ∀ el n, g.tyOf b = .ok (.arr el n) → n < 65536
+      (∀ el n, g.tyOf b = .ok (.arr el n) → n < 65536) ∧
+      -- a literal index is within the array
+      ∀ v w el n, i = .lit v w → g.tyOf b = .ok (.arr el n) → v < n
   | .bin op a b => WT g a ∧ WT g b ∧
       (if op.isLogic then g.tyOf a = .ok .bool ∧ g.tyOf b = .ok .bool
        else if op.isShift then (∃ w, g.tyOf a = .ok (.int w)) ∧ ∃ w, g.tyOf b = .ok (.int w)

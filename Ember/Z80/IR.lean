@@ -234,11 +234,6 @@ def fieldOffIn (p : Lang.Prog) : List (String × Ty) → String → Nat → Opti
 def fieldOff (p : Lang.Prog) (r f : String) : Option (Nat × Ty) :=
   fieldOffIn p (((p.struct? r).map (·.fields)).getD []) f 0
 
-/-- The parameter that travels in a register: the last one that is one or
-two bytes by value. -/
-def regParamOf (p : Lang.Prog) (f : Lang.Fn) : Option String :=
-  (f.params.reverse.find? fun prm => !prm.byRef && sizeOf p prm.ty ≤ 2).map (·.name)
-
 /-- Offsets of parameters from `off` on, and the first byte after them: a
 by-reference parameter is an address. -/
 def paramSlotsFrom (p : Lang.Prog) : List Lang.Param → Nat → List (Lang.Param × Nat) × Nat
@@ -249,6 +244,11 @@ def paramSlotsFrom (p : Lang.Prog) : List Lang.Param → Nat → List (Lang.Para
 
 /-- Offsets of the parameters in the frame, and the bytes they take. -/
 def paramSlots (p : Lang.Prog) (f : Lang.Fn) : List (Lang.Param × Nat) × Nat := paramSlotsFrom p f.params 0
+
+/-- The parameter that travels in a register, with its offset: the last
+one that is one or two bytes by value. -/
+def regParamOf (p : Lang.Prog) (f : Lang.Fn) : Option (Lang.Param × Nat) :=
+  (paramSlots p f).1.reverse.find? fun x => !x.1.byRef && sizeOf p x.1.ty ≤ 2
 
 /-! ## Lowering
 
@@ -655,17 +655,27 @@ def boolJump (e : Expr) (sense : Bool) (target : Nat) : LM Unit := do
   let o ← expr e
   emit (.br (if sense then .ne else .eq) 1 o (.const 0) target)
 
-/-- The branch of a comparison; `0 < y` is `y ≠ 0`, `0 ≥ y` is `y = 0`. -/
+/-- A comparison as one of `eq ne lt ge`, with its operands in order. -/
+def cmpOf (op : BinOp) (oa ob : Opd) : Cmp × Opd × Opd :=
+  match op with
+  | .eq => (.eq, oa, ob)
+  | .ne => (.ne, oa, ob)
+  | .lt => (.lt, oa, ob)
+  | .ge => (.ge, oa, ob)
+  | .le => (.ge, ob, oa)
+  | _ => (.lt, ob, oa)
+
+/-- `0 < y` is `y ≠ 0`, `0 ≥ y` is `y = 0`. -/
+def cmpZero (r : Cmp × Opd × Opd) : Cmp × Opd × Opd :=
+  match r.1, r.2.1 with
+  | .lt, .const 0 => (Cmp.ne, r.2.2, Opd.const 0)
+  | .ge, .const 0 => (Cmp.eq, r.2.2, Opd.const 0)
+  | _, _ => r
+
+/-- The branch of a comparison. -/
 def cmpBr (op : BinOp) (sense : Bool) (m : Nat) (oa ob : Opd) (target : Nat) : Instr :=
-  let r : Cmp × Opd × Opd := match op with
-    | .eq => (.eq, oa, ob) | .ne => (.ne, oa, ob)
-    | .lt => (.lt, oa, ob) | .ge => (.ge, oa, ob)
-    | .le => (.ge, ob, oa) | _ => (.lt, ob, oa)
-  let r : Cmp × Opd × Opd := match r.1, r.2.1 with
-    | .lt, .const 0 => (Cmp.ne, r.2.2, Opd.const 0)
-    | .ge, .const 0 => (Cmp.eq, r.2.2, Opd.const 0)
-    | _, _ => r
-  .br (if sense then r.1 else r.1.negate) m r.2.1 r.2.2 target
+  .br (if sense then (cmpZero (cmpOf op oa ob)).1 else (cmpZero (cmpOf op oa ob)).1.negate) m
+    (cmpZero (cmpOf op oa ob)).2.1 (cmpZero (cmpOf op oa ob)).2.2 target
 
 /-- Jump to `target` when the condition is `sense`. -/
 def condJump (e : Expr) (sense : Bool) (target : Nat) : LM Unit :=
@@ -827,8 +837,9 @@ def retStmt (v : Option Expr) : LM Env :=
     read
 
 /-- The arguments of a call, into the callee's frame; the one that
-travels in a register is returned (`reg`: found so far). -/
-def callArgs (f : String) (inReg : Option String) : List ((Lang.Param × Nat) × Expr) → Option Expr →
+travels in a register (the parameter at offset `inReg`) is returned
+(`reg`: found so far). -/
+def callArgs (f : String) (inReg : Option Nat) : List ((Lang.Param × Nat) × Expr) → Option Expr →
     LM (Option Expr)
   | [], reg => pure reg
   | ((prm, off), a) :: rest, reg =>
@@ -836,7 +847,7 @@ def callArgs (f : String) (inReg : Option String) : List ((Lang.Param × Nat) ×
       let r ← place a
       emit (.lea (.slot { area := .frame f, off }) r.1)
       callArgs f inReg rest reg
-    else if inReg == some prm.name then callArgs f inReg rest (some a)
+    else if inReg == some off then callArgs f inReg rest (some a)
     else do
       exprToSlot { area := .frame f, off } a
       callArgs f inReg rest reg
@@ -848,7 +859,7 @@ def callInstr (f : String) (args : List Expr) : LM (Option Nat × (Option (Nat �
   match env.prog.fn? f with
   | none => err s!"unknown function {f}"
   | some fd => do
-    let regArg ← callArgs f (regParamOf env.prog fd) ((paramSlots env.prog fd).1.zip args) none
+    let regArg ← callArgs f ((regParamOf env.prog fd).map (·.2)) ((paramSlots env.prog fd).1.zip args) none
     -- the register argument last: nothing is computed after it
     let reg ← (match regArg with
       | some a => do
@@ -1094,18 +1105,17 @@ def paramVars (fn : String) (slots : List (Lang.Param × Nat)) : List (String ×
 
 /-- The environment a function's body is lowered in. -/
 def fnEnv (p : Lang.Prog) (f : Lang.Fn) : Env :=
-  { prog := p, fn := f.name, vars := (paramVars f.name (paramSlots p f).1).reverse }
+  { prog := p, fn := f.name, vars := paramVars f.name (paramSlots p f).1 }
 
 def regParamSlot (p : Lang.Prog) (f : Lang.Fn) : Option (Nat × Slot) :=
-  (regParamOf p f).bind fun x =>
-    ((paramSlots p f).1.find? (·.1.name == x)).map fun (prm, off) =>
-      (sizeOf p prm.ty, ({ area := .frame f.name, off } : Slot))
+  (regParamOf p f).map fun x => (sizeOf p x.1.ty, ({ area := .frame f.name, off := x.2 } : Slot))
 
 /-- A function as it is lowered, before `cleanup` and `dropChecks`. -/
 def lowerFnRaw (p : Lang.Prog) (f : Lang.Fn) : Except String Fn :=
   match lowerBody f.body (fnEnv p f) { cur := (paramSlots p f).2, max := (paramSlots p f).2 } with
   | .ok (_, st) =>
-    .ok { name := f.name, regParam := regParamSlot p f, frame := st.max, body := st.out, tmps := st.tmps }
+    .ok { name := f.name, regParam := regParamSlot p f, frame := Nat.max st.max (paramSlots p f).2,
+          body := st.out, tmps := st.tmps }
   | .error e => .error e
 
 /-- The labels a body defines. -/
