@@ -1,6 +1,7 @@
 import Ember.Proof.Z80CallFn
 import Ember.Proof.Z80Bin16
 import Ember.Proof.Z80Una
+import Ember.Proof.Z80Ext
 
 /-!
 # Ember.Proof.Z80Ins — every instruction, one statement (plan M7.3)
@@ -36,6 +37,7 @@ theorem size12_spec {n : Nat} (h : size12 n = true) : n = 1 ∨ n = 2 := by
 /-- The instructions the proofs cover so far. -/
 def Covered : IR.Instr → Bool
   | .mov n _ _ | .bin _ n _ _ _ | .not n _ _ | .neg n _ _ | .cmp _ n _ _ _ | .br _ n _ _ _ => size12 n
+  | .ext n _ m _ => (n == 1 && m == 2) || (n == 2 && m == 1)
   | .jmp _ | .label _ | .trap => true
   | .ret v => (v.map fun p => size12 p.1).getD true
   | .call _ ret reg => (ret.map fun p => size12 p.1).getD true && (reg.map fun p => size12 p.1).getD true
@@ -47,6 +49,7 @@ def Need (Z : ZCtx) (E : GEnv) (dt : Nat → Prop) : IR.Instr → Prop
   | .bin _ n d a b => Rd Z E dt n a ∧ Rd Z E dt n b ∧ Wr Z E n d
   | .not n d a | .neg n d a => Rd Z E dt n a ∧ Wr Z E n d
   | .cmp _ n d a b => Rd Z E dt n a ∧ Rd Z E dt n b ∧ Wr Z E 1 d
+  | .ext n d m src => Rd Z E dt m src ∧ Wr Z E n d
   | .br _ n a b l => Rd Z E dt n a ∧ Rd Z E dt n b ∧ ∃ j : Nat, Z.items[j]? = some (Item.label (lname E l))
   | .jmp _ | .label _ => True
   | .ret v => ∀ n o, v = some (n, o) → Rd Z E dt n o
@@ -181,7 +184,15 @@ theorem ins_ok (ok : Z.OK) (hT : FnLay Z E) (F : GFinal Z base sF) (hrt : RtOK Z
     rw [step_call]
     exact fun res hcal => h hxF hN fr ist tmps s R hat res hcal
   | shift _ _ _ _ _ _ => cases hc
-  | ext _ _ _ _ => cases hc
+  | ext n d m src =>
+    have hnm : (n = 1 ∧ m = 2) ∨ (n = 2 ∧ m = 1) := by simpa [Covered] using hc
+    rcases hnm with ⟨rfl, rfl⟩ | ⟨rfl, rfl⟩
+    · refine wpg_mono (ext12_ok (dt := dt) ok hT F d src s0) ?_
+      intro _ s1 ⟨hx, h⟩
+      exact ⟨hx, fun hxF hN => h hxF hN⟩
+    · refine wpg_mono (ext21_ok (dt := dt) ok hT F d src s0) ?_
+      intro _ s1 ⟨hx, h⟩
+      exact ⟨hx, fun hxF hN => h hxF hN⟩
   | load _ _ _ => cases hc
   | store _ _ _ => cases hc
   | lea _ _ => cases hc
