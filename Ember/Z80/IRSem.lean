@@ -8,7 +8,8 @@ monad, which the kernel cannot unfold.  This file gives the same
 semantics in the form proofs need, as `Ember.Lang.Sem` does for Ember
 and `Ember.C.Sem` for the emitted C: recursion on fuel (one unit per
 instruction and per call), a result that is finished, trapped, out of
-fuel, or malformed (an unknown function or label).
+fuel, or malformed (an unknown function or label, an index that is
+not below the bound the program states for it).
 
 Memory is the same 64 KB of bytes at the addresses a `Layout` gives;
 `rd` and `wr` are little-endian and wrap at the top, as the
@@ -59,6 +60,17 @@ def addr (c : Ctx) (st : St) (tmps : Array Nat) (a : Addr) : Option Nat :=
     match x.len with
     | some len => if i < len then some (base + a.off + i * x.scale) else none
     | none => some (base + a.off + i * x.scale)
+
+/-- The index is below its `bound`.  Where it is not, the program is
+malformed: the bound is what the lowering knows of the index, and what
+`dropChecks` relies on when it drops the check. -/
+def inBound (c : Ctx) (st : St) (tmps : Array Nat) (a : Addr) : Bool :=
+  match a.idx with
+  | none => true
+  | some x =>
+    match x.bound with
+    | some b => decide (opd c st tmps x.size x.opd < b)
+    | none => true
 
 def setDst (c : Ctx) (st : St) (tmps : Array Nat) (n : Nat) (d : Dst) (v : Nat) : St × Array Nat :=
   match d with
@@ -125,15 +137,16 @@ def step (c : Ctx) (st : St) (tmps : Array Nat) : Instr → Step
   | .label _ => .next st tmps
   | .load n d p =>
     match addr c st tmps p with
-    | some a => .set (setDst c st tmps n d (rd st.mem a n))
+    | some a => if inBound c st tmps p then .set (setDst c st tmps n d (rd st.mem a n)) else .stop .bad
     | none => .stop (.trap st)
   | .store n p src =>
     match addr c st tmps p with
-    | some a => .next { st with mem := wr st.mem a n (opd c st tmps n src) } tmps
+    | some a =>
+      if inBound c st tmps p then .next { st with mem := wr st.mem a n (opd c st tmps n src) } tmps else .stop .bad
     | none => .stop (.trap st)
   | .lea d p =>
     match addr c st tmps p with
-    | some a => .set (setDst c st tmps 2 d (a % 65536))
+    | some a => if inBound c st tmps p then .set (setDst c st tmps 2 d (a % 65536)) else .stop .bad
     | none => .stop (.trap st)
   | .zero sl n => .next { st with mem := wr st.mem (c.layout.addr sl) n 0 } tmps
   | .call g ret reg =>

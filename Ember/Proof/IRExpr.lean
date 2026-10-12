@@ -56,9 +56,21 @@ theorem addr_agree (c : Ctx) (ist : St) {tmps tmps' : Array Nat} {a : Addr} {k :
   | some x => simp only [opd_agree c ist x.size (ha x hi) h]
 
 theorem step_load_some (c : Ctx) (ist : St) (tmps : Array Nat) (n : Nat) (d : Dst) (p : Addr) {A : Nat}
-    (h : addr c ist tmps p = some A) :
+    (h : addr c ist tmps p = some A) (hb : inBound c ist tmps p = true) :
     step c ist tmps (.load n d p) = .set (setDst c ist tmps n d (rd ist.mem A n)) := by
-  simp only [step, h]
+  simp only [step, h, hb, if_true]
+
+theorem inBound_agree (c : Ctx) (ist : St) {tmps tmps' : Array Nat} {a : Addr} {k : Nat}
+    (ha : ∀ x, a.idx = some x → ∀ t, x.opd = .tmp t → t < k) (h : Agree k tmps tmps') :
+    inBound c ist tmps' a = inBound c ist tmps a := by
+  unfold inBound
+  cases hi : a.idx with
+  | none => rfl
+  | some x => simp only [opd_agree c ist x.size (ha x hi) h]
+
+theorem inBound_static (c : Ctx) (ist : St) (tmps : Array Nat) {a : Addr} (hi : a.idx = none) :
+    inBound c ist tmps a = true := by
+  simp [inBound, hi]
 
 theorem step_load_none (c : Ctx) (ist : St) (tmps : Array Nat) (n : Nat) (d : Dst) (p : Addr)
     (h : addr c ist tmps p = none) : step c ist tmps (.load n d p) = .stop (.trap ist) := by
@@ -91,7 +103,8 @@ def PSem (E : Env) (e : Expr) (ty : Ty) (s s' : LS) (a : Addr) : Prop :=
   ∀ cur lst env ist tmps, Ext s' sF → SRel c E cur lst env ist → tmps.size = f.tmps.size →
     match Lang.Sem.evalE E.prog lst env e with
     | some v => Runs c f ist s.out.size s'.out.size s.tmps.size tmps
-        (fun tmps' => ∃ A, addr c ist tmps' a = some A ∧ PlaceAt c E cur lst env ist e ty v A)
+        (fun tmps' => ∃ A, addr c ist tmps' a = some A ∧ inBound c ist tmps' a = true ∧
+          PlaceAt c E cur lst env ist e ty v A)
     | none => Ends c f s.out.size tmps ist (.trap ist) ∨
         Runs c f ist s.out.size s'.out.size s.tmps.size tmps (fun tmps' => addr c ist tmps' a = none)
 
@@ -133,7 +146,7 @@ theorem placeVar_ok {E : Env} (L : LayOK E.prog c) (hE : EnvOK E) (x : String) (
   obtain ⟨sl', v, h1, h2, _⟩ := hrel.var L hinfo
   rw [h2]
   subst hti
-  exact Runs.done ⟨c.layout.addr sl, rfl, PlaceAt.var L hrel hinfo hat h2⟩
+  exact Runs.done ⟨c.layout.addr sl, rfl, rfl, PlaceAt.var L hrel hinfo hat h2⟩
 
 /-- A place that is a slot of its own: its address. -/
 theorem addr_static (c : Ctx) (ist : St) (tmps : Array Nat) {a : Addr} {sl : Slot} (hr : a.root = .static sl)
@@ -155,7 +168,7 @@ theorem loadPlace_ok (F : Final c fn f sF) {E : Env} (e : Expr) (ty : Ty) (hs : 
     cases hev : Lang.Sem.evalE E.prog lst env e with
     | some v =>
       simp only [hev] at hp ⊢
-      refine hp.mono (fun t _ _ ⟨A, hA, hpl⟩ => ?_)
+      refine hp.mono (fun t _ _ ⟨A, hA, hin, hpl⟩ => ?_)
       rw [addr_static c ist t hroot hi] at hA
       cases hA
       rw [opd_slot, ← (holds_scalar hs).mp hpl.holds]
@@ -184,8 +197,8 @@ theorem loadPlace_ok (F : Final c fn f sF) {E : Env} (e : Expr) (ty : Ty) (hs : 
       cases hev : Lang.Sem.evalE E.prog lst env e with
       | some v =>
         simp only [hev] at hp ⊢
-        refine hp.seq (Nat.le_refl _) (fun t hts _ ⟨A, hA, hpl⟩ => ?_)
-        refine Runs.tmp hb (step_load_some c ist t _ _ _ hA) hx.tmps ?_
+        refine hp.seq (Nat.le_refl _) (fun t hts _ ⟨A, hA, hin, hpl⟩ => ?_)
+        refine Runs.tmp hb (step_load_some c ist t _ _ _ hA hin) hx.tmps ?_
         rw [opd_set c ist t _ _ _ (by omega), modN_modN, modN_of_lt (rd_lt _ _ _)]
         exact (holds_scalar hs).mp hpl.holds
       | none =>
@@ -218,7 +231,7 @@ theorem movPlace_ok (F : Final c fn f sF) {E : Env} (e : Expr) (ty : Ty) (hs : t
     cases hev : Lang.Sem.evalE E.prog lst env e with
     | some v =>
       simp only [hev] at hp ⊢
-      obtain ⟨t, hr, hts, hag, A, hA, hpl⟩ := hp
+      obtain ⟨t, hr, hts, hag, A, hA, hin, hpl⟩ := hp
       rw [addr_static c ist t hroot hi] at hA
       cases hA
       refine ⟨t, hts, hag, hr.trans (reach_set F hxF rfl ?_)⟩
@@ -238,9 +251,9 @@ theorem movPlace_ok (F : Final c fn f sF) {E : Env} (e : Expr) (ty : Ty) (hs : t
     cases hev : Lang.Sem.evalE E.prog lst env e with
     | some v =>
       simp only [hev] at hp ⊢
-      obtain ⟨t, hr, hts, hag, A, hA, hpl⟩ := hp
+      obtain ⟨t, hr, hts, hag, A, hA, hin, hpl⟩ := hp
       refine ⟨t, hts, hag, hr.trans (reach_set F hxF rfl ?_)⟩
-      rw [step_load_some c ist t _ _ _ hA, (holds_scalar hs).mp hpl.holds]
+      rw [step_load_some c ist t _ _ _ hA hin, (holds_scalar hs).mp hpl.holds]
     | none =>
       simp only [hev] at hp ⊢
       rcases hp with hp | hp
@@ -396,8 +409,8 @@ theorem field_ok (F : Final c fn f sF) {E : Env} (L : LayOK E.prog c) (b : Expr)
             obtain ⟨rfl, rfl⟩ := hfo
             have hlt' : i < fs.size := by omega
             simp only [Lang.Sem.fieldIndex, hsd, hi, Array.getElem?_eq_getElem hlt']
-            exact hp.mono (fun t _ _ ⟨A, hA, hpl⟩ =>
-              ⟨_, by rw [addr_add_off, hA]; rfl, PlaceAt.field hpl hev hsd hi hlt hlt'⟩)
+            exact hp.mono (fun t _ _ ⟨A, hA, hin, hpl⟩ =>
+              ⟨_, by rw [addr_add_off, hA]; rfl, hin, PlaceAt.field hpl hev hsd hi hlt hlt'⟩)
 
 /-- What `lowIdx` promises: the low two bytes of the operand. -/
 def LPost (c : Ctx) (f : IR.Fn) (sF : LS) (m : Nat) (o : Opd) (s0 s3 : LS) (low : Opd) (s' : LS) : Prop :=
@@ -486,7 +499,7 @@ theorem index_ok (F : Final c fn f sF) {E : Env} (L : LayOK E.prog c) (b i : Exp
           simp only [hev] at hp
           have hv := evalE_hasTy E lst env (hrel.typed L) b bv _ hwb hev htb
           obtain ⟨xs, rfl, hxs, _⟩ := hasTy_arr hv
-          refine ⟨xs, rfl, hxs, hp.mono (fun t _ _ ⟨A, hA, hpl⟩ => ?_)⟩
+          refine ⟨xs, rfl, hxs, hp.mono (fun t _ _ ⟨A, hA, hin, hpl⟩ => ?_)⟩
           rw [addr_static c ist t hroot hri] at hA
           cases hA
           exact hpl
@@ -514,7 +527,7 @@ theorem index_ok (F : Final c fn f sF) {E : Env} (L : LayOK E.prog c) (b i : Exp
               obtain ⟨xs, rfl, hxs, hruns⟩ := hbS cur lst env ist tmps bv hxF hrel hsz hev
               have hlt : ival.toNat < xs.size := by omega
               simp only [Array.getElem?_eq_getElem hlt]
-              refine hruns.mono (fun t _ _ hpl => ⟨_, ?_, PlaceAt.index hpl hev (hiall lst env) rfl hlt⟩)
+              refine hruns.mono (fun t _ _ hpl => ⟨_, ?_, rfl, PlaceAt.index hpl hev (hiall lst env) rfl hlt⟩)
               rw [hiv]
               simp only [addr, hroot, addr_off, Option.some.injEq]
               omega
@@ -616,7 +629,7 @@ theorem index_ok (F : Final c fn f sF) {E : Env} (L : LayOK E.prog c) (b i : Exp
               | some v =>
                 obtain ⟨xs, k, hevb, hxs, hevi, hk, hlt, rfl⟩ := hsome cur lst env ist tmps v hxF hrel hsz hev
                 refine (hboth cur lst env ist tmps xs k hxF hrel hsz hevb hevi).mono (fun t _ _ ⟨ho, hpl⟩ =>
-                  ⟨_, ?_, PlaceAt.index hpl hevb hevi rfl hlt⟩)
+                  ⟨_, ?_, by simp [inBound, ho, Val.toNat]; omega, PlaceAt.index hpl hevb hevi rfl hlt⟩)
                 by_cases hbig : n ≥ 2 ^ iw.bits
                 · simp only [addr, hroot, ho, addr_off, hbig, if_true, Val.toNat]
                 · simp only [addr, hroot, ho, addr_off, hbig, if_false, Val.toNat]
@@ -670,7 +683,12 @@ theorem index_ok (F : Final c fn f sF) {E : Env} (L : LayOK E.prog c) (b i : Exp
                 have h4 := hsem4 ist t' hxF (by rw [hts]; exact hsz)
                 simp only [Array.size_push, hout3, htmps3] at h4
                 refine (h4.weaken (Nat.le_trans hx.tmps hx2.tmps)).mono (fun t4 _ _ hl =>
-                  ⟨_, ?_, PlaceAt.index hpl hevb hevi rfl hlt⟩)
+                  ⟨_, ?_, ?_, PlaceAt.index hpl hevb hevi rfl hlt⟩)
+                rotate_left
+                · simp only [inBound, hl, ho, Val.toNat]
+                  rw [Nat.mod_eq_of_lt (by omega)]
+                  simp
+                  omega
                 simp only [addr, hroot, hl, ho, addr_off, Val.toNat]
                 rw [Nat.mod_eq_of_lt (by omega)]
               | none =>

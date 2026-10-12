@@ -53,6 +53,10 @@ theorem opd_ctx (h : CtxEq c c') (st : St) (tmps : Array Nat) (n : Nat) (o : Opd
 theorem addr_ctx (h : CtxEq c c') (st : St) (tmps : Array Nat) (a : Addr) : addr c' st tmps a = addr c st tmps a := by
   simp only [addr, h.layout, opd_ctx h]
 
+theorem inBound_ctx (h : CtxEq c c') (st : St) (tmps : Array Nat) (a : Addr) :
+    inBound c' st tmps a = inBound c st tmps a := by
+  simp only [inBound, opd_ctx h]
+
 theorem setDst_ctx (h : CtxEq c c') (st : St) (tmps : Array Nat) (n : Nat) (d : Dst) (v : Nat) :
     setDst c' st tmps n d v = setDst c st tmps n d v := by
   cases d <;> simp [setDst, h.layout]
@@ -94,7 +98,7 @@ theorem step_ctx (h : CtxEq c c') (st : St) (tmps : Array Nat) (ins : Instr) :
           rw [hf, hf'] at hr
           simp only [Option.bind] at hr
           simp [hr]
-  | _ => simp only [step, opd_ctx h, addr_ctx h, setDst_ctx h, setRet_ctx h, effect_ctx h, h.layout]
+  | _ => simp only [step, opd_ctx h, addr_ctx h, inBound_ctx h, setDst_ctx h, setRet_ctx h, effect_ctx h, h.layout]
 
 end
 
@@ -405,7 +409,7 @@ theorem step_call_falls {c : Ctx} {st st' : St} {tmps : Array Nat} {ins : Instr}
 
 theorem step_goto_target {c : Ctx} {st : St} {tmps : Array Nat} {ins : Instr} {l : Nat}
     (h : step c st tmps ins = .goto l) : ins.target? = some l := by
-  cases ins <;> simp only [step, Step.set] at h <;> (try split at h) <;> simp_all [Instr.target?]
+  cases ins <;> simp only [step, Step.set] at h <;> (try split at h) <;> (try split at h) <;> simp_all [Instr.target?]
 
 /-- What a mask may drop: instructions that do nothing where they are
 (a label, a jump to the next instruction), and nothing a kept
@@ -752,17 +756,29 @@ theorem facts_step (h : FactsHold c U fs st tmps) (hS : SlotsOK c.layout U D) (i
     simp only [step]
     cases addr c st tmps p with
     | none => trivial
-    | some a => exact hold_written h hS hd _
+    | some a =>
+      by_cases hin : inBound c st tmps p = true
+      · simp only [hin, if_true]
+        exact hold_written h hS hd _
+      · simp only [hin, Bool.false_eq_true, if_false]
   | store n p src =>
     simp only [step]
     cases addr c st tmps p with
     | none => trivial
-    | some a => exact hold_noSlots h _
+    | some a =>
+      by_cases hin : inBound c st tmps p = true
+      · simp only [hin, if_true]
+        exact hold_noSlots h _
+      · simp only [hin, Bool.false_eq_true, if_false]
   | lea d p =>
     simp only [step]
     cases addr c st tmps p with
     | none => trivial
-    | some a => exact hold_written h hS hd _
+    | some a =>
+      by_cases hin : inBound c st tmps p = true
+      · simp only [hin, if_true]
+        exact hold_written h hS hd _
+      · simp only [hin, Bool.false_eq_true, if_false]
   | zero s n => exact hold_noSlots h _
   | call g ret reg =>
     intro r st2
@@ -796,9 +812,21 @@ theorem known_addr (h : FactsHold c U fs st tmps) (p : Addr) :
     · rfl
   · rfl
 
+/-- The bound stays where the check goes. -/
+theorem known_inBound (p : Addr) : inBound c st tmps (knownAddr fs p) = inBound c st tmps p := by
+  unfold knownAddr
+  split
+  · rename_i x hx
+    split
+    · split
+      · simp only [inBound, hx]
+      · rfl
+    · rfl
+  · rfl
+
 theorem known_step (h : FactsHold c U fs st tmps) (ins : Instr) :
     step c st tmps (knownInstr fs ins) = step c st tmps ins := by
-  cases ins <;> first | rfl | simp only [knownInstr, step, known_addr h]
+  cases ins <;> first | rfl | simp only [knownInstr, step, known_addr h, known_inBound]
 
 end
 

@@ -235,9 +235,9 @@ section
 variable {c : Ctx} {fn : String} {f : IR.Fn} {sF : LS}
 
 theorem step_store_some (c : Ctx) (ist : St) (tmps : Array Nat) (n : Nat) (p : Addr) (src : Opd) {A : Nat}
-    (h : addr c ist tmps p = some A) :
+    (h : addr c ist tmps p = some A) (hb : inBound c ist tmps p = true) :
     step c ist tmps (.store n p src) = .next { ist with mem := wr ist.mem A n (opd c ist tmps n src) } tmps := by
-  simp only [step, h]
+  simp only [step, h, hb, if_true]
 
 theorem step_store_none (c : Ctx) (ist : St) (tmps : Array Nat) (n : Nat) (p : Addr) (src : Opd)
     (h : addr c ist tmps p = none) : step c ist tmps (.store n p src) = .stop (.trap ist) := by
@@ -359,7 +359,8 @@ theorem assign_sem (F : Final c fn f sF) {E : Env} (L : LayOK E.prog c) (hE : En
       have hplace : ∀ (cur : Nat) (lst : Lang.Sem.St) (env : Lang.Sem.Env) (ist : St) (tmps : Array Nat),
           Ext s1 sF → SRel c E cur lst env ist → tmps.size = f.tmps.size →
           ∃ lv, Runs c f ist s.out.size s1.out.size s.tmps.size tmps
-            (fun t1 => ∃ A, addr c ist t1 a.1 = some A ∧ PlaceAt c E cur lst env ist l t lv A) := by
+            (fun t1 => ∃ A, addr c ist t1 a.1 = some A ∧ inBound c ist t1 a.1 = true ∧
+              PlaceAt c E cur lst env ist l t lv A) := by
         intro cur lst env ist tmps hxF hrel hsz
         obtain ⟨lv, hlv⟩ := noTrap L hrel l t hwl htl hct
         have hp := hs1 cur lst env ist tmps hxF hrel hsz
@@ -372,7 +373,7 @@ theorem assign_sem (F : Final c fn f sF) {E : Env} (L : LayOK E.prog c) (hE : En
         intro _ s2 ⟨hx2, hc2, hs2⟩
         refine ⟨hx1.trans hx2, by rw [hc2, hc1], ?_⟩
         intro cur lst env ist tmps hxF hrel hsz
-        obtain ⟨lv, t1, r1, sz1, ag1, A, hA, hpl⟩ := hplace cur lst env ist tmps (hx2.trans hxF) hrel hsz
+        obtain ⟨lv, t1, r1, sz1, ag1, A, hA, hin, hpl⟩ := hplace cur lst env ist tmps (hx2.trans hxF) hrel hsz
         rw [addr_static c ist t1 hroot hi] at hA
         cases hA
         have h2 := hs2 cur lst env ist t1 hxF hrel (by rw [sz1]; exact hsz)
@@ -392,7 +393,7 @@ theorem assign_sem (F : Final c fn f sF) {E : Env} (L : LayOK E.prog c) (hE : En
         refine ⟨hx1.trans (hx2.trans (Ext.emit _ _)), by rw [← hc1, ← hc2], ?_⟩
         intro cur lst env ist tmps hxF hrel hsz
         have hxF2 : Ext s2 sF := (Ext.emit _ _).trans hxF
-        obtain ⟨lv, t1, r1, sz1, ag1, A, hA, hpl⟩ := hplace cur lst env ist tmps (hx2.trans hxF2) hrel hsz
+        obtain ⟨lv, t1, r1, sz1, ag1, A, hA, hin, hpl⟩ := hplace cur lst env ist tmps (hx2.trans hxF2) hrel hsz
         have h2 := hs2 cur lst env ist t1 hxF2 hrel (by rw [sz1]; exact hsz)
         simp only [Array.size_push]
         cases hev : Lang.Sem.evalE E.prog lst env r with
@@ -403,9 +404,12 @@ theorem assign_sem (F : Final c fn f sF) {E : Env} (L : LayOK E.prog c) (hE : En
           have hA2 : addr c ist t2 a.1 = some A := by
             rw [addr_agree c ist (fun x hx t ht => (hidx x hx t ht).2) ag2]
             exact hA
+          have hin2 : inBound c ist t2 a.1 = true := by
+            rw [inBound_agree c ist (fun x hx t ht => (hidx x hx t ht).2) ag2]
+            exact hin
           refine assign_end hpl hrel.size hs hwr (evalE_hasTy E lst env (hrel.typed L) r v t hwrr hev htr)
             ((r1.trans r2).trans (Reach.next (F.emitted hxF rfl) ?_)) (by rw [sz2, sz1])
-          rw [step_store_some c ist t2 _ _ _ hA2, ho]
+          rw [step_store_some c ist t2 _ _ _ hA2 hin2, ho]
     · rw [if_neg hct]
       simp only [wp_bind]
       refine wp_mono (expr_ok F r E s t L hE hwrr htr hs) ?_
@@ -416,7 +420,7 @@ theorem assign_sem (F : Final c fn f sF) {E : Env} (L : LayOK E.prog c) (hE : En
       have hboth : ∀ (ins : Instr) (cur : Nat) (lst : Lang.Sem.St) (env : Lang.Sem.Env) (ist : St)
           (tmps : Array Nat), Ext { s2 with out := s2.out.push ins } sF → SRel c E cur lst env ist →
           tmps.size = f.tmps.size →
-          (∀ t2 A, addr c ist t2 a.1 = some A → ∀ v, opd c ist t2 (sizeOf E.prog t) o = v →
+          (∀ t2 A, addr c ist t2 a.1 = some A → inBound c ist t2 a.1 = true → ∀ v, opd c ist t2 (sizeOf E.prog t) o = v →
             step c ist t2 ins = .next { ist with mem := wr ist.mem A (sizeOf E.prog t) v } t2) →
           (∀ t2, addr c ist t2 a.1 = none → step c ist t2 ins = .stop (.trap ist)) →
           match Lang.Sem.evalE E.prog lst env r with
@@ -445,12 +449,12 @@ theorem assign_sem (F : Final c fn f sF) {E : Env} (L : LayOK E.prog c) (hE : En
             · exact r1.ends (h2.ends (fun t2 _ _ hA => Ends.stop hb (hnone t2 hA) (by simp)))
           | some lv =>
             simp only [hel] at h2
-            obtain ⟨t2, r2, sz2, ag2, A, hA, hpl⟩ := h2
+            obtain ⟨t2, r2, sz2, ag2, A, hA, hin, hpl⟩ := h2
             have ho2 : opd c ist t2 (sizeOf E.prog t) o = v.toNat := by
               rw [opd_agree c ist _ (fun t ht => (ho1.1 t ht).2) ag2]
               exact ho
             exact assign_end hpl hrel.size hs hwr (evalE_hasTy E lst env (hrel.typed L) r v t hwrr hev htr)
-              ((r1.trans r2).trans (Reach.next hb (hsome t2 A hA _ ho2))) (by rw [sz2, sz1])
+              ((r1.trans r2).trans (Reach.next hb (hsome t2 A hA hin _ ho2))) (by rw [sz2, sz1])
       unfold storeTo
       cases hi : a.1.idx with
       | none =>
@@ -458,7 +462,7 @@ theorem assign_sem (F : Final c fn f sF) {E : Env} (L : LayOK E.prog c) (hE : En
         refine ⟨hx1.trans (hx2.trans (Ext.emit _ _)), by rw [← hc1, ← hc2], ?_⟩
         intro cur lst env ist tmps hxF hrel hsz
         simp only [Array.size_push]
-        refine hboth _ cur lst env ist tmps hxF hrel hsz (fun t2 A hA v hv => ?_) (fun t2 hA => ?_)
+        refine hboth _ cur lst env ist tmps hxF hrel hsz (fun t2 A hA hin v hv => ?_) (fun t2 hA => ?_)
         · rw [addr_static c ist t2 hroot hi] at hA
           cases hA
           rw [step_mov, hv]
@@ -470,8 +474,8 @@ theorem assign_sem (F : Final c fn f sF) {E : Env} (L : LayOK E.prog c) (hE : En
         refine ⟨hx1.trans (hx2.trans (Ext.emit _ _)), by rw [← hc1, ← hc2], ?_⟩
         intro cur lst env ist tmps hxF hrel hsz
         simp only [Array.size_push]
-        refine hboth _ cur lst env ist tmps hxF hrel hsz (fun t2 A hA v hv => ?_) (fun t2 hA => ?_)
-        · rw [step_store_some c ist t2 _ _ _ hA, hv]
+        refine hboth _ cur lst env ist tmps hxF hrel hsz (fun t2 A hA hin v hv => ?_) (fun t2 hA => ?_)
+        · rw [step_store_some c ist t2 _ _ _ hA hin, hv]
         · exact step_store_none c ist t2 _ _ _ hA
   cases l with
   | var x =>

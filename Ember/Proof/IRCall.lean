@@ -1020,7 +1020,7 @@ theorem storeAt_ok (F : Final c fn f sF) {E : Env} (L : LayOK E.prog c) (hE : En
   have hboth : ∀ (ins : Instr) (cur : Nat) (lst : Lang.Sem.St) (env : Lang.Sem.Env) (ist : St)
       (tmps : Array Nat) (v : Val), Ext { s2 with out := s2.out.push ins } sF → SRel c E cur lst env ist →
       tmps.size = f.tmps.size → HasTy E.prog ty v → opd c ist tmps (sizeOf E.prog ty) o = v.toNat →
-      (∀ t2 A, addr c ist t2 a.1 = some A → ∀ x, opd c ist t2 (sizeOf E.prog ty) o = x →
+      (∀ t2 A, addr c ist t2 a.1 = some A → inBound c ist t2 a.1 = true → ∀ x, opd c ist t2 (sizeOf E.prog ty) o = x →
         step c ist t2 ins = .next { ist with mem := wr ist.mem A (sizeOf E.prog ty) x } t2) →
       (∀ t2, addr c ist t2 a.1 = none → step c ist t2 ins = .stop (.trap ist)) →
       match Lang.Sem.assign E.prog lst env d v with
@@ -1040,11 +1040,11 @@ theorem storeAt_ok (F : Final c fn f sF) {E : Env} (L : LayOK E.prog c) (hE : En
       · exact h2.ends (fun t2 _ _ hA => Ends.stop hb (hnone t2 hA) (by simp))
     | some lv =>
       simp only [hel] at h2
-      obtain ⟨t2, r2, sz2, ag2, A, hA, hpl⟩ := h2
+      obtain ⟨t2, r2, sz2, ag2, A, hA, hin, hpl⟩ := h2
       have ho2 : opd c ist t2 (sizeOf E.prog ty) o = v.toNat := by
         rw [opd_agree c ist _ ho ag2]
         exact hov
-      exact assign_end hpl hrel.size hs hwr hv (r2.trans (Reach.next hb (hsome t2 A hA _ ho2))) sz2
+      exact assign_end hpl hrel.size hs hwr hv (r2.trans (Reach.next hb (hsome t2 A hA hin _ ho2))) sz2
   unfold storeTo
   cases hi : a.1.idx with
   | none =>
@@ -1052,7 +1052,7 @@ theorem storeAt_ok (F : Final c fn f sF) {E : Env} (L : LayOK E.prog c) (hE : En
     refine ⟨hx2.trans (Ext.emit _ _), hc2, ?_⟩
     intro cur lst env ist tmps v hxF hrel hsz hv hov
     simp only [Array.size_push]
-    refine hboth _ cur lst env ist tmps v hxF hrel hsz hv hov (fun t2 A hA x hx => ?_) (fun t2 hA => ?_)
+    refine hboth _ cur lst env ist tmps v hxF hrel hsz hv hov (fun t2 A hA hin x hx => ?_) (fun t2 hA => ?_)
     · rw [addr_static c ist t2 hroot hi] at hA
       cases hA
       rw [step_mov, hx]
@@ -1064,8 +1064,8 @@ theorem storeAt_ok (F : Final c fn f sF) {E : Env} (L : LayOK E.prog c) (hE : En
     refine ⟨hx2.trans (Ext.emit _ _), hc2, ?_⟩
     intro cur lst env ist tmps v hxF hrel hsz hv hov
     simp only [Array.size_push]
-    refine hboth _ cur lst env ist tmps v hxF hrel hsz hv hov (fun t2 A hA x hx => ?_) (fun t2 hA => ?_)
-    · rw [step_store_some c ist t2 _ _ _ hA, hx]
+    refine hboth _ cur lst env ist tmps v hxF hrel hsz hv hov (fun t2 A hA hin x hx => ?_) (fun t2 hA => ?_)
+    · rw [step_store_some c ist t2 _ _ _ hA hin, hx]
     · exact step_store_none c ist t2 _ _ _ hA
 
 /-- An invocation with its result stored. -/

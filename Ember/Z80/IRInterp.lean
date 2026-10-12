@@ -117,6 +117,8 @@ partial def runFn (c : Ctx) (name : String) : IM (Option Nat) := do
         let i ← opd x.size x.opd
         if let some len := x.len then
           unless i < len do throw s!"trap: index {i} out of bounds [0, {len}) in {name}"
+        if let some b := x.bound then
+          unless i < b do throw s!"malformed IR: index {i} is not below its bound {b} in {name}"
         return base + a.off + i * x.scale
     -- a destination is written after the instruction's operands are read
     let mut out : Option (Nat × Dst × Nat) := none

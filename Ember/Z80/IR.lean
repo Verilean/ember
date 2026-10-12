@@ -71,12 +71,15 @@ def Cmp.negate : Cmp → Cmp
   | .eq => .ne | .ne => .eq | .lt => .ge | .ge => .lt
 
 /-- A dynamic index: `size` bytes (1 or 2), times `scale`; with `len`,
-a trap unless it is below. -/
+a trap unless it is below.  `bound`: what the index is known to be
+below, checked or not — a program in which it is not has no meaning
+(`Ember.Z80.IR.Sem`); code generation does not look at it. -/
 structure Index where
   opd : Opd
   size : Nat
   scale : Nat
   len : Option Nat
+  bound : Option Nat := none
   deriving BEq, Repr, Inhabited
 
 inductive Root where
@@ -534,13 +537,14 @@ def place (e : Expr) : LM (Addr × Ty) :=
             let o ← expr i
             if iw.bits / 8 ≤ 2 then
               pure ({ r.1 with idx := some { opd := o, size := iw.bits / 8, scale,
-                                             len := if n ≥ 2 ^ iw.bits then none else some n } }, el)
+                                             len := if n ≥ 2 ^ iw.bits then none else some n,
+                                             bound := some n } }, el)
             else do
               -- a wide index: compared as it is, then its low two bytes
               let tl ← trapLabel
               emit (.br .ge (iw.bits / 8) o (.const n) tl)
               let low ← lowIdx (iw.bits / 8) o
-              pure ({ r.1 with idx := some { opd := low, size := 2, scale, len := none } }, el)
+              pure ({ r.1 with idx := some { opd := low, size := 2, scale, len := none, bound := some n } }, el)
           | _ => err "non-integer index"
     | _ => err "index of a non-array"
   | .lit _ _ => err "not a place"

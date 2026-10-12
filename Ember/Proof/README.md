@@ -666,6 +666,13 @@ equality.
 * **the IR semantics against the interpreter**: `IR.Sem` and the
   `partial` interpreter `Ember/Z80/IRInterp.lean` are tested against
   each other, not proved equal;
+* an index has a `bound` besides its check (`Index.bound`): what the
+  lowering knows the index to be below, kept when `dropChecks` drops
+  the check.  `IR.Sem` gives a program no meaning (`bad`) where an index
+  is not below its bound; the theorems show the lowered program never
+  gets there.  Code generation does not look at it — it is there for
+  the proof of the code generator, which needs every access to stay in
+  its array;
 * **from the IR on**: the code generator (M7.3; "The encoder" below is
   what it will stand on).
 
