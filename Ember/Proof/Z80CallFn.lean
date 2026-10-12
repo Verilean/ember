@@ -51,13 +51,15 @@ def Outcome (Z : ZCtx) (f : IR.Fn) (fr : Fr) (s : Cpu) (w : Z.W) : IR.Sem.Res �
 /-- The function `g`, entered with the IR in the state `st1` (its
 argument stored), has the outcome of the result `res`. -/
 def Callee (Z : ZCtx) (g : String) (st1 : IR.Sem.St) (res : IR.Sem.Res) : Prop :=
-  ∀ gf st v s w, Z.c.prog.fn? g = some gf → st1 = stArg Z.c gf st v → Entry Z gf st v s → Z.wrel st.world w →
-    Outcome Z gf ⟨s.sp, s.mem⟩ s w res
+  ∀ gf st v s w, Z.c.prog.fn? g = some gf → gf.dead = false → st1 = stArg Z.c gf st v → Entry Z gf st v s →
+    Z.wrel st.world w → Outcome Z gf ⟨s.sp, s.mem⟩ s w res
 
 /-- What a call needs of the program. -/
 structure CallNeed (Z : ZCtx) (E : GEnv) (dt : Nat → Prop) (g : String) (ret : Option (Nat × Dst))
     (reg : Option (Nat × Opd)) : Prop where
   fn : ∃ gf, Z.c.prog.fn? g = some gf
+  /-- The function has code of its own (it was not inlined away). -/
+  live : ∀ gf, Z.c.prog.fn? g = some gf → gf.dead = false
   /-- The argument in a register is the parameter in a register, of that size. -/
   regSz : ∀ gf, Z.c.prog.fn? g = some gf → reg.map (·.1) = gf.regParam.map (·.1)
   rd : ∀ n o, reg = some (n, o) → Rd Z E dt n o
@@ -162,7 +164,7 @@ theorem call_fn (ok : Z.OK) (hT : FnLay Z E) (F : GFinal Z base sF) {s0 s1 : GS}
       exact R.mem x hxd
     · obtain ⟨h12, h1, h2, _⟩ := hargv n sl h
       exact ⟨fun e => by rw [cs.a]; exact h1 e, fun e => by rw [hl_congr cs.h cs.l]; exact h2 e, fun e => by omega⟩
-  have hout := hc gf ist v c1 w hgf hst1 ent hw
+  have hout := hc gf ist v c1 w hgf (N.live gf hgf) hst1 ent hw
   cases res with
   | fuel => trivial
   | bad => trivial

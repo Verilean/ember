@@ -1020,23 +1020,37 @@ structure Compiled where
   frames : List (String × Nat)
   lits : Array (Nat × Nat)
 
+/-- One function, two passes: with a slot for every temporary to find
+the temporaries read from their slot, then with slots for those only. -/
+def genOne (p : IR.Prog) (annotate : Bool) (f : IR.Fn) (lits : Array (Nat × Nat)) :
+    Except String (Array Item × Array (Nat × Nat) × Nat) :=
+  match genFn f (Array.replicate f.tmps.size true) lits with
+  | .error e => .error e
+  | .ok (_, missed, _, _, live) =>
+    match genFn f missed lits (f.name == p.entry) live annotate with
+    | .error e => .error e
+    | .ok (code, missed2, lits2, size, _) =>
+      match (List.range f.tmps.size).find? fun t => missed2[t]! && !missed[t]! with
+      | some t => .error s!"{f.name}: the two passes disagree on t{t}"
+      | none => .ok (code, lits2, size)
+
+/-- The functions one after the other: items, frames (temporaries included), literals. -/
+def genFns (p : IR.Prog) (annotate : Bool) :
+    List IR.Fn → Array Item × Array (String × Nat) × Array (Nat × Nat) →
+      Except String (Array Item × Array (String × Nat) × Array (Nat × Nat))
+  | [], acc => .ok acc
+  | f :: r, (items, frames, lits) =>
+    if f.dead then genFns p annotate r (items, frames.push (f.name, f.frame), lits)
+    else
+      match genOne p annotate f lits with
+      | .error e => .error e
+      | .ok (code, lits2, size) => genFns p annotate r (items ++ code, frames.push (f.name, size), lits2)
+
 /-- All functions: two passes each. -/
-def genProg (p : IR.Prog) (annotate := false) : Except String Compiled := do
-  let mut items : Array Item := #[]
-  let mut frames := #[]
-  let mut lits : Array (Nat × Nat) := #[]
-  for f in p.fns do
-    if f.dead then
-      frames := frames.push (f.name, f.frame)
-      continue
-    let (_, missed, _, _, live) ← genFn f (Array.replicate f.tmps.size true) lits
-    let (code, missed2, lits2, size, _) ← genFn f missed lits (f.name == p.entry) live annotate
-    for t in [0:f.tmps.size] do
-      if missed2[t]! && !missed[t]! then throw s!"{f.name}: the two passes disagree on t{t}"
-    items := items ++ code
-    lits := lits2
-    frames := frames.push (f.name, size)
-  return { items := items.toList, frames := frames.toList, lits }
+def genProg (p : IR.Prog) (annotate := false) : Except String Compiled :=
+  match genFns p annotate p.fns (#[], #[], #[]) with
+  | .error e => .error e
+  | .ok (items, frames, lits) => .ok { items := items.toList, frames := frames.toList, lits }
 
 /-! ## A whole image -/
 

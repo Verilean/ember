@@ -390,12 +390,12 @@ theorem exec_ok (ok : Z.OK) {G : FnGen} {f : IR.Fn} (GK : G.OK Z f) :
 
 /-- **Every function**: entered as `Entry` says, its code has the
 outcome of `IR.Sem.callF`. -/
-theorem fn_ok (ok : Z.OK) (hG : ∀ g gf, Z.c.prog.fn? g = some gf → ∃ G : FnGen, G.OK Z gf) :
+theorem fn_ok (ok : Z.OK) (hG : ∀ g gf, Z.c.prog.fn? g = some gf → gf.dead = false → ∃ G : FnGen, G.OK Z gf) :
     ∀ k g st1, Callee Z g st1 (IR.Sem.callF k Z.c g st1) := by
   intro k
   induction k using Nat.strongRecOn with
   | _ k ih =>
-    intro g st1 gf st v s w hgf hst1 ent hw
+    intro g st1 gf st v s w hgf hlive hst1 ent hw
     cases k with
     | zero =>
       rw [callF_zero]
@@ -403,7 +403,7 @@ theorem fn_ok (ok : Z.OK) (hG : ∀ g gf, Z.c.prog.fn? g = some gf → ∃ G : F
     | succ k =>
       rw [callF_succ]
       simp only [hgf]
-      obtain ⟨G, GK⟩ := hG g gf hgf
+      obtain ⟨G, GK⟩ := hG g gf hgf hlive
       obtain ⟨s', st', hat, R⟩ := GK.entry st v s ent
       rw [hst1]
       refine Outcome.steps (Steps.lift ok st' w) (exec_ok ok GK k (fun m hm => ih m (by omega)) 0 _ _ s' w _
