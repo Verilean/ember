@@ -158,6 +158,20 @@ theorem GFinal.emitted {Z : ZCtx} {base : Nat} {sF : GS} (F : GFinal Z base sF) 
     simp
   simpa using this
 
+/-- An item emitted so far. -/
+theorem GFinal.at {Z : ZCtx} {base : Nat} {sF : GS} (F : GFinal Z base sF) {s : GS} (hx : GExt s sF) {j : Nat}
+    {it : Item} (h : s.out[j]? = some it) : Z.items[base + j]? = some it := by
+  refine F.code j it ?_
+  obtain ⟨rest, hr⟩ := hx
+  have hj : j < s.out.size := by
+    rcases Nat.lt_or_ge j s.out.size with h' | h'
+    · exact h'
+    · rw [Array.getElem?_eq_none h'] at h; cases h
+  have : sF.out.toList[j]? = some it := by
+    rw [← hr, List.getElem?_append_left (by simpa using hj)]
+    simpa using h
+  simpa using this
+
 /-! ## Numbers -/
 
 theorem mk16_toNat (hi lo : UInt8) : (mk16 hi lo).toNat = hi.toNat * 256 + lo.toNat := by
