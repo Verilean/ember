@@ -390,29 +390,50 @@ structure Assembled where
   /-- Address of every item, for listings. -/
   addrs : Array Nat
 
-/-- Two passes: sizes do not depend on label values. -/
-def assemble (items : List Item) (origin : Nat := 0) : Except String Assembled := do
-  let mut labels : List (String × Nat) := []
-  let mut addrs : Array Nat := #[]
-  let mut pc := origin
-  for it in items do
-    addrs := addrs.push pc
+/-- The first pass: the address of every item, then the address after
+the last; the labels, the latest first. -/
+def place : List Item → Nat → List (String × Nat) → Except String (List Nat × List (String × Nat))
+  | [], pc, labels => .ok ([pc], labels)
+  | it :: r, pc, labels =>
     match it with
     | .label n =>
-      if labels.any (·.1 == n) then throw s!"label {n} defined twice"
-      labels := (n, pc) :: labels
+      if labels.any (·.1 == n) then .error s!"label {n} defined twice"
+      else (place r pc ((n, pc) :: labels)).map fun x => (pc :: x.1, x.2)
     | .equ n v =>
-      if labels.any (·.1 == n) then throw s!"label {n} defined twice"
-      labels := (n, v) :: labels
-    | _ => pc := pc + (← it.encode { sizing := true, pc := Int.ofNat pc }).length
-  if pc > 0x10000 then throw s!"program ends at {pc}"
-  let resolve (s : String) : Option Int := (labels.lookup s).map Int.ofNat
-  let mut out := ByteArray.empty
-  let mut k := 0
-  for it in items do
-    for b in ← it.encode { resolve, pc := Int.ofNat addrs[k]! } do out := out.push b
-    k := k + 1
-  return { origin, bytes := out, labels := labels.reverse, addrs }
+      if labels.any (·.1 == n) then .error s!"label {n} defined twice"
+      else (place r pc ((n, v) :: labels)).map fun x => (pc :: x.1, x.2)
+    | _ =>
+      match it.encode { sizing := true, pc := Int.ofNat pc } with
+      | .ok bs => (place r (pc + bs.length) labels).map fun x => (pc :: x.1, x.2)
+      | .error e => .error e
+
+/-- The second pass: every item at its address.  That an item has the
+size the first pass gave it is checked, not assumed. -/
+def emit (resolve : String → Option Int) : List Item → List Nat → Except String (List UInt8)
+  | [], _ => .ok []
+  | it :: r, a :: a' :: as =>
+    match it.encode { resolve, pc := Int.ofNat a } with
+    | .ok bs =>
+      if a' != a + bs.length then .error s!"{it.text}: its size changed between the passes"
+      else (emit resolve r (a' :: as)).map (bs ++ ·)
+    | .error e => .error e
+  | _ :: _, _ => .error "assemble: an item without an address"
+
+/-- Two passes: sizes do not depend on label values. -/
+def assemble (items : List Item) (origin : Nat := 0) : Except String Assembled :=
+  match place items origin [] with
+  | .error e => .error e
+  | .ok (addrs, labels) =>
+    if addrs.getLast?.getD origin > 0x10000 then .error s!"program ends at {addrs.getLast?.getD origin}"
+    else
+      match emit (fun s => (labels.lookup s).map Int.ofNat) items addrs with
+      | .ok bytes =>
+        .ok { origin, bytes := ByteArray.mk bytes.toArray, labels := labels.reverse, addrs := addrs.dropLast.toArray }
+      | .error e => .error e
+
+/-- The environment an item at `pc` was encoded in. -/
+def Assembled.env (a : Assembled) (pc : Nat) : Env :=
+  { resolve := fun s => (a.labels.reverse.lookup s).map Int.ofNat, pc := Int.ofNat pc }
 
 def source (items : List Item) (origin : Nat := 0) : String :=
   s!"  org {origin}\n" ++ "\n".intercalate (items.map Item.text) ++ "\n"

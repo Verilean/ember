@@ -316,33 +316,36 @@ def daa (s : Cpu) : Cpu :=
   let (d, s) := s.fetch
   if taken then ({ s with pc := s.pc + sext d }).tick 12 else s.tick 7
 
-/-- The `CB` page; under a prefix the operand is `(IX+d)` and the
-displacement comes before the opcode. -/
+/-- An instruction of the `CB` page without a prefix, its opcode fetched. -/
+def cbOp (s : Cpu) (op : UInt8) : Cpu :=
+  let g := op >>> 6
+  let y := (op >>> 3) &&& 7
+  let z := op &&& 7
+  if z == 6 then
+    let a := s.hl
+    let v := s.rd a
+    match g with
+    | 0 => let (r, s) := s.rot y v; (s.wr a r).tick 15
+    -- the undocumented flags of BIT n,(HL) come from an internal
+    -- register; this model takes them from H
+    | 1 => (s.bitTest y v s.h).tick 12
+    | 2 => (s.wr a (v &&& ~~~((1 : UInt8) <<< y))).tick 15
+    | _ => (s.wr a (v ||| ((1 : UInt8) <<< y))).tick 15
+  else
+    let v := s.reg .hl z
+    match g with
+    | 0 => let (r, s) := s.rot y v; (s.setReg .hl z r).tick 8
+    | 1 => (s.bitTest y v v).tick 8
+    | 2 => (s.setReg .hl z (v &&& ~~~((1 : UInt8) <<< y))).tick 8
+    | _ => (s.setReg .hl z (v ||| ((1 : UInt8) <<< y))).tick 8
+
+/-- The `CB` page (`cbOp`); under a prefix the operand is `(IX+d)` and
+the displacement comes before the opcode. -/
 def execCB (s : Cpu) (x : Idx) : Cpu :=
   match x with
   | .hl =>
     let (op, s) := s.fetch
-    let s := s.bumpR
-    let g := op >>> 6
-    let y := (op >>> 3) &&& 7
-    let z := op &&& 7
-    if z == 6 then
-      let a := s.hl
-      let v := s.rd a
-      match g with
-      | 0 => let (r, s) := s.rot y v; (s.wr a r).tick 15
-      -- the undocumented flags of BIT n,(HL) come from an internal
-      -- register; this model takes them from H
-      | 1 => (s.bitTest y v s.h).tick 12
-      | 2 => (s.wr a (v &&& ~~~((1 : UInt8) <<< y))).tick 15
-      | _ => (s.wr a (v ||| ((1 : UInt8) <<< y))).tick 15
-    else
-      let v := s.reg .hl z
-      match g with
-      | 0 => let (r, s) := s.rot y v; (s.setReg .hl z r).tick 8
-      | 1 => (s.bitTest y v v).tick 8
-      | 2 => (s.setReg .hl z (v &&& ~~~((1 : UInt8) <<< y))).tick 8
-      | _ => (s.setReg .hl z (v ||| ((1 : UInt8) <<< y))).tick 8
+    cbOp s.bumpR op
   | _ =>
     let (d, s) := s.fetch
     let (op, s) := s.fetch
@@ -410,10 +413,8 @@ def execBlock (s : Cpu) (inp : UInt16 → UInt8) (y z : UInt8) : Cpu :=
     let s := { s with f := (s.f &&& FC) ||| szxy b ||| FN, io := .write port v }
     if rep && b != 0 then ({ s with pc := s.pc - 2 }).tick 21 else s.tick 16
 
-/-- The `ED` page. -/
-def execED (s : Cpu) (inp : UInt16 → UInt8) : Cpu :=
-  let (op, s) := s.fetch
-  let s := s.bumpR
+/-- An instruction of the `ED` page, its opcode fetched. -/
+def edOp (s : Cpu) (inp : UInt16 → UInt8) (op : UInt8) : Cpu :=
   let g := op >>> 6
   let y := (op >>> 3) &&& 7
   let z := op &&& 7
@@ -456,6 +457,11 @@ def execED (s : Cpu) (inp : UInt16 → UInt8) : Cpu :=
       | _ => s.tick 8
   else if g == 2 && z ≤ 3 && y ≥ 4 then s.execBlock inp y z
   else s.tick 8
+
+/-- The `ED` page. -/
+def execED (s : Cpu) (inp : UInt16 → UInt8) : Cpu :=
+  let (op, s) := s.fetch
+  edOp s.bumpR inp op
 
 /-- An instruction of the main page, `x` naming the register pair that
 plays `HL` (the prefix has been counted already). -/

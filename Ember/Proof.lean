@@ -62,6 +62,8 @@ import Ember.Proof.IRInit
 import Ember.Proof.IRPass
 import Ember.Proof.IRLower
 import Ember.Proof.IRNet
+import Ember.Proof.Z80Encode
+import Ember.Proof.Z80Asm
 
 /-!
 # Ember.Proof — proofs (plan M5): about the reference stack (P1), and that Ember code refines it (P2)
@@ -143,8 +145,12 @@ The Z80 back end (M7, begun) — `Ember.Z80.IR.Sem` is the semantics of its IR:
 * `IRNet`: **the IR of the stack transmits and drops what the Spec does** (`stack_ir`) — M5.6 and M7.1
   together; the checkers accept every build of the stack.
 
-By-reference parameters and `inlineCalls` are outside M7.1; `IR → Z80` (M7.3) and the encoder (M7.4)
-are not proved.
+* `Z80Encode`, `Z80Asm`: **the encoder** (M7.4) — the CPU model, stepping on the bytes `Asm.encode`
+  gives for an instruction, does what `Asm.exec` says the instruction does (`step_encode`; every form
+  without `IX`/`IY`), and `Asm.assemble` puts every item's encoding at its address with the labels
+  resolved to the addresses of their items (`assemble_ok`).
+
+By-reference parameters and `inlineCalls` are outside M7.1; `IR → Z80` (M7.3) is not proved.
 
 Every statement is about the definitions of `Ember.Spec` as they are;
 `Ember/Proof/README.md` lists the theorems, the hypotheses they need and

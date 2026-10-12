@@ -73,6 +73,8 @@ specifies) is at the end of this file: "Refinement".
 | `IRProgram.lean`, `IRInit.lean`, `IRCheck.lean` | the program as lowered (`lowered_of_raw`), the layout check (`layOk_sound`), the initial memory (`init_rel`), the entry function again and again (`iter_sim`, `iter_trap`); the checker `progOkB` and `progOkB_sound` | M7.1 (programs) |
 | `IRPass.lean`, `IRLower.lean` | the passes: a simulation between two bodies (`sim_exec`), dropping instructions (`del_sim`), `cleanup`, `dropChecks` (`drop_sim`), `tidy_ref`; `IR.lower` as a whole (`lower_iter`, `lower_trap`) and the checker `irOkB` | M7.1 (passes) |
 | `IRNet.lean` | `stack_ir`: the IR of the SLIP build against the Spec; the `#guard`s that the builds of the stack are covered | M5.6 + M7.1 |
+| `Z80Encode.lean` | `step_encode`: the CPU model on the bytes of an encoded instruction does what `Asm.exec` (`Ember/Z80/AsmSem.lean`) says the instruction does | M7.4 |
+| `Z80Asm.lean` | `assemble_ok`: the assembler puts every item's encoding at its address; labels resolve to the addresses of their items | M7.4 |
 
 ## Theorems
 
@@ -230,8 +232,8 @@ occur.
   returns.
 * P2 beyond what "Refinement" below lists; P3: the emitted C is proved
   ("The emitted C" below); of the Z80 back end the translation to its
-  IR is ("The IR of the Z80 back end" below), the code generator and
-  the encoder are not (M7.3, M7.4).
+  IR and the encoder are ("The IR of the Z80 back end", "The encoder"
+  below), the code generator is not (M7.3).
 
 ## How the TCP proofs are organised
 
@@ -284,7 +286,8 @@ and none of them is proved:
    `Ember/C/Sem.lean` — which is itself a definition, tested against gcc
    and SDCC through the emitted programs, not derived from the C
    standard.  Of the translation to Z80, the step to the IR is proved
-   (M7.1), the code generator and the encoder are tested, not proved.
+   (M7.1) and so is the encoder (M7.4); the code generator is tested,
+   not proved.
 
 ### Theorems
 
@@ -663,7 +666,37 @@ equality.
 * **the IR semantics against the interpreter**: `IR.Sem` and the
   `partial` interpreter `Ember/Z80/IRInterp.lean` are tested against
   each other, not proved equal;
-* **from the IR on**: the code generator (M7.3) and the encoder (M7.4).
+* **from the IR on**: the code generator (M7.3; "The encoder" below is
+  what it will stand on).
+
+### The encoder (M7.4)
+
+The CPU model `Ember/Z80/Cpu.lean` has no decoder apart from its
+interpreter: `step` reads bytes and acts.  `Ember/Z80/AsmSem.lean`
+gives every instruction of `Asm.Instr` a meaning by its mnemonic and
+operands (`exec`), written with the model's own helpers (`alu`,
+`setReg`, `push`, …), and the theorems connect the three:
+
+| Theorem (`Z80Enc`) | Statement |
+|---|---|
+| **`step_encode`** (`Z80Encode.lean`) | if `Asm.encode i env = .ok bs`, the bytes `bs` are in memory at the program counter and the CPU is not halted, then `Cpu.step` gives the state `Asm.exec env i` gives — every register, flag, memory, T-states and `R`.  For every form the assembler accepts that has no `IX`/`IY` operand (the back end and its runtime use none): 8- and 16-bit loads, the accumulator operations, `inc`/`dec`, rotates and shifts, `bit`/`res`/`set`, jumps, calls and returns with every condition, `rst`, `push`/`pop`, exchanges, I/O, the interrupt modes, the block instructions |
+| **`assemble_ok`** (`Z80Asm.lean`) | in what `Asm.assemble` returns: the first item is at the origin, every item at the address after the encoding of the one before; the bytes at an item's address are its encoding with the labels resolved (`Assembled.env`); a label resolves to the address of its item |
+
+How: with the mnemonic and operands fixed the encoder computes to
+bytes, the model's decoding of those bytes computes, and both sides are
+equal by `rfl`; an immediate operand is the only part that does not
+compute, and three lemmas give its bytes.  For the proofs the `ED` and
+`CB` pages of the model were split into the fetch of the opcode and the
+rest (`edOp`, `cbOp`), and `assemble` was rewritten as two recursive
+functions (`place`, `emit`) with the same output; `emit` checks that an
+item has the size the first pass gave it, so "sizes do not depend on
+label values" is checked on every program rather than proved.
+
+**Not covered:** the forms with `IX` and `IY` (`exec` is `none` for
+them); the block instructions are covered but their meaning is the
+model's own `execBlock`; `Asm.relax` (it runs before `assemble`, which
+is what the theorem is about); the text parser of the runtime's
+assembly.
 
 ### Not proven
 
@@ -674,7 +707,7 @@ equality.
   ARP, DHCP) has no refinement proofs;
 * lines other than transmissions and drops (`pkt`, `tcb`, notes) are
   not compared;
-* the Z80 back end from the IR on: the translation from the IR to machine code (M7.3) and the encoder (M7.4) are tested, not proved; and what "The emitted C" and "The IR of the Z80 back end" above list as not covered;
+* the Z80 back end from the IR on: the translation from the IR to machine code (M7.3) is tested, not proved (the encoder, M7.4, is proved); and what "The emitted C" and "The IR of the Z80 back end" above list as not covered;
 * that a function *traps* exactly when the Spec rejects: the theorems
   are for states that satisfy their invariants, and show that from those
   no call traps (the fuel given is enough and every index is in range).

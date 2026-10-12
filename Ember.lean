@@ -28,6 +28,7 @@ import Ember.Net.Loop
 import Ember.Net.Eth
 import Ember.Z80.Cpu
 import Ember.Z80.Asm
+import Ember.Z80.AsmSem
 import Ember.Z80.IR
 import Ember.Z80.Frame
 import Ember.Z80.IRInterp
