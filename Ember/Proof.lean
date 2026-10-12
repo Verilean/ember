@@ -110,6 +110,7 @@ import Ember.Proof.Z80LoopItems
 import Ember.Proof.Z80LoopImage
 import Ember.Proof.Z80Rt
 import Ember.Proof.Z80Boot
+import Ember.Proof.Z80Note
 import Ember.Proof.Z80World
 import Ember.Proof.Z80Image
 import Ember.Proof.Z80LoopHItems

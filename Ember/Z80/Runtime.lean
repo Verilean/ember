@@ -647,12 +647,14 @@ rt_drop: out (0xD5),a
 ", []⟩,
   ⟨"
 rt_note: ld c,a
-  ld hl,rt_acc
-  ld b,4
-rt_note_l: ld a,(hl)
+  ld a,(rt_acc)
   out (0xDA),a
-  inc hl
-  djnz rt_note_l
+  ld a,(rt_acc+1)
+  out (0xDA),a
+  ld a,(rt_acc+2)
+  out (0xDA),a
+  ld a,(rt_acc+3)
+  out (0xDA),a
   ld a,c
   out (0xD6),a
   ret

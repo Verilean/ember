@@ -108,6 +108,12 @@ structure Harness (Z : ZCtx) where
   wrEnd : ∀ wd w p v, lo p = 0xD4 → Z.wrel wd w → Z.wrel (IR.Sem.effect Z.c wd .outEnd []).2 (Z.dev w (.write p v))
   wrDrop : ∀ wd w p v, lo p = 0xD5 → Z.wrel wd w →
     Z.wrel (IR.Sem.effect Z.c wd .drop [v.toNat]).2 (Z.dev w (.write p v))
+  /-- A note: the four bytes of its value to `0xDA`, least significant first, then its code to `0xD6`. -/
+  wrNote : ∀ wd w p0 p1 p2 p3 p (b0 b1 b2 b3 k : UInt8), lo p0 = 0xDA → lo p1 = 0xDA → lo p2 = 0xDA →
+    lo p3 = 0xDA → lo p = 0xD6 → Z.wrel wd w →
+    Z.wrel (IR.Sem.effect Z.c wd .note
+        [k.toNat, b0.toNat + 256 * (b1.toNat + 256 * (b2.toNat + 256 * (b3.toNat + 256 * 0)))]).2
+      (Z.dev (Z.dev (Z.dev (Z.dev (Z.dev w (.write p0 b0)) (.write p1 b1)) (.write p2 b2)) (.write p3 b3)) (.write p k))
 
 /-- `out (n),a; ret` under a label: the routine of an effect that is one write to a port. -/
 theorem out_routine (ok : Z.OK) (hsz : Z.a.bytes.size < 65536) {k : Nat} {name : String} {port : Nat}

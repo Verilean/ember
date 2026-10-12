@@ -134,6 +134,24 @@ def harness (a : Assembled) (addrs : List Nat) (μ : Nat × Nat) : Harness (Zof 
     have : hdev img.ctx w (.write p v) = ((IR.Sem.effect img.ctx w.1 .outEnd []).2, w.2) := by simp [hdev, h]
     rw [this]
     exact ⟨by rw [h1]; rfl, h2⟩
+  wrNote := fun wd w p0 p1 p2 p3 p b0 b1 b2 b3 k h0 h1 h2 h3 h hw => by
+    show hrel μ _ (hdev img.ctx (hdev img.ctx (hdev img.ctx (hdev img.ctx (hdev img.ctx w (.write p0 b0))
+      (.write p1 b1)) (.write p2 b2)) (.write p3 b3)) (.write p k))
+    obtain ⟨e1, e2, e3⟩ := hw
+    simp only [hdev, h0, h1, h2, h3, h, e3, show ¬ ((0xDA : UInt8) = 0xD3) by decide, show ¬ ((0xDA : UInt8) = 0xD4) by decide,
+      show ¬ ((0xDA : UInt8) = 0xD5) by decide, show ¬ ((0xD6 : UInt8) = 0xD3) by decide,
+      show ¬ ((0xD6 : UInt8) = 0xD4) by decide, show ¬ ((0xD6 : UInt8) = 0xD5) by decide,
+      show ¬ ((0xD6 : UInt8) = 0xDA) by decide, if_true, if_false]
+    refine ⟨?_, e2, rfl⟩
+    rw [e1]
+    have hv : 0 + b0.toNat * 2 ^ (8 * 0) + b1.toNat * 2 ^ (8 * (0 + 1)) + b2.toNat * 2 ^ (8 * (0 + 1 + 1)) +
+        b3.toNat * 2 ^ (8 * (0 + 1 + 1 + 1)) =
+        b0.toNat + 256 * (b1.toNat + 256 * (b2.toNat + 256 * (b3.toNat + 256 * 0))) := by
+      rw [show (2 : Nat) ^ (8 * 0) = 1 from rfl, show (2 : Nat) ^ (8 * (0 + 1)) = 256 from rfl,
+        show (2 : Nat) ^ (8 * (0 + 1 + 1)) = 65536 from rfl, show (2 : Nat) ^ (8 * (0 + 1 + 1 + 1)) = 16777216 from rfl]
+      omega
+    rw [hv]
+    rfl
   wrDrop := fun wd w p v h hw => by
     show hrel μ _ (hdev img.ctx w (.write p v))
     obtain ⟨h1, h2⟩ := hw
