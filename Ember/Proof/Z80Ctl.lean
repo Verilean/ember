@@ -116,16 +116,16 @@ theorem jmp_ok (ok : Z.OK) (F : GFinal Z base sF) (l : Nat) (s0 : GS) :
   exact ⟨s', st, at', R.keep hS hK.1 (hl_congr hK.2.2.2.2.2.2.1 hK.2.2.2.2.2.2.2.1)⟩
 
 /-- **`br`**: at the label's item when the comparison holds, at the next item when not. -/
-theorem br_ok (ok : Z.OK) (F : GFinal Z base sF) (op : Cmp) (n : Nat) (hn : n = 1 ∨ n = 2) (a b : Opd) (l : Nat)
-    (s0 : GS) :
+theorem br_core (ok : Z.OK) (F : GFinal Z base sF) (op : Cmp) (n : Nat) (a b : Opd) (l : Nat) (Pa Pb : Prop)
+    (s0 : GS) (hflags : wpg (genFlags op n a b) E (FlagsG Z E base sF dt op n a b Pa Pb s0) s0) :
     wpg (genInstr (.br op n a b l)) E (fun _ s1 => GExt s0 s1 ∧ (l, s1.regs) ∈ s1.jumps ∧
-      (GExt s1 sF → ∀ fr ist tmps s j, Z.items[j]? = some (.label (lname E l)) → Rd Z E dt n a → Rd Z E dt n b →
+      (GExt s1 sF → ∀ fr ist tmps s j, Z.items[j]? = some (.label (lname E l)) → Pa → Pb →
         Rel Z E fr dt s0.regs ist tmps s → At Z.addrs (base + s0.out.size) s →
         ∃ s', Steps s s' ∧ Rel Z E fr dt s1.regs ist tmps s' ∧
           (if IR.cmpOp op (IR.Sem.opd Z.c ist tmps n a) (IR.Sem.opd Z.c ist tmps n b) then At Z.addrs j s'
            else At Z.addrs (base + s1.out.size) s'))) s0 := by
   simp only [genInstr, wpg_bind]
-  refine wpg_mono (genFlags_ok (dt := dt) ok F op n hn a b s0) ?_
+  refine wpg_mono hflags ?_
   intro _ s1 ⟨hx1, hf⟩
   simp only [wpg_localLabel, wpg_ins]
   refine wpg_jumpTo l _ _ (fun s2 ho hr hl hj => ?_)
@@ -133,7 +133,7 @@ theorem br_ok (ok : Z.OK) (F : GFinal Z base sF) (op : Cmp) (n : Nat) (hn : n = 
     fun hx fr ist tmps s j hlab hra hrb R hat => ?_⟩
   have hx1F : GExt { s1 with out := s1.out.push (.ins ⟨.jp, [condOf op, .imm (.sym (lname E l))]⟩) } sF :=
     GExt.trans ⟨by simp [ho], by simp [hj], by simp [hl]⟩ hx
-  obtain ⟨s', st1, at1, R1, hfl⟩ := hf ((GExt.push _ _).trans hx1F) trivial fr ist tmps s hra hrb R hat
+  obtain ⟨s', st1, at1, R1, hfl⟩ := hf ((GExt.push _ _).trans hx1F) fr ist tmps s hra hrb R hat
   have hk : Z.items[base + s1.out.size]? = some (.ins ⟨.jp, [condOf op, .imm (.sym (lname E l))]⟩) :=
     F.at hx1F (by simp)
   obtain ⟨s'', st2, _, hS, hK, hcase⟩ := jp_cc_step ok op hk hlab R1.mach at1
@@ -144,6 +144,16 @@ theorem br_ok (ok : Z.OK) (F : GFinal Z base sF) (op : Cmp) (n : Nat) (hn : n = 
     have hsz : s2.out.size = s1.out.size + 1 := by rw [ho]; simp
     rw [hsz, ← Nat.add_assoc]
     exact hcase
+
+theorem br_ok (ok : Z.OK) (F : GFinal Z base sF) (op : Cmp) (n : Nat) (hn : n = 1 ∨ n = 2) (a b : Opd) (l : Nat)
+    (s0 : GS) :
+    wpg (genInstr (.br op n a b l)) E (fun _ s1 => GExt s0 s1 ∧ (l, s1.regs) ∈ s1.jumps ∧
+      (GExt s1 sF → ∀ fr ist tmps s j, Z.items[j]? = some (.label (lname E l)) → Rd Z E dt n a → Rd Z E dt n b →
+        Rel Z E fr dt s0.regs ist tmps s → At Z.addrs (base + s0.out.size) s →
+        ∃ s', Steps s s' ∧ Rel Z E fr dt s1.regs ist tmps s' ∧
+          (if IR.cmpOp op (IR.Sem.opd Z.c ist tmps n a) (IR.Sem.opd Z.c ist tmps n b) then At Z.addrs j s'
+           else At Z.addrs (base + s1.out.size) s'))) s0 :=
+  br_core ok F op n a b l _ _ s0 (genFlagsG_ok ok F op n hn a b s0)
 
 /-- Is the label reached from the instruction before it? -/
 def prevFalls (body : Array IR.Instr) (l : Nat) : Bool :=

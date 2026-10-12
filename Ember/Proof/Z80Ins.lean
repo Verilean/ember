@@ -3,6 +3,7 @@ import Ember.Proof.Z80Mem
 import Ember.Proof.Z80Eff
 import Ember.Proof.Z80Shift
 import Ember.Proof.Z80Acc
+import Ember.Proof.Z80AccOps
 import Ember.Proof.Z80Bin16
 import Ember.Proof.Z80Una
 import Ember.Proof.Z80Ext
@@ -35,8 +36,8 @@ def isConst : Opd → Bool
 
 /-- The instructions the proofs cover so far. -/
 def Covered : IR.Instr → Bool
-  | .mov n _ _ => size12 n || n == 4
-  | .bin _ n _ _ _ | .not n _ _ | .neg n _ _ | .cmp _ n _ _ _ | .br _ n _ _ _ => size12 n
+  | .mov n _ _ | .bin _ n _ _ _ | .cmp _ n _ _ _ | .br _ n _ _ _ => size12 n || n == 4
+  | .not n _ _ | .neg n _ _ => size12 n
   | .ext n _ m _ => (n == 1 && m == 2) || (n == 2 && m == 1)
   | .shift _ n _ _ _ amt => size12 n && isConst amt
   | .lea _ p => addrCov p
@@ -47,18 +48,25 @@ def Covered : IR.Instr → Bool
   | .eff e args ret => effCov e args ret
   | _ => false
 
+/-- An operand of `n` bytes can be read: where it is, or (wider than two bytes) a constant from the pool. -/
+def RdN (Z : ZCtx) (E : GEnv) (dt : Nat → Prop) (n : Nat) (o : Opd) : Prop :=
+  if n ≤ 2 then Rd Z E dt n o else RdW Z E dt n o
+
+theorem size124 {n : Nat} (h : (size12 n || n == 4) = true) : n = 1 ∨ n = 2 ∨ n = 4 := by
+  simpa [size12, or_assoc] using h
+
 /-- What an instruction needs of the program. -/
 def Need (Z : ZCtx) (E : GEnv) (dt : Nat → Prop) : IR.Instr → Prop
-  | .mov n d src => (if n ≤ 2 then Rd Z E dt n src else RdW Z E dt n src) ∧ Wr Z E n d
-  | .bin _ n d a b => Rd Z E dt n a ∧ Rd Z E dt n b ∧ Wr Z E n d
+  | .mov n d src => RdN Z E dt n src ∧ Wr Z E n d
+  | .bin _ n d a b => RdN Z E dt n a ∧ RdN Z E dt n b ∧ Wr Z E n d
   | .not n d a | .neg n d a => Rd Z E dt n a ∧ Wr Z E n d
-  | .cmp _ n d a b => Rd Z E dt n a ∧ Rd Z E dt n b ∧ Wr Z E 1 d
+  | .cmp _ n d a b => RdN Z E dt n a ∧ RdN Z E dt n b ∧ Wr Z E 1 d
   | .ext n d m src => Rd Z E dt m src ∧ Wr Z E n d
   | .shift _ n d a m amt => ∀ k, amt = .const k → (Rd Z E dt n a ∧ k < 2 ^ (8 * m)) ∧ Wr Z E n d
   | .lea d p => AddrNeed Z E dt p ∧ Wr Z E 2 d
   | .load n d p => AddrNeed Z E dt p ∧ AddrData Z p n ∧ Wr Z E n d
   | .store n p src => AddrNeed Z E dt p ∧ AddrStore Z E p n ∧ Rd Z E dt n src
-  | .br _ n a b l => Rd Z E dt n a ∧ Rd Z E dt n b ∧ ∃ j : Nat, Z.items[j]? = some (Item.label (lname E l))
+  | .br _ n a b l => RdN Z E dt n a ∧ RdN Z E dt n b ∧ ∃ j : Nat, Z.items[j]? = some (Item.label (lname E l))
   | .jmp _ | .label _ => True
   | .ret v => ∀ n o, v = some (n, o) → Rd Z E dt n o
   | .trap => ∃ j : Nat, Z.items[j]? = some (Item.label "rt_trap")
@@ -91,10 +99,7 @@ theorem ins0_ok (ok : Z.OK) (hT : FnLay Z E) (F : GFinal Z base sF) (hrt : RtOK 
     wpg (genInstr i) E (Ins0 Z E base sF dt i s0) s0 := by
   cases i with
   | mov n d src =>
-    have hn : n = 1 ∨ n = 2 ∨ n = 4 := by
-      have : (size12 n || n == 4) = true := hc
-      simpa [size12, or_assoc] using this
-    rcases hn with rfl | rfl | rfl
+    rcases size124 hc with rfl | rfl | rfl
     · refine wpg_mono (mov1_ok (dt := dt) ok hT F d src s0) ?_
       intro _ s1 ⟨hx, h⟩
       exact ⟨hx, fun hxF hN => h hxF hN⟩
@@ -105,13 +110,16 @@ theorem ins0_ok (ok : Z.OK) (hT : FnLay Z E) (F : GFinal Z base sF) (hrt : RtOK 
       intro _ s1 ⟨hx, h⟩
       exact ⟨hx, fun hxF hN => h hxF hN⟩
   | bin op n d a b =>
-    rcases size12_spec hc with rfl | rfl
+    rcases size124 hc with rfl | rfl | rfl
     · refine wpg_mono (bin1_ok (dt := dt) ok hT F op d a b s0) ?_
       intro _ s1 ⟨hx, h⟩
       exact ⟨hx, fun hxF hN => h hxF ⟨hN.1, hN.2.1, hN.2.2, hrt, hdep⟩⟩
     · refine wpg_mono (bin2_ok (dt := dt) ok hT F op d a b s0) ?_
       intro _ s1 ⟨hx, h⟩
       exact ⟨hx, fun hxF hN => h hxF ⟨hN.1, hN.2.1, hN.2.2, hrt, hdep⟩⟩
+    · refine wpg_mono (binW_ok (dt := dt) ok hT F (by omega) hrt.wide hdep op d a b s0) ?_
+      intro _ s1 ⟨hx, h⟩
+      exact ⟨hx, fun hxF hN => h hxF hN⟩
   | not n d a =>
     rcases size12_spec hc with rfl | rfl
     · refine wpg_mono (not1_ok (dt := dt) ok hT F d a s0) ?_
@@ -129,11 +137,23 @@ theorem ins0_ok (ok : Z.OK) (hT : FnLay Z E) (F : GFinal Z base sF) (hrt : RtOK 
       intro _ s1 ⟨hx, h⟩
       exact ⟨hx, fun hxF hN => h hxF ⟨hN.1, hN.2, hrt, hdep⟩⟩
   | cmp op n d a b =>
-    refine wpg_mono (cmp_ok (dt := dt) ok hT F op n (size12_spec hc) d a b s0) ?_
+    have hfl : wpg (genFlags op n a b) E
+        (FlagsG Z E base sF dt op n a b (RdN Z E dt n a) (RdN Z E dt n b) s0) s0 := by
+      rcases size124 hc with rfl | rfl | rfl
+      · exact genFlagsG_ok ok F op 1 (Or.inl rfl) a b s0
+      · exact genFlagsG_ok ok F op 2 (Or.inr rfl) a b s0
+      · exact flagsW_ok ok hT F (by omega) hrt.wide hdep op a b s0
+    refine wpg_mono (cmp_core (dt := dt) ok hT F op n d a b _ _ s0 hfl) ?_
     intro _ s1 ⟨hx, h⟩
     exact ⟨hx, fun hxF hN => h hxF hN⟩
   | br op n a b l =>
-    refine wpg_mono (br_ok (dt := dt) ok F op n (size12_spec hc) a b l s0) ?_
+    have hfl : wpg (genFlags op n a b) E
+        (FlagsG Z E base sF dt op n a b (RdN Z E dt n a) (RdN Z E dt n b) s0) s0 := by
+      rcases size124 hc with rfl | rfl | rfl
+      · exact genFlagsG_ok ok F op 1 (Or.inl rfl) a b s0
+      · exact genFlagsG_ok ok F op 2 (Or.inr rfl) a b s0
+      · exact flagsW_ok ok hT F (by omega) hrt.wide hdep op a b s0
+    refine wpg_mono (br_core (dt := dt) ok F op n a b l _ _ s0 hfl) ?_
     intro _ s1 ⟨hx, hj, h⟩
     refine ⟨hx, fun hxF hN fr ist tmps s R hat => ?_⟩
     obtain ⟨hra, hrb, j0, hj0⟩ := hN

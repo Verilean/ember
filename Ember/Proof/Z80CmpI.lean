@@ -167,18 +167,19 @@ theorem mat_eq (ok : Z.OK) (F : GFinal Z base sF) (z : Bool) (op : Cmp)
       rfl
 
 /-- **The code of `cmp` on one or two bytes does what the IR's instruction does.** -/
-theorem cmp_ok (ok : Z.OK) (hT : FnLay Z E) (F : GFinal Z base sF) (op : Cmp) (n : Nat) (hn : n = 1 ∨ n = 2)
-    (d : Dst) (a b : Opd) (s0 : GS) :
+theorem cmp_core (ok : Z.OK) (hT : FnLay Z E) (F : GFinal Z base sF) (op : Cmp) (n : Nat)
+    (d : Dst) (a b : Opd) (Pa Pb : Prop) (s0 : GS)
+    (hflags : wpg (genFlags op n a b) E (FlagsG Z E base sF dt op n a b Pa Pb s0) s0) :
     wpg (genInstr (.cmp op n d a b)) E
-      (InsPost Z E base sF dt (dtAfter dt d) (.cmp op n d a b) (Rd Z E dt n a ∧ Rd Z E dt n b ∧ Wr Z E 1 d) s0)
+      (InsPost Z E base sF dt (dtAfter dt d) (.cmp op n d a b) (Pa ∧ Pb ∧ Wr Z E 1 d) s0)
       s0 := by
   have fin : ∀ (m : GM Unit), (∀ s1, wpg m E (Mat Z base sF op s1) s1) →
       wpg (do genFlags op n a b; m; setRegs fun r => { r with a := [] }; storeA d) E
-        (InsPost Z E base sF dt (dtAfter dt d) (.cmp op n d a b) (Rd Z E dt n a ∧ Rd Z E dt n b ∧ Wr Z E 1 d) s0)
+        (InsPost Z E base sF dt (dtAfter dt d) (.cmp op n d a b) (Pa ∧ Pb ∧ Wr Z E 1 d) s0)
         s0 := by
     intro m hm
     simp only [wpg_bind]
-    refine wpg_mono (genFlags_ok (dt := dt) ok F op n hn a b s0) ?_
+    refine wpg_mono hflags ?_
     intro _ s1 ⟨hx1, hf⟩
     refine wpg_mono (hm s1) ?_
     intro _ s2 ⟨hx2, hr2, hmat⟩
@@ -186,7 +187,7 @@ theorem cmp_ok (ok : Z.OK) (hT : FnLay Z E) (F : GFinal Z base sF) (op : Cmp) (n
     refine wpg_mono (storeA_ok (dt := dt) ok hT F d _) ?_
     intro _ s3 ⟨hx3, _, _, hs⟩
     refine ⟨hx1.trans (hx2.trans ((GExt.regs _ _).trans hx3)), fun hxF ⟨hra, hrb, hwr⟩ fr ist tmps s R hat => ?_⟩
-    obtain ⟨s', st1, at1, R1, hfl⟩ := hf (hx2.trans ((GExt.regs _ _).trans (hx3.trans hxF))) trivial fr ist tmps s hra hrb R hat
+    obtain ⟨s', st1, at1, R1, hfl⟩ := hf (hx2.trans ((GExt.regs _ _).trans (hx3.trans hxF))) fr ist tmps s hra hrb R hat
     obtain ⟨s'', st2, at2, S2, hhl, hA⟩ := hmat ((GExt.regs _ _).trans (hx3.trans hxF)) s' _ _ R1.mach at1 hfl
     have R2 : Rel Z E fr dt { s2.regs with a := [] } ist tmps s'' :=
       R1.of_sys S2 rfl (fun o ho => by rw [← hr2]; exact ho)
@@ -207,6 +208,14 @@ theorem cmp_ok (ok : Z.OK) (hT : FnLay Z E) (F : GFinal Z base sF) (op : Cmp) (n
       cases (x == y) <;> simp) s1)
   · exact fin _ (fun s1 => mat_lt ok F s1)
   · exact fin _ (fun s1 => mat_ge ok F s1)
+
+/-- **`cmp` of one and two bytes.** -/
+theorem cmp_ok (ok : Z.OK) (hT : FnLay Z E) (F : GFinal Z base sF) (op : Cmp) (n : Nat) (hn : n = 1 ∨ n = 2)
+    (d : Dst) (a b : Opd) (s0 : GS) :
+    wpg (genInstr (.cmp op n d a b)) E
+      (InsPost Z E base sF dt (dtAfter dt d) (.cmp op n d a b) (Rd Z E dt n a ∧ Rd Z E dt n b ∧ Wr Z E 1 d) s0)
+      s0 :=
+  cmp_core ok hT F op n d a b _ _ s0 (genFlagsG_ok ok F op n hn a b s0)
 
 end
 

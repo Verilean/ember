@@ -603,12 +603,26 @@ theorem flags16_ok (ok : Z.OK) (F : GFinal Z base sF) (op : Cmp) (a b : Opd) (s0
         rfl
       rcases hop with rfl | rfl <;> exact hf'
 
+/-- What a comparison promises, whatever it needs of its operands (`Pa`, `Pb`). -/
+def FlagsG (Z : ZCtx) (E : GEnv) (base : Nat) (sF : GS) (dt : Nat → Prop) (op : Cmp) (n : Nat) (a b : Opd)
+    (Pa Pb : Prop) (s0 : GS) (_ : Unit) (s1 : GS) : Prop :=
+  GExt s0 s1 ∧
+    (GExt s1 sF → ∀ fr ist tmps s, Pa → Pb → Rel Z E fr dt s0.regs ist tmps s →
+      At Z.addrs (base + s0.out.size) s →
+      ∃ s', Steps s s' ∧ At Z.addrs (base + s1.out.size) s' ∧ Rel Z E fr dt s1.regs ist tmps s' ∧
+        FlagsOf op (IR.Sem.opd Z.c ist tmps n a) (IR.Sem.opd Z.c ist tmps n b) s')
+
 /-- **A comparison of one or two bytes leaves its result in the flags.** -/
 theorem genFlags_ok (ok : Z.OK) (F : GFinal Z base sF) (op : Cmp) (n : Nat) (hn : n = 1 ∨ n = 2) (a b : Opd)
     (s0 : GS) : wpg (genFlags op n a b) E (Flags Z E base sF dt op n a b True s0) s0 := by
   rcases hn with rfl | rfl
   · exact flags8_ok ok F op a b s0
   · exact flags16_ok ok F op a b s0
+
+theorem genFlagsG_ok (ok : Z.OK) (F : GFinal Z base sF) (op : Cmp) (n : Nat) (hn : n = 1 ∨ n = 2) (a b : Opd)
+    (s0 : GS) : wpg (genFlags op n a b) E (FlagsG Z E base sF dt op n a b (Rd Z E dt n a) (Rd Z E dt n b) s0) s0 :=
+  wpg_mono (genFlags_ok (dt := dt) ok F op n hn a b s0)
+    (fun _ s1 ⟨hx, h⟩ => ⟨hx, fun hxF fr ist tmps s ha hb R hat => h hxF trivial fr ist tmps s ha hb R hat⟩)
 
 end
 
