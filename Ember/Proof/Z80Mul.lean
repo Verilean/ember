@@ -13,8 +13,20 @@ open Ember.Z80 Ember.Z80.Cpu Ember.Z80.Codegen Ember.Z80.Asm
 open Ember.Proof.Z80Enc Ember.Proof.IRSim
 open Ember.Z80.IR (Opd Dst Slot Area Bin)
 
+/-- `rt_bound`: returns with the registers as they were when `HL < BC`;
+if not, the CPU gets to `rt_trap`. -/
+def RtBound (Z : ZCtx) : Prop :=
+  ∃ entry, Z.sym "rt_bound" entry ∧ entry < 65536 ∧
+    ∀ c : Cpu, c.pc.toNat = entry → Img Z.a 0 c → c.halted = false → c.ramStart.toNat = Z.ramStart →
+      c.mem.size = 65536 → Z.stackLo + Z.rtK ≤ c.sp.toNat → c.sp.toNat + 2 ≤ Z.stackHi →
+      ∃ s', Steps Z.inp c s' ∧ s'.halted = false ∧ s'.ramStart = c.ramStart ∧ s'.mem.size = 65536 ∧
+        FreeStack Z c s' ∧ s'.a = c.a ∧ s'.de = c.de ∧
+        (if c.hl.toNat < c.bc.toNat then s'.pc = c.rd16 c.sp ∧ s'.sp = c.sp + 2 ∧ s'.hl = c.hl
+         else ∃ j : Nat, Z.items[j]? = some (Item.label "rt_trap") ∧ At Z.addrs j s')
+
 /-- **What is taken of the runtime.** -/
 structure RtOK (Z : ZCtx) : Prop where
+  bound : RtBound Z
   mul8 : RtPure Z "rt_mul8" (fun s s' => s'.a.toNat = s.a.toNat * s.e.toNat % 256 ∧ s'.hl = s.hl)
   div8 : RtPure Z "rt_div8"
     (fun s s' => s'.a.toNat = (if s.e.toNat = 0 then 0 else s.a.toNat / s.e.toNat) ∧ s'.hl = s.hl)

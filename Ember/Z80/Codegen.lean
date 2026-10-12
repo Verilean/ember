@@ -656,6 +656,39 @@ def scaleHL : Nat → Nat → GM Unit
       scaleHL fuel (sc / 2)
     else pure ()
 
+/-- A byte into `HL`, the upper byte zero.  Keeps `A`. -/
+def loadHLByte (o : Opd) : GM Unit := do
+  if (← get).regs.a.contains o then
+    ins .ld [.l, .a]
+    ins .ld [.h, n8 0]
+  else
+    match o with
+    | .const v => ins .ld [.hl, n16 (v % 256)]
+    | o =>
+      -- two bytes read, the upper one dropped
+      ins .ld [.hl, .mem (← addrOf o)]
+      ins .ld [.h, n8 0]
+
+/-- The check of an index is made in line for a fixed array of bytes:
+`index − len` carries exactly when the index is too large, and the base
+is then added with `len` on top. -/
+def inlineLen (x : Index) (root : Root) : Option Nat :=
+  match x.len, root with
+  | some len, .static _ => if x.scale == 1 then some len else none
+  | _, _ => none
+
+/-- Trap unless the index in `HL` is below the length. -/
+def genCheck (x : Index) (inline : Option Nat) : GM Unit :=
+  match x.len, inline with
+  | some len, some _ => do
+    ins .ld [.bc, n16 (65536 - len)]
+    ins .add [.hl, .bc]
+    ins .jp [.c, .imm (.sym "rt_trap")]
+  | some len, none => do
+    ins .ld [.bc, n16 len]
+    call "rt_bound"
+  | none, _ => pure ()
+
 /-- The address into `HL`.  Keeps `A` and `DE`. -/
 def genAddr (p : Addr) : GM Unit := do
   match p.idx with
@@ -669,36 +702,13 @@ def genAddr (p : Addr) : GM Unit := do
       ins .ld [.hl, .mem (slotVal q)]
       addOff p.off
   | some x =>
-    if x.size == 2 then loadHL x.opd
-    else if (← get).regs.a.contains x.opd then
-      ins .ld [.l, .a]
-      ins .ld [.h, n8 0]
-    else
-      match x.opd with
-      | .const v => ins .ld [.hl, n16 (v % 256)]
-      | o =>
-        -- two bytes read, the upper one dropped
-        ins .ld [.hl, .mem (← addrOf o)]
-        ins .ld [.h, n8 0]
-    -- the check: for a fixed array `index − len` carries exactly when the
-    -- index is too large, and the base is then added with `len` on top
-    let inline := match x.len, p.root with
-      | some len, .static _ => if x.scale == 1 then some len else none
-      | _, _ => none
-    match x.len, inline with
-    | some len, some _ =>
-      ins .ld [.bc, n16 (65536 - len)]
-      ins .add [.hl, .bc]
-      ins .jp [.c, .imm (.sym "rt_trap")]
-    | some len, none =>
-      ins .ld [.bc, n16 len]
-      call "rt_bound"
-    | none, _ => pure ()
+    if x.size == 2 then loadHL x.opd else loadHLByte x.opd
+    genCheck x (inlineLen x p.root)
     scaleHL x.scale x.scale
     match p.root with
     | .static s =>
       noteAddr s
-      ins .ld [.bc, .imm (slotVal { s with off := s.off + p.off + inline.getD 0 })]
+      ins .ld [.bc, .imm (slotVal { s with off := s.off + p.off + (inlineLen x p.root).getD 0 })]
       ins .add [.hl, .bc]
     | .ptr q =>
       noteRead q
@@ -828,15 +838,7 @@ def genInstr (i : IR.Instr) : GM Unit := do
           else killAll
     else if n == 2 then
       -- from one byte
-      if r.a.contains src then
-        ins .ld [.l, .a]
-        ins .ld [.h, n8 0]
-      else
-        match src with
-        | .const v => ins .ld [.hl, n16 (v % 256)]
-        | src =>
-          ins .ld [.hl, .mem (← addrOf src)]
-          ins .ld [.h, n8 0]
+      loadHLByte src
       setRegs fun r => { r with hl := [] }
     else
       if m == 1 then

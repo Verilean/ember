@@ -120,34 +120,36 @@ def ldH0 (s : Cpu) : Cpu := ((skip (op1 s) 1).setReg .hl 4 (byteOf (Int.ofNat (0
 theorem does_ld_h_0 : Does ⟨.ld, [.h, n8 0]⟩ ldH0 :=
   ⟨fun _ _ _ => rfl, rfl, fun s => by simp only [Sys, ldH0, zsim, and_self]⟩
 
-/-- **`ext` to two bytes from one.** -/
-theorem ext21_ok (ok : Z.OK) (hT : FnLay Z E) (F : GFinal Z base sF) (d : Dst) (src : Opd) (s0 : GS) :
-    wpg (genInstr (.ext 2 d 1 src)) E
-      (InsPost Z E base sF dt (dtAfter dt d) (.ext 2 d 1 src) (Rd Z E dt 1 src ∧ Wr Z E 2 d) s0) s0 := by
-  simp only [genInstr, store, wpg_bind, wpg_get, show ¬ ((2 : Nat) < 1) from by decide, if_false,
-    beq_self_eq_true, if_true, show ((2 : Nat) == 1) = false from rfl, Bool.false_eq_true]
+/-- **A byte into `HL`**, the upper byte zero; `A` and `DE` are as they were. -/
+theorem loadHLByte_ok (ok : Z.OK) (F : GFinal Z base sF) (o : Opd) (s0 : GS) :
+    wpg (loadHLByte o) E (fun _ s1 => GExt s0 s1 ∧ s1.regs = s0.regs ∧
+      (GExt s1 sF → ∀ fr ist tmps s, Rd Z E dt 1 o → Rel Z E fr dt s0.regs ist tmps s →
+        At Z.addrs (base + s0.out.size) s →
+        ∃ s', Steps Z.inp s s' ∧ At Z.addrs (base + s1.out.size) s' ∧ KeepADE s s' ∧
+          s'.hl.toNat = IR.Sem.opd Z.c ist tmps 1 o)) s0 := by
+  unfold loadHLByte
+  simp only [wpg_bind, wpg_get]
   have mem_case : ∀ o : Opd, (∀ v, o ≠ .const v) →
       wpg (do
         let p ← addrOf o
         ins .ld [.hl, .mem p]
-        ins .ld [.h, n8 0]
-        setRegs fun r => { r with hl := [] }
-        storeHL d) E
-        (InsPost Z E base sF dt (dtAfter dt d) (.ext 2 d 1 o) (Rd Z E dt 1 o ∧ Wr Z E 2 d) s0) s0 := by
+        ins .ld [.h, n8 0]) E (fun _ s1 => GExt s0 s1 ∧ s1.regs = s0.regs ∧
+      (GExt s1 sF → ∀ fr ist tmps s, Rd Z E dt 1 o → Rel Z E fr dt s0.regs ist tmps s →
+        At Z.addrs (base + s0.out.size) s →
+        ∃ s', Steps Z.inp s s' ∧ At Z.addrs (base + s1.out.size) s' ∧ KeepADE s s' ∧
+          s'.hl.toNat = IR.Sem.opd Z.c ist tmps 1 o)) s0 := by
     intro o hc
     simp only [wpg_bind]
     refine wpg_mono (addrOf_ok o s0) ?_
     intro p s1 ⟨ho1, hr1, hp, hsp, _, hj1, hl1⟩
     subst hp
-    simp only [wpg_ins, wpg_setRegs]
-    refine wpg_mono (thenStoreHL (dt := dt) ok hT F d s0 _ (Rd Z E dt 1 o)
-      (fun ist tmps => IR.modN 2 (IR.Sem.opd Z.c ist tmps 1 o))
-      ⟨by simp [ho1], by simp [hj1], by simp [hl1]⟩ (fun hx hrd fr ist tmps s R hat => ?_)) (fun _ s2 h => h)
+    simp only [wpg_ins]
+    refine ⟨⟨by simp [ho1], by simp [hj1], by simp [hl1]⟩, hr1, fun hx fr ist tmps s hrd R hat => ?_⟩
     obtain ⟨ad, had, hpc⟩ := hat
     obtain ⟨hv, hb⟩ := opd_val ok hrd hsp hc ad
     have hnn : (Instr.immW (Z.a.env ad) ⟨.ld, [.hl, .mem (opdVal E o)]⟩).toNat = opdAddr Z E o :=
       immW_toNat _ _ _ _ rfl hv (by omega)
-    have hxa : GExt (pushL [⟨.ld, [.hl, .mem (opdVal E o)]⟩, ⟨.ld, [.h, n8 0]⟩] s1) sF := (GExt.regs _ _).trans hx
+    have hxa : GExt (pushL [⟨.ld, [.hl, .mem (opdVal E o)]⟩, ⟨.ld, [.h, n8 0]⟩] s1) sF := hx
     obtain ⟨hst, hat'⟩ := run_ins ok F (s0 := s1)
       (s1 := { s1 with out := s1.out.push (.ins ⟨.ld, [.hl, .mem (opdVal E o)]⟩) })
       (i := ⟨.ld, [.hl, .mem (opdVal E o)]⟩) ((GExt.push _ _).trans hxa) rfl R.img R.run
@@ -165,53 +167,64 @@ theorem ext21_ok (ok : Z.OK) (hT : FnLay Z E) (F : GFinal Z base sF) (d : Dst) (
       (s0 := { s1 with out := s1.out.push (.ins ⟨.ld, [.hl, .mem (opdVal E o)]⟩) })
       (s1 := pushL [⟨.ld, [.hl, .mem (opdVal E o)]⟩, ⟨.ld, [.h, n8 0]⟩] s1)
       hxa rfl (R.mach.sys hS1) hat' (ldH0 _) (fun _ _ => rfl) rfl (does_ld_h_0.sys _)
-    refine ⟨_, hst.trans st2, at2,
-      R.hl_gone (hS1.trans (does_ld_h_0.sys _)) rfl (Or.inr ⟨by rw [hr1], by simp only [ldH0, zsim]⟩)
-        (fun n o h => by rw [← hr1]; exact h), ?_⟩
-    rw [modN2_byte _ (opd_lt _ _ _ 1 _), ← opd_mem hrd hsp hc R, rd_one _ _ (by omega), hl_toNat]
+    refine ⟨_, hst.trans st2, at2, ⟨hS1.trans (does_ld_h_0.sys _), by simp only [ldH0, zsim],
+      by simp only [ldH0, zsim]⟩, ?_⟩
+    rw [← opd_mem hrd hsp hc R, rd_one _ _ (by omega), hl_toNat]
     simp only [ldH0, zsim]
     rw [← hnn]
     show (byteOf (Int.ofNat (0 % 256))).toNat * 256 +
       (lo (w16 (s.mem.get! _) (s.mem.get! _))).toNat = _
     rw [w16_eq, lo_mk16, byte0, Nat.zero_mul, Nat.zero_add]
-  by_cases ha : s0.regs.a.contains src = true
-  · simp only [ha, if_true, wpg_bind, wpg_ins, wpg_setRegs]
-    have hmem : src ∈ s0.regs.a := by simpa using ha
-    refine wpg_mono (thenStoreHL (dt := dt) ok hT F d s0 _ (Rd Z E dt 1 src)
-      (fun ist tmps => IR.modN 2 (IR.Sem.opd Z.c ist tmps 1 src))
-      ((pushL_ext [⟨.ld, [.l, .a]⟩, ⟨.ld, [.h, n8 0]⟩] s0).trans (GExt.regs _ _))
-      (fun hx hrd fr ist tmps s R hat => ?_)) (fun _ s2 h => h)
+  by_cases ha : s0.regs.a.contains o = true
+  · simp only [ha, if_true, wpg_bind, wpg_ins]
+    have hmem : o ∈ s0.regs.a := by simpa using ha
+    refine ⟨pushL_ext [⟨.ld, [.l, .a]⟩, ⟨.ld, [.h, n8 0]⟩] s0, trivial, fun hx fr ist tmps s hrd R hat => ?_⟩
     obtain ⟨st, at', _, hS⟩ := run_list ok F [(⟨.ld, [.l, .a]⟩, ldRA 5), (⟨.ld, [.h, n8 0]⟩, ldH0)]
       (by
         intro p hp
         simp only [List.mem_cons, List.not_mem_nil, or_false] at hp
         rcases hp with rfl | rfl
         · exact does_ld_l_a
-        · exact does_ld_h_0) s0 s ((GExt.regs _ _).trans hx) R.mach hat
-    refine ⟨_, st, at', R.hl_gone hS rfl (Or.inr ⟨rfl, by simp only [List.map, runL, ldRA, ldH0, zsim]⟩)
-      (fun n o h => h), ?_⟩
-    rw [modN2_byte _ (opd_lt _ _ _ 1 _), ← R.ra src hmem hrd.own, hl_toNat]
+        · exact does_ld_h_0) s0 s hx R.mach hat
+    refine ⟨_, st, at', ⟨hS, by simp only [List.map, runL, ldRA, ldH0, zsim],
+      by simp only [List.map, runL, ldRA, ldH0, zsim]⟩, ?_⟩
+    rw [← R.ra o hmem hrd.own, hl_toNat]
     simp only [List.map, runL, ldRA, ldH0, zsim]
     rw [byte0, Nat.zero_mul, Nat.zero_add]
   · simp only [ha, Bool.false_eq_true, if_false]
-    cases src with
+    cases o with
     | slot sl => exact mem_case (.slot sl) (fun v h => by cases h)
     | tmp t => exact mem_case (.tmp t) (fun v h => by cases h)
     | const v =>
-      simp only [wpg_bind, wpg_ins, wpg_setRegs]
-      refine wpg_mono (thenStoreHL (dt := dt) ok hT F d s0 _ (Rd Z E dt 1 (.const v))
-        (fun ist tmps => IR.modN 2 (IR.Sem.opd Z.c ist tmps 1 (.const v)))
-        ((GExt.push _ _).trans (GExt.regs _ _)) (fun hx hrd fr ist tmps s R hat => ?_)) (fun _ s2 h => h)
+      simp only [wpg_ins]
+      refine ⟨GExt.push _ _, trivial, fun hx fr ist tmps s hrd R hat => ?_⟩
       have hS : Sys s (((skip (op1 s) 2).setHL (w16 (byteOf (Int.ofNat (v % 256 % 65536)))
           (byteOf (Int.ofNat (v % 256 % 65536) / 256)))).tick 10) := by simp only [Sys, zsim, and_self]
       obtain ⟨st, at', _⟩ := run_reg ok F (s0 := s0)
         (s1 := { s0 with out := s0.out.push (.ins ⟨.ld, [.hl, n16 (v % 256)]⟩) })
-        ((GExt.regs _ _).trans hx) rfl R.mach hat _ (fun _ _ => rfl) rfl hS
-      refine ⟨_, st, at', R.hl_gone hS rfl (Or.inr ⟨rfl, by simp only [zsim]⟩) (fun n o h => h), ?_⟩
+        hx rfl R.mach hat _ (fun _ _ => rfl) rfl hS
+      refine ⟨_, st, at', ⟨hS, by simp only [zsim], by simp only [zsim]⟩, ?_⟩
       simp only [zsim]
       rw [w16_val _ (Nat.mod_lt _ (by decide))]
-      show v % 256 % 65536 = v % 256 % 65536 % 65536
+      show v % 256 % 65536 = v % 256
       omega
+
+/-- **`ext` to two bytes from one.** -/
+theorem ext21_ok (ok : Z.OK) (hT : FnLay Z E) (F : GFinal Z base sF) (d : Dst) (src : Opd) (s0 : GS) :
+    wpg (genInstr (.ext 2 d 1 src)) E
+      (InsPost Z E base sF dt (dtAfter dt d) (.ext 2 d 1 src) (Rd Z E dt 1 src ∧ Wr Z E 2 d) s0) s0 := by
+  simp only [genInstr, store, wpg_bind, wpg_get, show ¬ ((2 : Nat) < 1) from by decide, if_false,
+    beq_self_eq_true, if_true, show ((2 : Nat) == 1) = false from rfl, Bool.false_eq_true]
+  refine wpg_mono (loadHLByte_ok (dt := dt) ok F src s0) ?_
+  intro _ s1 ⟨hx1, hr1, h⟩
+  rw [wpg_setRegs]
+  refine wpg_mono (thenStoreHL (dt := dt) ok hT F d s0 _ (Rd Z E dt 1 src)
+    (fun ist tmps => IR.modN 2 (IR.Sem.opd Z.c ist tmps 1 src))
+    (hx1.trans (GExt.regs _ _)) (fun hx hrd fr ist tmps s R hat => ?_)) (fun _ s2 h => h)
+  obtain ⟨s', st, at', hk, hv⟩ := h ((GExt.regs _ _).trans hx) fr ist tmps s hrd R hat
+  refine ⟨s', st, at', R.hl_gone hk.1 rfl (Or.inr ⟨by rw [hr1], hk.2.1⟩) (fun n o h => by rw [← hr1]; exact h), ?_⟩
+  rw [modN2_byte _ (opd_lt _ _ _ 1 _)]
+  exact hv
 
 end
 
