@@ -225,6 +225,69 @@ A further step, natural in this repository: a Z80 core written in
 Sparkle, so that the CPU, the network stack, and the code between them
 all come from Lean.
 
+### 2.7 Resources: what is fixed, what is bounded, what is not
+
+"Static everything" is easy to overstate.  What holds, for one
+configuration of the stack (the globals, the functions, the profile):
+
+- **Memory is laid out before the program runs.**  No heap; every
+  global, parameter, local and temporary has a fixed address (§2.6), so
+  the static RAM of an image is a number the build prints — for the SLIP
+  build on the board 1061 bytes: 273 of the runtime (its cells and the
+  256-byte receive ring), 623 of globals (the packet buffer, the TCB, the
+  application's buffer), 165 of frames and temporaries.  The build
+  refuses an image whose code does not fit below the RAM or whose static
+  RAM does not fit below `0xFF00`.
+- **The stack is bounded, not constant.**  The call graph has no cycle
+  and a call pushes only its return address, so the deepest stack follows
+  from the items of the image (`Ember.Z80.StackBound`: start-up, the
+  program, the routines of the runtime, one interrupt — the interrupt
+  routine does not let another in): 24 bytes for the SLIP build, against
+  16 seen on the corpus and more than 31 KB of room.  `ember-z80
+  own-size` fails when the bound exceeds the room.  That bound is an
+  analysis, not a theorem; proved so far is only that the routines of the
+  loopback image for the test harness use no stack at all (§4, M7.3).
+- **Time is not fixed.**  How long a call of `main` takes depends on the
+  input: the loops are bounded (`for`, `loop (max := n)`), so each call
+  ends, and the proofs give a number of steps of the Ember semantics that
+  suffices for any input (`n + 4716` for the SLIP build) — a bound on the
+  *fuel* of a semantics, not on T-states, and nothing is proved about
+  response times or about interrupts arriving while `main` runs.  What is
+  sent, and how often it is sent again, depends on the peer.
+
+What this buys: no leak and no fragmentation, because nothing is
+allocated; a footprint that can be read off before deployment; and a
+state small and fixed enough to state invariants about.  What it costs,
+as things are today:
+
+- capacities are constants of the build — the MTU, **one** TCP
+  connection, one segment of echoed data awaiting its acknowledgement, an
+  ARP cache of four entries (Spec and the Ethernet build) — and changing
+  one means generating and building again, and for the proved build,
+  checking the proofs again;
+- no recursion, no data structure that grows, no pointers;
+- a function added to the stack is a function added to the proofs.
+
+**Running out is a protocol matter, not a memory matter**, and each case
+has its behaviour written down in the Spec and replayed from the corpus:
+a frame longer than the buffer is dropped (`drop
+reason=oversize-frame`), the decoder recovering at the next frame end; a
+segment for a second connection is answered with a reset (`drop
+reason=unsupported-second-connection`); the echo application takes new
+data only when the last echo is acknowledged and advertises its window
+accordingly; on the board, the receive ring raises RTS at 224 of 256
+bytes and counts what still overruns.  The one connection is given back
+on a close, on a reset, after `maxRetries` (8) retransmissions without an
+acknowledgement, after `idleTicks` without traffic, and from FIN-WAIT-2
+after the same wait — all driven by `tick`; without ticks none of the
+timeouts happen.
+
+What is proved and what is only tested or checked is in
+`Ember/Proof/README.md`; in short: the Spec-to-IR chain is proved for the
+SLIP build; of the Z80 code, the functions of the loopback image built
+*without* the passes on the assembly; of the images as built by default,
+nothing — they are tested.
+
 ## 3. Milestones and exit criteria
 
 | | Deliverable | Done when |

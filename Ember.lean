@@ -35,6 +35,7 @@ import Ember.Z80.IRInterp
 import Ember.Z80.IRSem
 import Ember.Z80.Runtime
 import Ember.Z80.Codegen
+import Ember.Z80.StackBound
 import Ember.Z80.RtCheck
 import Ember.Z80.Check
 import Ember.Z80.Machine

@@ -102,8 +102,10 @@ def z80(tmp):
 
 def z80own(tmp):
     """The stack compiled by the own Z80 back end (plan M6), no trace: code
-    with constants and runtime routines, static RAM, deepest stack, and
-    T-states per ping."""
+    with constants and runtime routines; static RAM (the runtime's cells and
+    its 256-byte receive ring, globals, frames, temporaries — not the stack);
+    the static bound on the stack and the deepest stack seen on the corpus
+    (both with the interrupt routine's share); T-states per ping."""
     exe = os.path.join(ROOT, ".lake/build/bin/ember-z80")
     if not os.path.exists(exe):
         return None
@@ -112,6 +114,9 @@ def z80own(tmp):
     g = re.search(r"(\d+) bytes of code and constants, (\d+) bytes of RAM", out)
     funcs = {mm.group(2): int(mm.group(1)) for mm in re.finditer(r"^\s+(\d+)\t(\S+)$", out, re.M)}
     m = {"z80own.code": int(g.group(1)), "z80own.ram": int(g.group(2))}
+    # the static bound on the stack (start-up, the program, one interrupt); own-size fails
+    # when it exceeds the room above the static RAM
+    m["z80own.stack_bound"] = int(re.search(r"stack bound: (\d+) bytes", out).group(1))
     run("own-build", "net", "--trace", "0", "--out", os.path.join(tmp, "own0"))
     m["z80own.stack"] = int(re.search(r"stack: (\d+) bytes", run(
         "stack", os.path.join(tmp, "own0/net-own.ihx"), os.path.join(ROOT, "Tests/Ember/corpus"))).group(1))

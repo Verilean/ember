@@ -739,6 +739,9 @@ footprint (`ZCtx.wr`) has changed.
 | `#guard boardCheck` (`Z80PlanOf.lean`, `Z80BoardPlan.lean`) | the plan `mkPlan` makes of a build for the board passes `okB` and `fnStaticB` of every function: the SLIP build (35 functions) and the loopback program — evaluated at build time, not by the kernel |
 | **`loop_static`**, `loop_ok` (`Z80LoopIR.lean`, `Z80Loop.lean`) | the loopback program, by the kernel: the environments of its four functions, `okB` and `fnStaticB` of its plan, the labels in the generated items — on its IR written out as a term (that the term is what `IR.lower` returns, and the layout what `build` computes, are `#guard`s) |
 | **`loop_image_ok`** (`Z80LoopItems.lean`, `Z80LoopImage.lean`) | the loopback image for the board without the passes on the assembly (`build (passes := false)`, its 351 items written out; `#guard`): the kernel assembles it, finds the symbols of the areas, the generated items, `rt_trap`, and no instruction naming `rt_acc` — so every function of it does what the IR's function does, given `RtOK` and a machine that an instruction without I/O leaves alone |
+| `rt_bound_ok`, `harness_input`, `harness_out_byte`, `harness_out_end`, `harness_drop` (`Z80Rt.lean`) | routines of the runtime, from their items in an image: `rt_bound` returns when `HL < BC` with `A`, `DE`, `HL` kept and is at `rt_trap` when not; the effects of the test harness (`Runtime.harness`: ports of the model, no interrupts) do to the harness's machine (`Harness`) what `IR.Sem.effect` does to the world.  None uses the stack |
+| `ImgIn.ok` (`Z80Image.lean`) | the statement of `loop_image_ok` for any image: one check (`ImgIn.check`, run by the kernel on a term) gives `ZCtx.OK` and, with `RtOK`, the functions |
+| **`loopH_ok`** (`Z80LoopHItems.lean`, `Z80LoopH.lean`) | the loopback image for the test harness, without the passes on the assembly: every function does what the IR's does **with nothing taken of the runtime** — the four routines it calls are proved, it calls no other, and the plan has `rtK = 0` (a function needs two bytes of stack per call below it) |
 
 **Checked, not proved** (translation validation, on every function
 generated): `jumpsOk` — what the generator assumes the registers hold
@@ -760,7 +763,12 @@ effect does to the world).  Each is taken where the image calls the
 routine (`Uses`), and the accumulator's symbol where an instruction
 names it (`AccRef`): an image has the routines its code uses and no
 others, so the loopback image, without the wide routines and `rt_acc`,
-can meet them.
+can meet them.  Proved so far: `rt_bound`, and the four effect
+routines of the test harness (`Z80Rt.lean`); the board's routines (the
+ring filled by the interrupt routine) need interrupts in the machine of
+the proofs, which it does not have — `WSteps` runs instructions only —
+and the arithmetic and accumulator routines are tested (`rt-check`),
+not proved.
 
 **Two changes to the generator the proofs asked for** (the images
 changed; the tests and the size gate pass):
@@ -781,8 +789,10 @@ changed; the tests and the size gate pass):
   it.
 
 **Where this stands for the images.**  Of the loopback image without
-the passes on the assembly, `loop_image_ok` — nothing assumed of the
-program, the layout or the image.  Of the SLIP build, the checks of the
+the passes on the assembly: for the test harness `loopH_ok` — nothing
+assumed of the program, the layout, the image or the runtime; for the
+board `loop_image_ok` — the same but for `RtOK`, and in a machine
+without interrupts, which is not the board's.  Of the SLIP build, the checks of the
 layout pass (`#guard`, not the kernel), and nothing is connected to its
 image yet (it has wide constants: the literal pool; and 1073
 instructions to run the checks on in the kernel).  Of the images as
@@ -791,7 +801,11 @@ built by default nothing is proved: `build` runs `retThreading`,
 of 7159 in the SLIP build; `ember-z80 own-build --plain` is the image
 without them, tested like the other (random programs, the loopback, the
 corpus).  Not proved of any image: start-up, the interrupt routine and
-the loop that calls `main`; the routines of the runtime.
+the loop that calls `main`; interrupts.  The stack: `Z.rtK` is what a
+routine of the runtime needs below its return address — 0 for the
+harness loopback (proved), 32 in the plans of the board builds
+(a placeholder: `Ember.Z80.StackBound` computes at most 4 for any
+routine of `Runtime.pieces`, not proved).
 
 **Covered** (`Covered`): all 1073 instructions of the SLIP build's IR,
 all 79 of the loopback program's, 1559 of the 1562 of the Ethernet

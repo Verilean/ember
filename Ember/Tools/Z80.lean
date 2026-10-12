@@ -1,3 +1,4 @@
+import Ember.Z80.StackBound
 import Ember.Z80.Check
 import Ember.Lang.Examples
 import Ember.Z80.Asm
@@ -803,7 +804,13 @@ def main (args : List String) : IO UInt32 := do
       let lo (xs : List Nat) := xs.foldl Nat.min 65536
       IO.println s!"RAM: runtime and ring {lo gl - 0x8000}, globals {lo fr - lo gl}, frames {img.layout.top - lo fr}"
       IO.println s!"own back end: {name}: {img.codeSize} bytes of code and constants, {img.ramSize} bytes of RAM"
-      return 0
+      -- the stack: a static bound against the room above the static RAM
+      let room := 65536 - img.layout.top
+      match StackBound.ofItems img.items with
+      | none => IO.println "FAIL stack bound: the analysis gave up"; return 1
+      | some b =>
+        IO.println s!"stack bound: {b.total} bytes at most ({b.main} from start-up on, {b.interrupt} for an interrupt); {room} bytes above the static RAM"
+        return if b.total ≤ room then 0 else 1
   | "own-fuzz" :: rest => ownFuzz ((rest.head?.bind (·.toNat?)).getD 500) o.seed o.verbose !o.plain
   | "ir-replay" :: paths => irReplay paths
   | "ir-dump" :: rest => irDump ((rest.head?.bind (·.toNat?)).getD 400) o.seed

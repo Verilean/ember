@@ -13,4 +13,5 @@ z80.stack 181
 z80own.code 6011
 z80own.ram 1061
 z80own.stack 16
+z80own.stack_bound 24
 z80own.ping_tstates 187426
