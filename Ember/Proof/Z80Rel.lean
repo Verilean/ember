@@ -31,6 +31,13 @@ structure ZCtx where
   inp : UInt16 → UInt8
   /-- The bytes the generated code and the IR share. -/
   data : Nat → Prop
+  /-- Where RAM starts. -/
+  ramStart : Nat
+  /-- The slots a function reads and writes in its own frame and in the
+  globals (with their sizes): what the tracker of registers may rely on. -/
+  use : Slot × Nat → Prop
+  /-- The slots written, wherever they are. -/
+  dst : Slot × Nat → Prop
 
 /-- The name `n` is the number `v` in the image. -/
 def ZCtx.sym (Z : ZCtx) (n : String) (v : Nat) : Prop := Z.a.labels.reverse.lookup n = some v
@@ -39,10 +46,24 @@ structure ZCtx.OK (Z : ZCtx) : Prop where
   placed : Placed Z.items 0 Z.a Z.addrs
   /-- The image was built for the layout. -/
   areas : ∀ ar ad, Z.c.layout.areaAddr ar = some ad → Z.sym (areaSym ar) ad
+  /-- The shared bytes are in RAM. -/
+  ram : ∀ x, Z.data x → Z.ramStart ≤ x ∧ x < 65536
+  ubound : ∀ a an, Z.use (a, an) → Z.c.layout.addr a + an ≤ 65536
+  dbound : ∀ b bn, Z.dst (b, bn) → Z.c.layout.addr b + bn ≤ 65536
+  /-- A slot that is used and one that is written are apart in memory unless their offsets overlap. -/
+  apart : ∀ a an b bn, Z.use (a, an) → Z.dst (b, bn) →
+    IR.slotsOverlap a an b bn = true ∨ Z.c.layout.addr a + an ≤ Z.c.layout.addr b ∨
+      Z.c.layout.addr b + bn ≤ Z.c.layout.addr a
 
 /-- The slot of the temporary `t`. -/
 def tmpAddr (Z : ZCtx) (E : GEnv) (t : Nat) : Nat :=
   Z.c.layout.addr { area := .frame E.fn.name, off := E.tmpOff[t]! }
+
+/-- An operand of the function's own: a constant, a temporary, a slot of
+its frame or of a global (not of the frame of a function it calls). -/
+def Own (E : GEnv) : Opd → Prop
+  | .slot sl => sl.area = .frame E.fn.name ∨ ∃ g, sl.area = .global g
+  | _ => True
 
 /-- **The relation.**  `dt`: the temporaries assigned so far. -/
 structure Rel (Z : ZCtx) (E : GEnv) (dt : Nat → Prop) (regs : Regs) (ist : IR.Sem.St) (tmps : Array Nat)
@@ -52,17 +73,28 @@ structure Rel (Z : ZCtx) (E : GEnv) (dt : Nat → Prop) (regs : Regs) (ist : IR.
   mem : ∀ x, Z.data x → s.mem.get! x = ist.mem.get! x
   tmp : ∀ t, dt t → E.spilled[t]! = true →
     IR.Sem.rd s.mem (tmpAddr Z E t) (E.fn.tmps[t]!) = tmps.getD t 0
-  ra : ∀ o, o ∈ regs.a → s.a.toNat = IR.Sem.opd Z.c ist tmps 1 o
-  rhl : ∀ o, o ∈ regs.hl → s.hl.toNat = IR.Sem.opd Z.c ist tmps 2 o
+  rs : s.ramStart.toNat = Z.ramStart
+  msz : s.mem.size = 65536
+  isz : ist.mem.size = 65536
+  tsz : tmps.size = E.fn.tmps.size
+  /-- What the tracker says, for the operands of the function's own. -/
+  ra : ∀ o, o ∈ regs.a → Own E o → s.a.toNat = IR.Sem.opd Z.c ist tmps 1 o
+  rhl : ∀ o, o ∈ regs.hl → Own E o → s.hl.toNat = IR.Sem.opd Z.c ist tmps 2 o
+  ina : ∀ sl, Opd.slot sl ∈ regs.a → Own E (.slot sl) → Z.use (sl, 1)
+  inhl : ∀ sl, Opd.slot sl ∈ regs.hl → Own E (.slot sl) → Z.use (sl, 2)
 
 /-- A step that changes registers only. -/
 theorem Rel.regs_only {Z : ZCtx} {E : GEnv} {dt : Nat → Prop} {regs regs' : Regs} {ist : IR.Sem.St}
     {tmps : Array Nat} {s s' : Cpu} (R : Rel Z E dt regs ist tmps s) (hm : s'.mem = s.mem)
     (hr : s'.ramStart = s.ramStart) (hh : s'.halted = s.halted)
-    (ha : ∀ o, o ∈ regs'.a → s'.a.toNat = IR.Sem.opd Z.c ist tmps 1 o)
-    (hhl : ∀ o, o ∈ regs'.hl → s'.hl.toNat = IR.Sem.opd Z.c ist tmps 2 o) : Rel Z E dt regs' ist tmps s' :=
+    (ha : ∀ o, o ∈ regs'.a → Own E o → s'.a.toNat = IR.Sem.opd Z.c ist tmps 1 o)
+    (hhl : ∀ o, o ∈ regs'.hl → Own E o → s'.hl.toNat = IR.Sem.opd Z.c ist tmps 2 o)
+    (hina : ∀ sl, Opd.slot sl ∈ regs'.a → Own E (.slot sl) → Z.use (sl, 1))
+    (hinhl : ∀ sl, Opd.slot sl ∈ regs'.hl → Own E (.slot sl) → Z.use (sl, 2)) :
+    Rel Z E dt regs' ist tmps s' :=
   ⟨R.img.congr hr hm, by rw [hh]; exact R.run, fun x hx => by rw [hm]; exact R.mem x hx,
-    fun t h1 h2 => by rw [hm]; exact R.tmp t h1 h2, ha, hhl⟩
+    fun t h1 h2 => by rw [hm]; exact R.tmp t h1 h2, by rw [hr]; exact R.rs, by rw [hm]; exact R.msz, R.isz, R.tsz,
+    ha, hhl, hina, hinhl⟩
 
 /-! ## The code being generated is in the image -/
 
@@ -119,6 +151,13 @@ theorem mk16_toNat (hi lo : UInt8) : (mk16 hi lo).toNat = hi.toNat * 256 + lo.to
   rw [show (8 : UInt16).toNat % 16 = 8 from rfl, Nat.shiftRight_eq_div_pow]
   omega
 
+@[simp] theorem mk16_hi_lo (v : UInt16) : mk16 (hi v) (lo v) = v := by
+  apply UInt16.toNat_inj.mp
+  have := v.toNat_lt
+  simp only [mk16_toNat, hi, lo, UInt16.toNat_toUInt8, UInt16.toNat_shiftRight]
+  rw [show (8 : UInt16).toNat % 16 = 8 from rfl, Nat.shiftRight_eq_div_pow]
+  omega
+
 theorem w16_eq (lo hi : UInt8) : w16 lo hi = mk16 hi lo := by
   simp only [w16, mk16, UInt16.or_comm]
 
@@ -150,6 +189,12 @@ theorem val_sym (env : Env) (n : String) (off A : Int) (h : env.resolve n = some
   have hr : (readThe Env : Enc Env) env = Except.ok env := rfl
   simp only [Env.val, value, bind, ReaderT.bind, ReaderT.run, read, Except.bind, hr, h]
   rfl
+
+/-- The word an instruction carries, when its operand is the number `x`. -/
+theorem immW_toNat (env : Env) (i : Instr) (v : Val) (x : Nat) (hi : i.immVal? = some v)
+    (hv : env.val v = Int.ofNat x) (hx : x < 65536) : (i.immW env).toNat = x := by
+  simp only [Instr.immW, Instr.immInt, hi, hv]
+  exact w16_val x hx
 
 /-- A slot's address in the image is its address in the layout. -/
 theorem slot_val {Z : ZCtx} (ok : Z.OK) (sl : Slot) (ad pc : Nat) (h : Z.c.layout.areaAddr sl.area = some ad) :

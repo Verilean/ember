@@ -122,4 +122,16 @@ theorem rd_low (m : ByteArray) (a n k : Nat) : rd m a n = rd m a (n + k) % 2 ^ (
 theorem rd_high (m : ByteArray) (a n k : Nat) : rd m (a + n) k = rd m a (n + k) / 2 ^ (8 * n) := by
   rw [rd_add, Nat.add_mul_div_left _ _ (Nat.two_pow_pos _), Nat.div_eq_of_lt (rd_lt m a n), Nat.zero_add]
 
+theorem wr_get_far (m : ByteArray) (b k v x : Nat) (hb : b + k ≤ 65536) (hx : x < b ∨ b + k ≤ x) :
+    (wr m b k v).get! x = m.get! x := by
+  induction k generalizing m b v with
+  | zero => rfl
+  | succ k ih =>
+    rw [wr, ih _ _ _ (by omega) (by omega), get_set, Nat.mod_eq_of_lt (by omega), if_neg (by omega)]
+
+/-- A read away from a write, whatever the size of the memory. -/
+theorem rd_wr_far (m : ByteArray) (a n b k v : Nat) (ha : a + n ≤ 65536) (hb : b + k ≤ 65536)
+    (hd : a + n ≤ b ∨ b + k ≤ a) : rd (wr m b k v) a n = rd m a n :=
+  rd_congr _ _ _ _ ha fun x _ _ => wr_get_far m b k v x hb (by omega)
+
 end Ember.Proof.IRSim

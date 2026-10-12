@@ -1,4 +1,4 @@
-import Ember.Proof.Z80Rel
+import Ember.Proof.Z80Fields
 
 /-!
 # Ember.Proof.Z80Load — loading an operand into a register (plan M7.3)
@@ -17,10 +17,19 @@ open Ember.Z80.IR (Opd Dst Slot Area)
 def Rd (Z : ZCtx) (E : GEnv) (dt : Nat → Prop) (n : Nat) : Opd → Prop
   | .const _ => True
   | .slot sl => (∃ ad, Z.c.layout.areaAddr sl.area = some ad) ∧ Z.c.layout.addr sl + n ≤ 65536 ∧
-      ∀ j, j < n → Z.data (Z.c.layout.addr sl + j)
+      (∀ j, j < n → Z.data (Z.c.layout.addr sl + j)) ∧ Own E (.slot sl) ∧ Z.use (sl, n)
   | .tmp t => E.spilled[t]! = true →
       dt t ∧ (∃ ad, Z.c.layout.areaAddr (.frame E.fn.name) = some ad) ∧
         tmpAddr Z E t + E.fn.tmps[t]! ≤ 65536 ∧ n ≤ E.fn.tmps[t]!
+
+theorem Rd.own {Z : ZCtx} {E : GEnv} {dt : Nat → Prop} {n : Nat} {o : Opd} (h : Rd Z E dt n o) : Own E o := by
+  cases o with
+  | const v => trivial
+  | tmp t => trivial
+  | slot sl => exact h.2.2.2.1
+
+theorem Rd.use {Z : ZCtx} {E : GEnv} {dt : Nat → Prop} {n : Nat} {sl : Slot} (h : Rd Z E dt n (.slot sl)) :
+    Z.use (sl, n) := h.2.2.2.2
 
 /-- Where an operand is, as the generator names it. -/
 def opdVal (E : GEnv) : Opd → Val
@@ -89,7 +98,7 @@ theorem opd_mem {n : Nat} {o : Opd} (hrd : Rd Z E dt n o) (hsp : ∀ t, o = .tmp
   cases o with
   | const v => exact absurd rfl (hc v)
   | slot sl =>
-    obtain ⟨_, hb, hd⟩ := hrd
+    obtain ⟨_, hb, hd, _⟩ := hrd
     exact rd_congr _ _ _ _ hb (fun x h1 h2 => by
       have := hd (x - Z.c.layout.addr sl) (by omega)
       rw [show Z.c.layout.addr sl + (x - Z.c.layout.addr sl) = x by omega] at this
@@ -108,6 +117,14 @@ def KeepA (s s' : Cpu) : Prop :=
   s'.b = s.b ∧ s'.c = s.c ∧ s'.d = s.d ∧ s'.e = s.e ∧ s'.h = s.h ∧ s'.l = s.l ∧ s'.sp = s.sp ∧ s'.mem = s.mem
 
 theorem KeepA.refl (s : Cpu) : KeepA s s := ⟨rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl⟩
+
+/-- Nothing but `HL` and the program counter changed. -/
+def KeepHL (s s' : Cpu) : Prop :=
+  s'.a = s.a ∧ s'.f = s.f ∧ s'.b = s.b ∧ s'.c = s.c ∧ s'.d = s.d ∧ s'.e = s.e ∧ s'.sp = s.sp ∧ s'.mem = s.mem
+
+theorem KeepHL.refl (s : Cpu) : KeepHL s s := ⟨rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl⟩
+
+macro "unfold_keep" : tactic => `(tactic| simp only [KeepA, KeepHL, zsim, and_self])
 
 /-- What `loadA o` promises. -/
 def LoadA (Z : ZCtx) (E : GEnv) (base : Nat) (sF : GS) (dt : Nat → Prop) (o : Opd) (s0 : GS) (_ : Unit)
@@ -138,7 +155,8 @@ theorem loadA_ok (ok : Z.OK) (F : GFinal Z base sF) (o : Opd) (s0 : GS) :
   by_cases h1 : s0.regs.a.contains o = true
   · simp only [h1, if_true, wpg_pure]
     have hmem : o ∈ s0.regs.a := by simpa using h1
-    exact ⟨GExt.refl _, rfl, hmem, fun _ ist tmps s _ R hat => ⟨s, Steps.refl _ _, hat, R, KeepA.refl s, R.ra o hmem⟩⟩
+    exact ⟨GExt.refl _, rfl, hmem, fun _ ist tmps s hrd R hat =>
+      ⟨s, Steps.refl _ _, hat, R, KeepA.refl s, R.ra o hmem hrd.own⟩⟩
   · simp only [h1, Bool.false_eq_true, if_false]
     by_cases h2 : (s0.regs.hl.contains o && isSlot o) = true
     · simp only [h2, if_true, wpg_bind, wpg_ins, wpg_setRegs]
@@ -150,7 +168,7 @@ theorem loadA_ok (ok : Z.OK) (F : GFinal Z base sF) (o : Opd) (s0 : GS) :
       have hval : s.l.toNat = IR.Sem.opd Z.c ist tmps 1 o := by
         cases o with
         | slot sl =>
-          have h := R.rhl _ hmem
+          have h := R.rhl _ hmem hrd.own
           show _ = IR.Sem.rd ist.mem _ 1
           have hlow := rd_low ist.mem (Z.c.layout.addr sl) 1 1
           rw [hlow]
@@ -162,11 +180,11 @@ theorem loadA_ok (ok : Z.OK) (F : GFinal Z base sF) (o : Opd) (s0 : GS) :
         | const v => simp [isSlot] at h2
         | tmp t => simp [isSlot] at h2
       have hval' : (((op1 s).setReg .hl 7 ((op1 s).reg .hl 5)).tick 4).a.toNat = IR.Sem.opd Z.c ist tmps 1 o := by
-        show (lo (mk16 s.h s.l)).toNat = _
-        rw [lo_mk16]
+        simp only [zsim]
         exact hval
-      refine ⟨_, hst, hat', R.regs_only rfl rfl rfl (fun o' ho' => ?_) (fun o' ho' => R.rhl o' ho'),
-        ⟨rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl⟩, hval'⟩
+      refine ⟨_, hst, hat', R.regs_only (by simp only [zsim]) (by simp only [zsim]) (by simp only [zsim]) (fun o' ho' _ => ?_) (fun o' ho' => R.rhl o' ho')
+          (fun sl hsl _ => by simp only [List.mem_singleton] at hsl; first | (subst hsl; exact hrd.use) | cases hsl) R.inhl,
+        (by unfold_keep), hval'⟩
       simp only [List.mem_singleton] at ho'
       subst ho'
       exact hval'
@@ -198,12 +216,17 @@ theorem loadA_ok (ok : Z.OK) (F : GFinal Z base sF) (o : Opd) (s0 : GS) :
             rw [ho1, had] at had'
             cases had'
             rfl) rfl
-        have hval : (s.mem.get! (Instr.immW (Z.a.env ad) ⟨.ld, [.a, .mem (opdVal E o)]⟩).toNat).toNat =
+        have hval : (({ (skip (op1 s) 2) with
+            a := (op1 s).rd (Instr.immW (Z.a.env ad) ⟨.ld, [.a, .mem (opdVal E o)]⟩) } : Cpu).tick 13).a.toNat =
             IR.Sem.opd Z.c ist tmps 1 o := by
+          simp only [zsim]
+          show (s.mem.get! _).toNat = _
           rw [hnn, ← rd_one _ _ (by omega)]
           exact opd_mem hrd hsp hc R
-        refine ⟨_, hst, hat', R.regs_only rfl rfl rfl (fun o' ho' => ?_)
-          (fun o' ho' => R.rhl o' (by rw [← hr1]; exact ho')), ⟨rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl⟩, hval⟩
+        refine ⟨_, hst, hat', R.regs_only (by simp only [zsim]) (by simp only [zsim]) (by simp only [zsim]) (fun o' ho' _ => ?_)
+          (fun o' ho' => R.rhl o' (by rw [← hr1]; exact ho'))
+          (fun sl hsl _ => by simp only [List.mem_singleton] at hsl; first | (subst hsl; exact hrd.use) | cases hsl)
+          (fun sl hsl => R.inhl sl (by rw [← hr1]; exact hsl)), (by unfold_keep), hval⟩
         simp only [List.mem_singleton] at ho'
         subst ho'
         exact hval
@@ -218,11 +241,13 @@ theorem loadA_ok (ok : Z.OK) (F : GFinal Z base sF) (o : Opd) (s0 : GS) :
           obtain ⟨hst, hat'⟩ := run_ins ok F (s0 := s0) (i := ⟨.xor, [.a]⟩) hx rfl R.img R.run hat
             (s' := ((op1 s).alu 5 ((op1 s).reg .hl 7)).tick 4) (fun ad _ => rfl) rfl
           have hval : (((op1 s).alu 5 ((op1 s).reg .hl 7)).tick 4).a.toNat = IR.Sem.opd Z.c ist tmps 1 (.const v) := by
+            simp only [zsim]
             show (s.a ^^^ s.a).toNat = IR.modN 1 v
             have hz' : v % 256 = 0 := by simpa using hz
             simp [IR.modN, hz']
-          refine ⟨_, hst, hat', R.regs_only rfl rfl rfl (fun o' ho' => ?_) (fun o' ho' => R.rhl o' ho'),
-            ⟨rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl⟩, hval⟩
+          refine ⟨_, hst, hat', R.regs_only (by simp only [zsim]) (by simp only [zsim]) (by simp only [zsim]) (fun o' ho' _ => ?_) (fun o' ho' => R.rhl o' ho')
+          (fun sl hsl _ => by simp only [List.mem_singleton] at hsl; first | (subst hsl; exact hrd.use) | cases hsl) R.inhl,
+            (by unfold_keep), hval⟩
           simp only [List.mem_singleton] at ho'
           subst ho'
           exact hval
@@ -232,16 +257,96 @@ theorem loadA_ok (ok : Z.OK) (F : GFinal Z base sF) (o : Opd) (s0 : GS) :
             (s' := ((skip (op1 s) 1).setReg .hl 7 (byteOf (Int.ofNat (v % 256)))).tick 7) (fun ad _ => rfl) rfl
           have hval : (((skip (op1 s) 1).setReg .hl 7 (byteOf (Int.ofNat (v % 256)))).tick 7).a.toNat =
               IR.Sem.opd Z.c ist tmps 1 (.const v) := by
+            simp only [zsim]
             show (byteOf (Int.ofNat (v % 256))).toNat = IR.modN 1 v
             rw [byteOf_toNat, IR.modN]
             have : (Int.ofNat (v % 256) : Int) = ((v % 256 : Nat) : Int) := rfl
             rw [this]
             omega
-          refine ⟨_, hst, hat', R.regs_only rfl rfl rfl (fun o' ho' => ?_) (fun o' ho' => R.rhl o' ho'),
-            ⟨rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl⟩, hval⟩
+          refine ⟨_, hst, hat', R.regs_only (by simp only [zsim]) (by simp only [zsim]) (by simp only [zsim]) (fun o' ho' _ => ?_) (fun o' ho' => R.rhl o' ho')
+          (fun sl hsl _ => by simp only [List.mem_singleton] at hsl; first | (subst hsl; exact hrd.use) | cases hsl) R.inhl,
+            (by unfold_keep), hval⟩
           simp only [List.mem_singleton] at ho'
           subst ho'
           exact hval
+
+/-- What `loadHL o` promises. -/
+def LoadHL (Z : ZCtx) (E : GEnv) (base : Nat) (sF : GS) (dt : Nat → Prop) (o : Opd) (s0 : GS) (_ : Unit)
+    (s1 : GS) : Prop :=
+  GExt s0 s1 ∧ s1.regs.a = s0.regs.a ∧ o ∈ s1.regs.hl ∧
+    (GExt s1 sF → ∀ ist tmps s, Rd Z E dt 2 o → Rel Z E dt s0.regs ist tmps s →
+      At Z.addrs (base + s0.out.size) s →
+      ∃ s', Steps Z.inp s s' ∧ At Z.addrs (base + s1.out.size) s' ∧ Rel Z E dt s1.regs ist tmps s' ∧ KeepHL s s' ∧
+        s'.hl.toNat = IR.Sem.opd Z.c ist tmps 2 o)
+
+theorem loadHL_ok (ok : Z.OK) (F : GFinal Z base sF) (o : Opd) (s0 : GS) :
+    wpg (loadHL o) E (LoadHL Z E base sF dt o s0) s0 := by
+  unfold loadHL
+  simp only [wpg_bind, wpg_get]
+  by_cases h1 : s0.regs.hl.contains o = true
+  · simp only [h1, if_true, wpg_pure]
+    have hmem : o ∈ s0.regs.hl := by simpa using h1
+    exact ⟨GExt.refl _, rfl, hmem, fun _ ist tmps s hrd R hat =>
+      ⟨s, Steps.refl _ _, hat, R, KeepHL.refl s, R.rhl o hmem hrd.own⟩⟩
+  · simp only [h1, Bool.false_eq_true, if_false]
+    have mem_case : ∀ o : Opd, (∀ v, o ≠ .const v) →
+        wpg (do
+          let p ← addrOf o
+          ins .ld [.hl, .mem p]
+          setRegs fun r => { r with hl := [o] }) E (LoadHL Z E base sF dt o s0) s0 := by
+      intro o hc
+      simp only [wpg_bind]
+      refine wpg_mono (addrOf_ok o s0) ?_
+      intro p s1 ⟨ho1, hr1, hp, hsp, _⟩
+      subst hp
+      simp only [wpg_ins, wpg_setRegs]
+      refine ⟨by simp [GExt, ho1], (by show s1.regs.a = s0.regs.a; rw [hr1]), by simp,
+        fun hx ist tmps s hrd R hat => ?_⟩
+      obtain ⟨ad, had, hpc⟩ := hat
+      obtain ⟨hv, hb⟩ := opd_val ok hrd hsp hc ad
+      have hnn : (Instr.immW (Z.a.env ad) ⟨.ld, [.hl, .mem (opdVal E o)]⟩).toNat = opdAddr Z E o :=
+        immW_toNat _ _ _ _ rfl hv (by omega)
+      obtain ⟨hst, hat'⟩ := run_ins ok F (s0 := s1) (i := ⟨.ld, [.hl, .mem (opdVal E o)]⟩) hx rfl R.img R.run
+        (by rw [ho1]; exact ⟨ad, had, hpc⟩)
+        (s' := ((skip (op1 s) 2).setHL
+          ((op1 s).rd16 (Instr.immW (Z.a.env ad) ⟨.ld, [.hl, .mem (opdVal E o)]⟩))).tick 16)
+        (fun ad' had' => by
+          rw [ho1, had] at had'
+          cases had'
+          rfl) rfl
+      have hval : (((skip (op1 s) 2).setHL
+          ((op1 s).rd16 (Instr.immW (Z.a.env ad) ⟨.ld, [.hl, .mem (opdVal E o)]⟩))).tick 16).hl.toNat =
+          IR.Sem.opd Z.c ist tmps 2 o := by
+        simp only [zsim]
+        rw [cpu_rd16 _ _ (by rw [hnn]; omega), hnn]
+        exact opd_mem hrd hsp hc R
+      refine ⟨_, hst, hat', R.regs_only (by simp only [zsim]) (by simp only [zsim]) (by simp only [zsim]) (fun o' ho' => R.ra o' (by rw [← hr1]; exact ho'))
+        (fun o' ho' _ => ?_) (fun sl hsl => R.ina sl (by rw [← hr1]; exact hsl))
+        (fun sl hsl _ => by simp only [List.mem_singleton] at hsl; first | (subst hsl; exact hrd.use) | cases hsl), (by unfold_keep), hval⟩
+      simp only [List.mem_singleton] at ho'
+      subst ho'
+      exact hval
+    cases o with
+    | slot sl => exact mem_case (.slot sl) (fun v h => by cases h)
+    | tmp t => exact mem_case (.tmp t) (fun v h => by cases h)
+    | const v =>
+      simp only [wpg_bind, wpg_ins, wpg_setRegs]
+      refine ⟨GExt.push _ _, rfl, by simp, fun hx ist tmps s hrd R hat => ?_⟩
+      obtain ⟨hst, hat'⟩ := run_ins ok F (s0 := s0) (i := ⟨.ld, [.hl, n16 v]⟩) hx rfl R.img R.run hat
+        (s' := ((skip (op1 s) 2).setHL (w16 (byteOf (Int.ofNat (v % 65536))) (byteOf (Int.ofNat (v % 65536) / 256)))).tick 10)
+        (fun ad _ => rfl) rfl
+      have hval : (((skip (op1 s) 2).setHL
+          (w16 (byteOf (Int.ofNat (v % 65536))) (byteOf (Int.ofNat (v % 65536) / 256)))).tick 10).hl.toNat =
+          IR.Sem.opd Z.c ist tmps 2 (.const v) := by
+        simp only [zsim]
+        rw [w16_val _ (Nat.mod_lt _ (by decide))]
+        rfl
+      refine ⟨_, hst, hat', R.regs_only (by simp only [zsim]) (by simp only [zsim]) (by simp only [zsim]) (fun o' ho' => R.ra o' ho') (fun o' ho' _ => ?_)
+        R.ina (fun sl hsl _ => by simp only [List.mem_singleton] at hsl; cases hsl),
+        (by unfold_keep), hval⟩
+      simp only [List.mem_singleton] at ho'
+      subst ho'
+      exact hval
 
 end
 
