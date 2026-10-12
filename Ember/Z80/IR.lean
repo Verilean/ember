@@ -32,23 +32,23 @@ open Ember.Lang
 inductive Area where
   | global (g : String)
   | frame (f : String)
-  deriving BEq, Repr, Inhabited, Hashable
+  deriving DecidableEq, Repr, Inhabited, Hashable
 
 structure Slot where
   area : Area
   off : Nat := 0
-  deriving BEq, Repr, Inhabited
+  deriving DecidableEq, Repr, Inhabited
 
 inductive Opd where
   | const (v : Nat)
   | slot (s : Slot)
   | tmp (t : Nat)
-  deriving BEq, Repr, Inhabited
+  deriving DecidableEq, Repr, Inhabited
 
 inductive Dst where
   | slot (s : Slot)
   | tmp (t : Nat)
-  deriving BEq, Repr, Inhabited
+  deriving DecidableEq, Repr, Inhabited
 
 def Dst.opd : Dst → Opd
   | .slot s => .slot s
@@ -1003,33 +1003,48 @@ end
 /-- A block: its locals give their bytes back at its end. -/
 def block (ss : List Stmt) : LM Unit := inScope fun e => blockFrom e ss e
 
-/-- Drop what cannot run (after a `ret`, `jmp` or `trap`, up to the next
-label), jumps to the next instruction, and labels nothing jumps to. -/
-def cleanupPass (body : Array Instr) : Array Instr := Id.run do
-  let mut out : Array Instr := #[]
-  let mut dead := false
-  for i in body do
+/-- The elements a mask keeps. -/
+def sel {α : Type} : List Bool → List α → List α
+  | true :: ks, x :: xs => x :: sel ks xs
+  | false :: ks, _ :: xs => sel ks xs
+  | _, _ => []
+
+/-- What can run: not what follows a `ret`, `jmp` or `trap`, up to the next label. -/
+def deadMask : Bool → List Instr → List Bool
+  | _, [] => []
+  | dead, i :: r =>
     match i with
-    | .label _ => dead := false; out := out.push i
-    | _ =>
-      if dead then continue
-      out := out.push i
-      match i with
-      | .ret _ | .jmp _ | .trap => dead := true
-      | _ => pure ()
-  -- `jmp L` right before `L:`
-  let mut out2 : Array Instr := #[]
-  for k in [0:out.size] do
-    match out[k]!, out[k + 1]? with
-    | .jmp l, some (.label m) => if l != m then out2 := out2.push out[k]!
-    | i, _ => out2 := out2.push i
-  let targets := out2.toList.filterMap fun i => match i with
-    | .jmp l | .br _ _ _ _ l => some l
-    | _ => none
-  let out3 := out2.filter fun i => match i with
+    | .label _ => true :: deadMask false r
+    | .ret _ | .jmp _ | .trap => (!dead) :: deadMask true r
+    | _ => (!dead) :: deadMask dead r
+
+/-- Not a `jmp L` right before `L:`. -/
+def jmpMask : List Instr → List Bool
+  | [] => []
+  | i :: r =>
+    (match i, r with
+     | .jmp l, .label m :: _ => l != m
+     | _, _ => true) :: jmpMask r
+
+/-- Where an instruction may jump to. -/
+def Instr.target? : Instr → Option Nat
+  | .jmp l | .br _ _ _ _ l => some l
+  | _ => none
+
+def targetsOf (body : List Instr) : List Nat := body.filterMap Instr.target?
+
+/-- Not a label nothing jumps to. -/
+def labelMask (targets : List Nat) (body : List Instr) : List Bool :=
+  body.map fun i => match i with
     | .label l => targets.contains l
     | _ => true
-  return out3
+
+/-- Drop what cannot run, jumps to the next instruction, and labels
+nothing jumps to. -/
+def cleanupPass (body : Array Instr) : Array Instr :=
+  let a := sel (deadMask false body.toList) body.toList
+  let b := sel (jmpMask a) a
+  (sel (labelMask (targetsOf b) b) b).toArray
 
 /-- `cleanupPass` until nothing more goes (every round that goes on is shorter). -/
 def cleanupN : Nat → Array Instr → Array Instr
@@ -1043,48 +1058,63 @@ def cleanup (body : Array Instr) : Array Instr := cleanupN (body.size + 1) body
 def slotsOverlap (a : Slot) (an : Nat) (b : Slot) (bn : Nat) : Bool :=
   a.area == b.area && a.off < b.off + bn && b.off < a.off + an
 
+/-- What is known on the way: an operand, its size, and a bound it is below. -/
+abbrev Facts := List (Opd × Nat × Nat)
+
+/-- The address, without the check a fact makes needless. -/
+def knownAddr (facts : Facts) (p : Addr) : Addr :=
+  match p.idx with
+  | some x =>
+    match x.len with
+    | some n =>
+      if facts.any (fun (o, sz, c) => o == x.opd && sz == x.size && c ≤ n) then { p with idx := some { x with len := none } }
+      else p
+    | none => p
+  | none => p
+
+def knownInstr (facts : Facts) : Instr → Instr
+  | .load n d p => .load n d (knownAddr facts p)
+  | .store n p src => .store n (knownAddr facts p) src
+  | .lea d p => .lea d (knownAddr facts p)
+  | i => i
+
+/-- The facts a write of `n` bytes to `d` leaves. -/
+def written (d : Dst) (n : Nat) (fs : Facts) : Facts :=
+  fs.filter fun (o, sz, _) => match o, d with
+    | .tmp t, .tmp u => t != u
+    | .slot a, .slot b => !slotsOverlap a sz b n
+    | _, _ => true
+
+def noSlots (fs : Facts) : Facts :=
+  fs.filter fun (o, _, _) => match o with | .slot _ => false | _ => true
+
+/-- The facts after an instruction, when it goes on to the next. -/
+def factsAfter (facts : Facts) : Instr → Facts
+  | .label _ | .jmp _ | .ret _ | .trap => []
+  | .br op n x y _ =>
+    (match op, y, x with
+     | .ge, .const _, .const _ => facts
+     | .ge, .const c, x => (x, n, c) :: facts
+     | _, _, _ => facts)
+  | .mov n d _ | .bin _ n d _ _ | .shift _ n d _ _ _ | .not n d _ | .neg n d _ | .ext n d _ _ | .load n d _ =>
+    written d n facts
+  | .cmp _ _ d _ _ => written d 1 facts
+  | .lea d _ => written d 2 facts
+  | .store .. | .zero .. => noSlots facts
+  | .call _ r _ | .eff _ _ r =>
+    (match r with
+     | some (n, d) => written d n (noSlots facts)
+     | none => noSlots facts)
+
+def dropFrom (facts : Facts) : List Instr → List Instr
+  | [] => []
+  | i :: r => knownInstr facts i :: dropFrom (factsAfter facts i) r
+
 /-- An index check is dropped where a comparison on the way already
 established it: after `if x ≥ C goto …` falls through, `x < C` holds
 until `x` may have changed (an assignment to it; for a variable also any
 call, effect or store through an address; any label). -/
-def dropChecks (body : Array Instr) : Array Instr := Id.run do
-  -- operand, its size, and the bound below which it is
-  let mut facts : List (Opd × Nat × Nat) := []
-  let mut out : Array Instr := #[]
-  for i in body do
-    let known (p : Addr) : Addr :=
-      match p.idx with
-      | some x =>
-        match x.len with
-        | some n => if facts.any (fun (o, sz, c) => o == x.opd && sz == x.size && c ≤ n) then { p with idx := some { x with len := none } } else p
-        | none => p
-      | none => p
-    let i' := match i with
-      | .load n d p => Instr.load n d (known p)
-      | .store n p src => .store n (known p) src
-      | .lea d p => .lea d (known p)
-      | i => i
-    out := out.push i'
-    let written (d : Dst) (n : Nat) (fs : List (Opd × Nat × Nat)) : List (Opd × Nat × Nat) :=
-      fs.filter fun (o, sz, _) => match o, d with
-        | .tmp t, .tmp u => t != u
-        | .slot a, .slot b => !slotsOverlap a sz b n
-        | _, _ => true
-    let noSlots (fs : List (Opd × Nat × Nat)) : List (Opd × Nat × Nat) :=
-      fs.filter fun (o, _, _) => match o with | .slot _ => false | _ => true
-    facts := match i with
-      | .label _ | .jmp _ | .ret _ | .trap => []
-      | .br .ge n x (.const c) _ => (match x with | .const _ => facts | x => (x, n, c) :: facts)
-      | .br .. => facts
-      | .mov n d _ | .bin _ n d _ _ | .shift _ n d _ _ _ | .not n d _ | .neg n d _ | .ext n d _ _ | .load n d _ =>
-        written d n facts
-      | .cmp _ _ d _ _ => written d 1 facts
-      | .lea d _ => written d 2 facts
-      | .store .. | .zero .. => noSlots facts
-      | .call _ r _ | .eff _ _ r =>
-        let fs := noSlots facts
-        (match r with | some (n, d) => written d n fs | none => fs)
-  return out
+def dropChecks (body : Array Instr) : Array Instr := (dropFrom [] body.toList).toArray
 
 /-- The trap that index checks jump to, when there is one. -/
 def trapEpilogue : LM Unit := fun _ s =>

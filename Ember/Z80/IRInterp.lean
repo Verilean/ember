@@ -159,15 +159,22 @@ partial def runFn (c : Ctx) (name : String) : IM (Option Nat) := do
       | .tmp t => tmps := tmps.set! t (modN n v)
   return result
 
+/-- Bytes into memory, from `a` on. -/
+def storeBytes (m : ByteArray) (a : Nat) : List UInt8 → ByteArray
+  | [] => m
+  | b :: bs => storeBytes (m.set! a b) (a + 1) bs
+
+/-- The initial values of the globals that have one, at their addresses. -/
+def initMem (l : Layout) (gs : List Global) (m : ByteArray) : ByteArray :=
+  gs.foldl (fun m g =>
+    match g.init with
+    | some bytes => storeBytes m ((l.globals.lookup g.name).getD 0) bytes.data.toList
+    | none => m) m
+
 /-- Lay the program out and set the globals' initial values. -/
-def initial (p : Prog) (inputs : Array Input) (framed := false) : Layout × IState := Id.run do
+def initial (p : Prog) (inputs : Array Input) (framed := false) : Layout × IState :=
   let l := layout p (fun f => ((p.fn? f).map (·.frame)).getD 0) 0x8000
-  let mut mem := ByteArray.mk (Array.replicate 65536 0)
-  for g in p.globals do
-    if let some bytes := g.init then
-      let a := (l.globals.lookup g.name).getD 0
-      for k in [0:bytes.size] do mem := mem.set! (a + k) bytes[k]!
-  return (l, { mem, world := { inputs, framed } })
+  (l, { mem := initMem l p.globals (ByteArray.mk (Array.replicate 65536 0)), world := { inputs, framed } })
 
 /-- The driver of the Ember interpreter (`Lang.runMachine`), on the IR. -/
 def run (lp : Lang.Prog) (inputs : Array Input) (header : Header := { impl := "ir" })

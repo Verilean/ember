@@ -64,6 +64,15 @@ specifies) is at the end of this file: "Refinement".
 | `CCheck.lean` | the checker `progOkB` and `progOkB_sound` | M5.8 |
 | `CNet.lean` | `stack_c`: the emitted C of the SLIP build against the Spec; the `#guard`s that the builds of the stack are covered | M5.6 + M5.8 |
 | `Z80Frame.lean` | `validate_sound`: a frame layout the validator accepts keeps frames apart from globals and from the frames of reachable functions | M7.2 |
+| `IRFuel.lean`, `IRMem.lean` | the IR semantics again: more fuel changes nothing (`mono1`); a function's run without counting fuel (`Reach`, `Ends`); `rd` and `wr` | M7.1 |
+| `IRTypes.lean`, `IRRel.lean`, `IRPlace.lean` | well-typed expressions (`WT`); a value as bytes at an address (`Holds`); what a layout must give (`LayOK`); the relation statements keep (`LRel`, `GRel`, `SRel`); a place as an address (`PlaceAt`) | M7.1 |
+| `IRWp.lean`, `IRArith.lean` | a weakest-precondition calculus for the lowering monad (`wp`, `Ext`, `Final`); the IR's operators as the Ember operators | M7.1 |
+| `IRExpr.lean`, `IRJump.lean` | `place_ok`, `expr_ok`, `exprTo_ok`; conditions as jumps (`condJump_ok`) | M7.1 (expressions) |
+| `IRStmt.lean`, `IRCall.lean`, `IRBlock.lean` | well-typed statements (`WTS`, `FnOK`, `ProgOK`); assignment, declaration, `break`, `return`; arguments, calls, effects and where results go; blocks, `if`, `loop`, `for` | M7.1 (statements) |
+| `IRSim.lean` | `stmt_ok`, `block_ok`, `fn_sim`: every statement, and a lowered function for any fuel | M7.1 (functions) |
+| `IRProgram.lean`, `IRInit.lean`, `IRCheck.lean` | the program as lowered (`lowered_of_raw`), the layout check (`layOk_sound`), the initial memory (`init_rel`), the entry function again and again (`iter_sim`, `iter_trap`); the checker `progOkB` and `progOkB_sound` | M7.1 (programs) |
+| `IRPass.lean`, `IRLower.lean` | the passes: a simulation between two bodies (`sim_exec`), dropping instructions (`del_sim`), `cleanup`, `dropChecks` (`drop_sim`), `tidy_ref`; `IR.lower` as a whole (`lower_iter`, `lower_trap`) and the checker `irOkB` | M7.1 (passes) |
+| `IRNet.lean` | `stack_ir`: the IR of the SLIP build against the Spec; the `#guard`s that the builds of the stack are covered | M5.6 + M7.1 |
 
 ## Theorems
 
@@ -220,7 +229,9 @@ occur.
   definition of both; no theorem connects it to the `Trace` that `run`
   returns.
 * P2 beyond what "Refinement" below lists; P3: the emitted C is proved
-  ("The emitted C" below), the Z80 back end is not (M7).
+  ("The emitted C" below); of the Z80 back end the translation to its
+  IR is ("The IR of the Z80 back end" below), the code generator and
+  the encoder are not (M7.3, M7.4).
 
 ## How the TCP proofs are organised
 
@@ -272,7 +283,8 @@ and none of them is proved:
    programs without by-reference parameters, against the C semantics of
    `Ember/C/Sem.lean` — which is itself a definition, tested against gcc
    and SDCC through the emitted programs, not derived from the C
-   standard.  The translation to Z80 (M7) is tested, not proved.
+   standard.  Of the translation to Z80, the step to the IR is proved
+   (M7.1), the code generator and the encoder are tested, not proved.
 
 ### Theorems
 
@@ -591,6 +603,68 @@ emitted checks; `compileFn` and `compile` are built from named functions
 * the `while` of the drivers (`C.Sem.run`, `Lang.Sem.run`): the theorems
   are about the calls those loops make, as for M5.6.
 
+### The IR of the Z80 back end (M7.1, M7.2)
+
+`Ember/Z80/IRSem.lean` is the IR's semantics as total functions: one
+instruction is one `step`, a function runs on fuel, memory is 64 KB of
+bytes at the addresses a `Layout` gives.  The proofs relate it to
+`Ember.Lang.Sem` through the lowering `Ember/Z80/IR.lean` itself.
+
+**The result** (`IRNet.lean`):
+
+| Theorem (`IRSim`) | Statement |
+|---|---|
+| **`stack_ir`** | for the checked SLIP build, the IR `IR.lower` returns for it and a layout the checker `irOkB` accepts: called again and again from its initial memory as `IR.Sem.run` calls it, the IR ends every call normally — no trap — and once the input is read, the kept lines of its trace are `specKept`.  M5.6 (`main_run_all`) and M7.1 (`lower_iter`) together |
+| **`lower_iter`**, `lower_trap` (`IRLower.lean`) | for any program `progOkB` accepts and any layout `irOkB` accepts: from the initial state, if `j` calls of the entry function end in `Lang.Sem`, they end in the IR `IR.lower` returns, with the same world; and if the next call traps, the IR traps, with the same events |
+| **`tidy_ref`** (`IRPass.lean`) | a call in the program with every body tidied (`cleanup`, then `dropChecks`) ends as in the program as lowered, in the same state |
+| `sim_exec`, `del_sim`, `drop_sim` | a relation between the points of two bodies that every step keeps makes the second end as the first; dropping instructions a mask selects is one when what is dropped does nothing where it is (a label nothing jumps to, a jump to the next instruction, what follows a `ret`, `jmp` or `trap`); dropping an index check is one when the facts `dropChecks` collects hold (`facts_step`) |
+| **`iter_sim`**, `iter_trap`, `entry_sim` (`IRProgram.lean`) | the same for the program as lowered (`lowerRaw`), from related states |
+| `init_rel` (`IRInit.lean`) | the memory `initMem` builds holds every global's initial value |
+| **`fn_sim`** (`IRSim.lean`) | a lowered function, its arguments in its frame: the result of `Lang.Sem` for its body, with any fuel — the same result, globals and world related again, memory outside its frames as it was — or a trap when it traps |
+| **`stmt_ok`**, `block_ok` | for a well-typed statement: the code the lowering emits does, from related states, what `Lang.Sem.execS` does — goes on, jumps to the end of the loop for `break`, returns the value, or traps.  Every construct, as for the C |
+| **`expr_ok`**, `place_ok`, `condJump_ok` (`IRExpr.lean`, `IRJump.lean`) | a well-typed scalar expression: the code leaves its value in the operand returned, or traps when it has none; a place is the address of its storage; a condition jumps or falls through as its value says, `&&` and `||` early only where nothing is skipped that could trap |
+| `layOk_sound`, `progOkB_sound`, `slotsOkB_sound` | what the checkers accept satisfies what the theorems assume |
+| `validate_sound` (`Z80Frame.lean`, M7.2) | a layout the frame validator accepts keeps every frame apart from the globals and from the frames of the functions it reaches |
+
+How it is put together:
+
+* **The relation** (`SRel`): every Ember local is at its offset in the
+  function's frame, every global at its address, as the bytes of its
+  value (`Holds`); the worlds are equal.  Frames are static, so what a
+  callee may write is what its frame and those it reaches cover
+  (`KeepOut`), and the layout keeps those apart from the caller's
+  (`LayOK`, from `validate_sound`).
+* **Translation validation, twice**: the lowering checks that no label
+  is defined twice (`lowerFnChecked`; it never is, the proofs take it
+  from the check), and the layout is checked rather than the allocator
+  proved.
+* **The passes** are proved for any body: `cleanup` needs the labels to
+  be unique; `dropChecks` needs a slot the body compares in a branch
+  and a slot it writes to be apart in memory unless their offsets
+  overlap (`SlotsOK`, checked by `slotsOkB` on the program and layout).
+* The checkers are run on the checked builds of the stack — SLIP,
+  loopback, Ethernet, Ethernet with DHCP — with the layout
+  `IR.Sem.run` computes (`#guard`s in `IRNet.lean`): all are accepted.
+
+The proofs found one defect in the lowering, now fixed with a test
+(`regress_strict_and`): `a && b` skipped `b` when `b` was an element at
+a constant index that is not a literal and out of range, where the
+interpreter traps.  For the proofs the lowering was rewritten with
+named functions (identical IR for every build of the stack, the
+examples and 400 random programs), `cleanup` and `dropChecks` as
+recursive functions on lists, and slots and operands got decidable
+equality.
+
+**Not covered:**
+
+* **by-reference parameters** (as for the C: `progOkB` rejects them);
+* **`inlineCalls`** (off by default; `lower_iter` is about `IR.lower`
+  without it);
+* **the IR semantics against the interpreter**: `IR.Sem` and the
+  `partial` interpreter `Ember/Z80/IRInterp.lean` are tested against
+  each other, not proved equal;
+* **from the IR on**: the code generator (M7.3) and the encoder (M7.4).
+
 ### Not proven
 
 * the driver loop of `Sem.run` and the printing of the `Trace` (above);
@@ -600,7 +674,7 @@ emitted checks; `compileFn` and `compile` are built from named functions
   ARP, DHCP) has no refinement proofs;
 * lines other than transmissions and drops (`pkt`, `tcb`, notes) are
   not compared;
-* the Z80 back end (M7) apart from its frame validator (`validate_sound`): the translation to the IR and from the IR to machine code are tested, not proved — `Ember/Z80/IRSem.lean` is the semantics those proofs will be about; and what "The emitted C" above lists as not covered;
+* the Z80 back end from the IR on: the translation from the IR to machine code (M7.3) and the encoder (M7.4) are tested, not proved; and what "The emitted C" and "The IR of the Z80 back end" above list as not covered;
 * that a function *traps* exactly when the Spec rejects: the theorems
   are for states that satisfy their invariants, and show that from those
   no call traps (the fuel given is enough and every index is in range).

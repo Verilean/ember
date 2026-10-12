@@ -43,6 +43,25 @@ import Ember.Proof.CProgram
 import Ember.Proof.CCheck
 import Ember.Proof.CNet
 import Ember.Proof.Z80Frame
+import Ember.Proof.IRFuel
+import Ember.Proof.IRMem
+import Ember.Proof.IRTypes
+import Ember.Proof.IRRel
+import Ember.Proof.IRPlace
+import Ember.Proof.IRWp
+import Ember.Proof.IRArith
+import Ember.Proof.IRExpr
+import Ember.Proof.IRJump
+import Ember.Proof.IRStmt
+import Ember.Proof.IRCall
+import Ember.Proof.IRBlock
+import Ember.Proof.IRSim
+import Ember.Proof.IRProgram
+import Ember.Proof.IRCheck
+import Ember.Proof.IRInit
+import Ember.Proof.IRPass
+import Ember.Proof.IRLower
+import Ember.Proof.IRNet
 
 /-!
 # Ember.Proof — proofs (plan M5): about the reference stack (P1), and that Ember code refines it (P2)
@@ -110,7 +129,22 @@ The Z80 back end (M7, begun) — `Ember.Z80.IR.Sem` is the semantics of its IR:
 
 * `Z80Frame`: **the frame validator is right** (M7.2) — a layout `IR.validate` accepts keeps every
   function's frame apart from the globals and from the frame of every function it can reach through
-  calls (`validate_sound`).
+  calls (`validate_sound`);
+* `IRFuel`, `IRMem`, `IRTypes`, `IRRel`, `IRPlace`, `IRWp`, `IRArith`: the IR's semantics without counting
+  fuel, memory, values as bytes, the relation statements keep, and a weakest-precondition calculus for
+  the lowering monad;
+* `IRExpr`, `IRJump`, `IRStmt`, `IRCall`, `IRBlock`, `IRSim`: **`Lang → IR`** (M7.1) — what the lowering
+  emits for an expression, a condition, a statement, a call, a function does what `Lang.Sem` does
+  (`expr_ok`, `condJump_ok`, `stmt_ok`, `fn_sim`);
+* `IRProgram`, `IRInit`, `IRCheck`: the program as lowered, its initial state, the entry function called
+  again and again (`iter_sim`, `init_rel`), and a checker for what is assumed (`progOkB_sound`);
+* `IRPass`, `IRLower`: the passes `cleanup` and `dropChecks` keep what a function does (`tidy_ref`), so
+  the program `IR.lower` returns does what `Lang.Sem` does (`lower_iter`, `lower_trap`);
+* `IRNet`: **the IR of the stack transmits and drops what the Spec does** (`stack_ir`) — M5.6 and M7.1
+  together; the checkers accept every build of the stack.
+
+By-reference parameters and `inlineCalls` are outside M7.1; `IR → Z80` (M7.3) and the encoder (M7.4)
+are not proved.
 
 Every statement is about the definitions of `Ember.Spec` as they are;
 `Ember/Proof/README.md` lists the theorems, the hypotheses they need and
