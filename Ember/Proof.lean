@@ -99,6 +99,7 @@ import Ember.Proof.Z80Ins
 import Ember.Proof.Z80Fn
 import Ember.Proof.Z80FnGen
 import Ember.Proof.Z80Prog
+import Ember.Proof.Z80Shape
 
 /-!
 # Ember.Proof — proofs (plan M5): about the reference stack (P1), and that Ember code refines it (P2)
