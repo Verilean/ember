@@ -89,6 +89,7 @@ import Ember.Proof.Z80Ext
 import Ember.Proof.Z80Addr
 import Ember.Proof.Z80After
 import Ember.Proof.Z80Mem
+import Ember.Proof.Z80Eff
 import Ember.Proof.Z80CallFn
 import Ember.Proof.Z80Ins
 import Ember.Proof.Z80Fn

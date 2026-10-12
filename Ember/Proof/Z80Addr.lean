@@ -205,8 +205,8 @@ theorem checkRt_ok (ok : Z.OK) (hT : FnLay Z E) (F : GFinal Z base sF) (hrt : Rt
     rw [bc_congr cs.b cs.c, ldBC_bc, Nat.mod_eq_of_lt hlen]
   rw [hc1hl, hc1bc] at hcase
   have hmem : FreeStack Z (ldBC len s) s' := by
-    intro x hx'
-    rw [hfree x (by omega), cs.mem x (by omega)]
+    intro x hx' hnrt
+    rw [hfree x (by omega) hnrt, cs.mem x (by omega)]
   refine ⟨s', (st0.trans st1).trans st2, fun hin => ?_, fun hin => ?_⟩
   · rw [if_pos hin] at hcase
     obtain ⟨hpc', hsp', hhl'⟩ := hcase
@@ -225,7 +225,7 @@ theorem checkRt_ok (ok : Z.OK) (hT : FnLay Z E) (F : GFinal Z base sF) (hrt : Rt
     obtain ⟨j, hj, hatj⟩ := hcase
     refine ⟨j, hj, hatj, hh', fun x hxd => ?_⟩
     have hns := ok.nostack x hxd
-    rw [hmem x (by omega), hk0.1.1]
+    rw [hmem x (by omega) (ok.rtData x hxd), hk0.1.1]
     exact R.mem x hxd
 
 /-- **The check of an index in `HL`.** -/

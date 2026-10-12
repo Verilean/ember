@@ -43,6 +43,7 @@ structure FnLay (Z : ZCtx) (E : GEnv) : Prop where
   noacc : ∀ t, E.spilled[t]! = true →
     tmpAddr Z E t + E.fn.tmps[t]! ≤ Z.acc ∨ Z.acc + 8 ≤ tmpAddr Z E t
   inwr : ∀ t, E.spilled[t]! = true → ∀ j, j < E.fn.tmps[t]! → Z.wr E.fn.name (tmpAddr Z E t + j)
+  nort : ∀ t, E.spilled[t]! = true → ∀ j, j < E.fn.tmps[t]! → ¬ Z.rt (tmpAddr Z E t + j)
   apart : ∀ t t', t ≠ t' → E.spilled[t]! = true → E.spilled[t']! = true →
     tmpAddr Z E t' + E.fn.tmps[t']! ≤ tmpAddr Z E t ∨ tmpAddr Z E t + E.fn.tmps[t]! ≤ tmpAddr Z E t'
 

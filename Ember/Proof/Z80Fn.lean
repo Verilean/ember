@@ -48,7 +48,7 @@ theorem FnLay.env {E E' : GEnv} (h1 : E'.fn = E.fn) (h2 : E'.spilled = E.spilled
   cases E'
   simp only at h1 h2 h3
   subst h1 h2 h3
-  exact ⟨L.area, L.bound, L.ram, L.nodata, L.nostack, L.noacc, L.inwr, L.apart⟩
+  exact ⟨L.area, L.bound, L.ram, L.nodata, L.nostack, L.noacc, L.inwr, L.nort, L.apart⟩
 
 theorem Rel.toAt {fr : Fr} {dt : Nat → Prop} {regs : Regs} {ist : IR.Sem.St} {tmps : Array Nat} {s : Cpu}
     (k : Nat) (i : IR.Instr) (R : Rel Z E fr dt regs ist tmps s) : Rel Z (envAt E k i) fr dt regs ist tmps s :=

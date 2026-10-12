@@ -50,6 +50,9 @@ structure ZCtx where
   globals, their frames with the slots of the temporaries, the
   accumulator, the stack. -/
   wr : String → Nat → Prop
+  /-- The bytes of RAM the runtime keeps to itself (its counters and
+  buffers): a routine of the runtime may write them. -/
+  rt : Nat → Prop
   /-- The machine around the CPU: its state, what its I/O bus answers a
   read with, and what a read or a write does to it. -/
   W : Type
@@ -76,6 +79,13 @@ structure ZCtx.OK (Z : ZCtx) : Prop where
   accStack : Z.acc + 8 ≤ Z.stackLo ∨ Z.stackHi ≤ Z.acc
   wrStack : ∀ f x, Z.stackLo ≤ x → x < Z.stackHi → Z.wr f x
   nostack : ∀ x, Z.data x → x < Z.stackLo ∨ Z.stackHi ≤ x
+  /-- The runtime's own bytes are in RAM, are not shared, and are not the accumulator; any function may
+  have them written. -/
+  rtRam : ∀ x, Z.rt x → Z.ramStart ≤ x
+  rtData : ∀ x, Z.data x → ¬ Z.rt x
+  rtStack : ∀ x, Z.rt x → x < Z.stackLo ∨ Z.stackHi ≤ x
+  rtAcc : ∀ x, Z.rt x → x < Z.acc ∨ Z.acc + 8 ≤ x
+  rtWr : ∀ f x, Z.rt x → Z.wr f x
   ubound : ∀ a an, Z.use (a, an) → Z.c.layout.addr a + an ≤ 65536
   dbound : ∀ b bn, Z.dst (b, bn) → Z.c.layout.addr b + bn ≤ 65536
   /-- A slot that is used and one that is written are apart in memory unless their offsets overlap. -/

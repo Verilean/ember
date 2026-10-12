@@ -209,9 +209,9 @@ theorem call_rule (ok : Z.OK) {k : Nat} {name : String} {entry K : Nat} {P : Cpu
 
 /-! ## The free part of the stack -/
 
-/-- Only the stack below `s`'s stack pointer may differ in `s'`. -/
+/-- Only the stack below `s`'s stack pointer and the runtime's own bytes may differ in `s'`. -/
 def FreeStack (Z : ZCtx) (s s' : Cpu) : Prop :=
-  ∀ x, x < Z.stackLo ∨ s.sp.toNat ≤ x → s'.mem.get! x = s.mem.get! x
+  ∀ x, x < Z.stackLo ∨ s.sp.toNat ≤ x → ¬ Z.rt x → s'.mem.get! x = s.mem.get! x
 
 /-- The states agree again when only the free part of the stack changed. -/
 theorem Rel.free_stack (ok : Z.OK) (hT : FnLay Z E) {regs regs' : Regs} {ist : IR.Sem.St} {tmps : Array Nat}
@@ -234,26 +234,28 @@ theorem Rel.free_stack (ok : Z.OK) (hT : FnLay Z E) {regs regs' : Regs} {ist : I
       · rw [Array.getElem?_eq_none h'] at hx; cases hx
     have hrom := R.img.rom
     have hrs := R.rs
-    rw [Nat.zero_add, hm x (by omega)]
+    rw [Nat.zero_add, hm x (by omega) (fun h => by have := ok.rtRam x h; omega)]
     simpa using R.img.bytes x b hx
   have hmem : ∀ x, Z.data x → s'.mem.get! x = ist.mem.get! x := by
     intro x hx
-    rw [hm x (by have := ok.nostack x hx; omega)]
+    rw [hm x (by have := ok.nostack x hx; omega) (ok.rtData x hx)]
     exact R.mem x hx
   have htmp : ∀ t, dt t → E.spilled[t]! = true →
       IR.Sem.rd s'.mem (tmpAddr Z E t) (E.fn.tmps[t]!) = tmps.getD t 0 := by
     intro t h1 h2
     rw [← R.tmp t h1 h2]
-    refine rd_congr _ _ _ _ (hT.bound t h2) (fun x hx1 hx2 => hm x ?_)
-    have := hT.nostack t h2
-    omega
+    refine rd_congr _ _ _ _ (hT.bound t h2) (fun x hx1 hx2 => hm x ?_ ?_)
+    · have := hT.nostack t h2
+      omega
+    · have := hT.nort t h2 (x - tmpAddr Z E t) (by omega)
+      rwa [show tmpAddr Z E t + (x - tmpAddr Z E t) = x by omega] at this
   have hstk' : ∀ x, fr.sp.toNat ≤ x → x < Z.stackHi → s'.mem.get! x = fr.mem.get! x := by
     intro x h1 h2
-    rw [hm x (by omega)]
+    rw [hm x (by omega) (fun h => by have := ok.rtStack x h; omega)]
     exact R.stk x h1 h2
   have hout : ∀ x, ¬ Z.wr E.fn.name x → s'.mem.get! x = fr.mem.get! x := by
     intro x hx
-    rw [hm x ?_]
+    rw [hm x ?_ (fun h => hx (ok.rtWr _ x h))]
     · exact R.out x hx
     · rcases Nat.lt_or_ge x Z.stackLo with h | h
       · exact Or.inl h
@@ -266,9 +268,11 @@ theorem Rel.free_stack (ok : Z.OK) (hT : FnLay Z E) {regs regs' : Regs} {ist : I
     have h8 := R.nacc n o (hacc n o h)
     have hacr := ok.accRam
     rw [← R.racc n o (hacc n o h) hown]
-    refine rd_congr _ _ _ _ (by omega) (fun x hx1 hx2 => hm x ?_)
-    have := ok.accStack
-    omega
+    refine rd_congr _ _ _ _ (by omega) (fun x hx1 hx2 => hm x ?_ (fun h => ?_))
+    · have := ok.accStack
+      omega
+    · have := ok.rtAcc x h
+      omega
   exact ⟨⟨by rw [hr]; exact R.img.rom, himg⟩, by rw [hh]; exact R.run, hmem, htmp, by rw [hr]; exact R.rs, hsz,
     R.isz, R.tsz, by rw [hsp]; exact R.sp, R.room, hstk', hout, ha, hhl, hacc', hina, hinhl,
     fun n sl h hown => R.inacc n sl (hacc _ _ h) hown, fun n o h => R.nacc n o (hacc n o h)⟩
@@ -303,7 +307,8 @@ theorem rt_call {base : Nat} {sF : GS} (ok : Z.OK) (hT : FnLay Z E) (F : GFinal 
   refine ⟨c1, s', cs, hst, by rw [ho, Array.size_push, ← Nat.add_assoc]; exact hat', hrel, fun regs' ha hhl hina hinhl hacc => ?_⟩
   refine R.free_stack ok hT (fun x hx => ?_) hsz' hrs' (by rw [hh', R.run]) hsp' ha hhl hina hinhl hacc
   have hc1sp : c1.sp.toNat = s.sp.toNat - 2 := by rw [cs.sp]; exact sub2_toNat _ (by omega)
-  rw [hfree x (by omega), cs.mem x (by omega)]
+  intro hnrt
+  rw [hfree x (by omega) hnrt, cs.mem x (by omega)]
 
 end
 

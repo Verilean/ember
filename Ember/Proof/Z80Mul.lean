@@ -24,9 +24,32 @@ def RtBound (Z : ZCtx) : Prop :=
         (if c.hl.toNat < c.bc.toNat then s'.pc = c.rd16 c.sp ∧ s'.sp = c.sp + 2 ∧ s'.hl = c.hl
          else ∃ j : Nat, Z.items[j]? = some (Item.label "rt_trap") ∧ At Z.addrs j s')
 
+/-- The effects whose routines are specified so far. -/
+def effKnown : Ember.Lang.Effect → Bool
+  | .inputNext | .ringPop | .outByte | .outEnd | .drop => true
+  | _ => false
+
+/-- The arguments of an effect, where its routine finds them: a byte in `A`. -/
+def EffArgs (e : Ember.Lang.Effect) (vs : List Nat) (c : Cpu) : Prop :=
+  match e with
+  | .outByte | .drop => vs = [c.a.toNat]
+  | _ => vs = []
+
+/-- **The routine of an effect**: it returns, having done to the machine
+what the effect does to the world; the result in `HL`. -/
+def RtEff (Z : ZCtx) (e : Ember.Lang.Effect) : Prop :=
+  ∃ entry, Z.sym (effectRoutine e) entry ∧ entry < 65536 ∧
+    ∀ (c : Cpu) (w : Z.W) (wd : Ember.Lang.World) (vs : List Nat), c.pc.toNat = entry → Img Z.a 0 c →
+      c.halted = false → c.ramStart.toNat = Z.ramStart → c.mem.size = 65536 → Z.stackLo + Z.rtK ≤ c.sp.toNat →
+      c.sp.toNat + 2 ≤ Z.stackHi → Z.wrel wd w → EffArgs e vs c →
+      ∃ c' w', WSteps Z (c, w) (c', w') ∧ c'.pc = c.rd16 c.sp ∧ c'.sp = c.sp + 2 ∧ c'.halted = false ∧
+        c'.ramStart = c.ramStart ∧ c'.mem.size = 65536 ∧ FreeStack Z c c' ∧
+        Z.wrel (IR.Sem.effect Z.c wd e vs).2 w' ∧ ∀ r, (IR.Sem.effect Z.c wd e vs).1 = some r → c'.hl.toNat = r
+
 /-- **What is taken of the runtime.** -/
 structure RtOK (Z : ZCtx) : Prop where
   bound : RtBound Z
+  eff : ∀ e, effKnown e = true → RtEff Z e
   mul8 : RtPure Z "rt_mul8" (fun s s' => s'.a.toNat = s.a.toNat * s.e.toNat % 256 ∧ s'.hl = s.hl)
   div8 : RtPure Z "rt_div8"
     (fun s s' => s'.a.toNat = (if s.e.toNat = 0 then 0 else s.a.toNat / s.e.toNat) ∧ s'.hl = s.hl)

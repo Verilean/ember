@@ -1,5 +1,6 @@
 import Ember.Proof.Z80After
 import Ember.Proof.Z80Mem
+import Ember.Proof.Z80Eff
 import Ember.Proof.Z80Bin16
 import Ember.Proof.Z80Una
 import Ember.Proof.Z80Ext
@@ -35,6 +36,7 @@ def Covered : IR.Instr → Bool
   | .jmp _ | .label _ | .trap => true
   | .ret v => (v.map fun p => size12 p.1).getD true
   | .call _ ret reg => (ret.map fun p => size12 p.1).getD true && (reg.map fun p => size12 p.1).getD true
+  | .eff e args ret => effCov e args ret
   | _ => false
 
 /-- What an instruction needs of the program. -/
@@ -52,6 +54,7 @@ def Need (Z : ZCtx) (E : GEnv) (dt : Nat → Prop) : IR.Instr → Prop
   | .ret v => ∀ n o, v = some (n, o) → Rd Z E dt n o
   | .trap => ∃ j : Nat, Z.items[j]? = some (Item.label "rt_trap")
   | .call g ret reg => CallNeed Z E dt g ret reg
+  | .eff _ args ret => EffNeed Z E dt args ret
   | _ => False
 
 /-- What the generator promises for an instruction `i` without effects.
@@ -74,7 +77,8 @@ section
 variable {Z : ZCtx} {E : GEnv} {base : Nat} {sF : GS} {dt : Nat → Prop}
 
 theorem ins0_ok (ok : Z.OK) (hT : FnLay Z E) (F : GFinal Z base sF) (hrt : RtOK Z)
-    (hdep : Z.rtK + 2 ≤ Z.depth E.fn.name) (i : IR.Instr) (hc : Covered i = true) (s0 : GS) :
+    (hdep : Z.rtK + 2 ≤ Z.depth E.fn.name) (i : IR.Instr) (hc : Covered i = true)
+    (hne : ∀ e a r, i ≠ .eff e a r) (s0 : GS) :
     wpg (genInstr i) E (Ins0 Z E base sF dt i s0) s0 := by
   cases i with
   | mov n d src =>
@@ -201,7 +205,7 @@ theorem ins0_ok (ok : Z.OK) (hT : FnLay Z E) (F : GFinal Z base sF) (hrt : RtOK 
     intro _ s1 ⟨hx, h⟩
     exact ⟨hx, fun hxF hN => h hxF hN⟩
   | zero _ _ => cases hc
-  | eff _ _ _ => cases hc
+  | eff _ _ _ => exact absurd rfl (hne _ _ _)
 
 end
 
@@ -231,11 +235,13 @@ variable {Z : ZCtx} {E : GEnv} {base : Nat} {sF : GS} {dt : Nat → Prop}
 theorem ins_ok (ok : Z.OK) (hT : FnLay Z E) (F : GFinal Z base sF) (hrt : RtOK Z)
     (hdep : Z.rtK + 2 ≤ Z.depth E.fn.name) (i : IR.Instr) (hc : Covered i = true) (s0 : GS) :
     wpg (genInstr i) E (Ins Z E base sF dt i s0) s0 := by
-  refine wpg_mono (ins0_ok (dt := dt) ok hT F hrt hdep i hc s0) ?_
-  intro _ s1 h
-  refine Ins0.lift ok (fun e a r h' => ?_) h
-  subst h'
-  cases hc
+  by_cases he : ∃ e a r, i = .eff e a r
+  · obtain ⟨e, a, r, rfl⟩ := he
+    exact eff_ok (dt := dt) ok hT F hrt hdep e a r hc s0
+  · have hne : ∀ e a r, i ≠ .eff e a r := fun e a r h => he ⟨e, a, r, h⟩
+    refine wpg_mono (ins0_ok (dt := dt) ok hT F hrt hdep i hc hne s0) ?_
+    intro _ s1 h
+    exact Ins0.lift ok hne h
 
 end
 
