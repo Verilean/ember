@@ -514,4 +514,16 @@ variable (s : Cpu) (k v : UInt8)
 @[zsim] theorem alu_bc : (s.alu k v).bc = s.bc := by unfold Cpu.alu; split <;> rfl
 end
 
+section
+variable (s : Cpu) (v : UInt8)
+@[zsim] theorem setReg0_hl : (s.setReg .hl 0 v).hl = s.hl := rfl
+@[zsim] theorem setReg0_de : (s.setReg .hl 0 v).de = s.de := rfl
+@[zsim] theorem setReg1_hl : (s.setReg .hl 1 v).hl = s.hl := rfl
+@[zsim] theorem setReg1_de : (s.setReg .hl 1 v).de = s.de := rfl
+@[zsim] theorem setReg2_hl : (s.setReg .hl 2 v).hl = s.hl := rfl
+@[zsim] theorem setReg2_bc : (s.setReg .hl 2 v).bc = s.bc := rfl
+@[zsim] theorem setReg3_hl : (s.setReg .hl 3 v).hl = s.hl := rfl
+@[zsim] theorem setReg3_bc : (s.setReg .hl 3 v).bc = s.bc := rfl
+end
+
 end Ember.Proof.Z80Gen
