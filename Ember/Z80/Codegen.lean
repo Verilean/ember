@@ -527,78 +527,106 @@ def reads (i : IR.Instr) (o : Opd) : Bool :=
   | .ret v => (v.map (·.2 == o)).getD false
   | _ => false
 
-/-- Flags of `a − b`: `Z` when equal, `C` when below.  A 16-bit
-comparison subtracts; when `a` is read again right after (here or at the
-branch target), the subtrahend is added back, which leaves both flags. -/
-def genFlags (op : Cmp) (n : Nat) (a b : Opd) : GM Unit := do
+/-- Is the comparison a test for zero that only `Z` is wanted of? -/
+def zeroTest (op : Cmp) (b : Opd) : Bool := b == .const 0 && (op == .eq || op == .ne)
+
+/-- `cp` with the second operand, the first being in `A`. -/
+def cp8Opd (a b : Opd) : GM Unit :=
+  match b with
+  | .const v => ins .cp [n8 v]
+  | b =>
+    if a == b then ins .cp [.a]
+    else do
+      let p ← addrOf b
+      ins .ld [.hl, .imm p]
+      ins .cp [.mhl]
+      setRegs fun r => { r with hl := [] }
+
+/-- One byte: `cp`, or `or a` for a test for zero. -/
+def flags8 (op : Cmp) (a b : Opd) : GM Unit := do
   let r := (← get).regs
-  let zeroTest := b == .const 0 && (op == .eq || op == .ne)
-  if n == 1 then
-    if zeroTest then
-      loadA a
-      ins .or [.a]
-    else if r.a.contains b && a != b then
-      ins .ld [.c, .a]
-      setRegs fun r => { r with a := [] }
-      loadA a
-      ins .cp [.c]
-    else
-      loadA a
-      match b with
-      | .const v => ins .cp [n8 v]
-      | b =>
-        if a == b then ins .cp [.a]
-        else
-          ins .ld [.hl, .imm (← addrOf b)]
-          ins .cp [.mhl]
-          setRegs fun r => { r with hl := [] }
-  else if n == 2 then
-    let eqConst : Option Nat := match b with
-      | .const v => if op == .eq || op == .ne then some (v % 65536) else none
-      | _ => none
-    if zeroTest then
-      loadHL a
-      ins .ld [.a, .h]
-      ins .or [.l]
-      setRegs fun r => { r with a := [] }
-    else if eqConst.isSome && (eqConst.getD 0 == 65535 || eqConst.getD 0 % 256 == 0 || eqConst.getD 0 / 256 == 0) then
-      -- `Z` exactly when equal, and `HL` is kept
-      let v := eqConst.getD 0
-      loadHL a
-      if v == 65535 then
-        ins .ld [.a, .h]
-        ins .and [.l]
-        ins .inc [.a]
-      else if v / 256 == 0 then
-        ins .ld [.a, .l]
-        ins .xor [n8 v]
-        ins .or [.h]
-      else
-        ins .ld [.a, .h]
-        ins .xor [n8 (v / 256)]
-        ins .or [.l]
-      setRegs fun r => { r with a := [] }
-    else
-      if r.hl.contains b && a != b then
-        ins .ex [.de, .hl]
-        setRegs fun r => { r with hl := [] }
-        loadHL a
-      else
-        loadHL a
-        loadDE b
-      ins .or [.a]
-      ins .sbc [.hl, .de]
-      let e ← read
-      let again := (match a with | .const _ => false | _ => true) &&
-        ((e.next.map (reads · a)).getD false || (e.atTarget.map (reads · a)).getD false)
-      if again then ins .add [.hl, .de]
-      else setRegs fun r => { r with hl := [] }
+  if zeroTest op b then do
+    loadA a
+    ins .or [.a]
+  else if r.a.contains b && a != b then do
+    ins .ld [.c, .a]
+    setRegs fun r => { r with a := [] }
+    loadA a
+    ins .cp [.c]
+  else do
+    loadA a
+    cp8Opd a b
+
+/-- The constant of an equality test of two bytes that is done in `A`, `HL` being kept. -/
+def eqConst (op : Cmp) (b : Opd) : Option Nat :=
+  match b with
+  | .const v =>
+    if (op == .eq || op == .ne) && (v % 65536 == 65535 || v % 65536 % 256 == 0 || v % 65536 / 256 == 0) then
+      some (v % 65536)
+    else none
+  | _ => none
+
+/-- `Z` exactly when `HL = v`, for the constants of `eqConst`. -/
+def eqHL (v : Nat) : GM Unit :=
+  if v == 65535 then do
+    ins .ld [.a, .h]
+    ins .and [.l]
+    ins .inc [.a]
+  else if v / 256 == 0 then do
+    ins .ld [.a, .l]
+    ins .xor [n8 v]
+    ins .or [.h]
+  else do
+    ins .ld [.a, .h]
+    ins .xor [n8 (v / 256)]
+    ins .or [.l]
+
+/-- Is `a` read again right after the comparison (here or at the branch target)? -/
+def readAgain (e : GEnv) (a : Opd) : Bool :=
+  (match a with | .const _ => false | _ => true) &&
+    ((e.next.map (reads · a)).getD false || (e.atTarget.map (reads · a)).getD false)
+
+/-- Two bytes: `HL − DE`; when `a` is read again right after, the
+subtrahend is added back, which leaves both flags. -/
+def sub16 (a b : Opd) : GM Unit := do
+  let r := (← get).regs
+  if r.hl.contains b && a != b then do
+    ins .ex [.de, .hl]
+    setRegs fun r => { r with hl := [] }
+    loadHL a
+  else do
+    loadHL a
+    loadDE b
+  ins .or [.a]
+  ins .sbc [.hl, .de]
+  let e ← read
+  if readAgain e a then ins .add [.hl, .de]
+  else setRegs fun r => { r with hl := [] }
+
+def flags16 (op : Cmp) (a b : Opd) : GM Unit :=
+  if zeroTest op b then do
+    loadHL a
+    ins .ld [.a, .h]
+    ins .or [.l]
+    setRegs fun r => { r with a := [] }
   else
-    let pb ← ptrOf n b
-    loadAcc n a
-    ins .ld [.hl, .imm pb]
-    call s!"rt_cmp{bits n}"
-    setRegs fun r => { r with a := [], hl := [] }
+    match eqConst op b with
+    | some v => do
+      loadHL a
+      eqHL v
+      setRegs fun r => { r with a := [] }
+    | none => sub16 a b
+
+def flagsW (n : Nat) (a b : Opd) : GM Unit := do
+  let pb ← ptrOf n b
+  loadAcc n a
+  ins .ld [.hl, .imm pb]
+  call s!"rt_cmp{bits n}"
+  setRegs fun r => { r with a := [], hl := [] }
+
+/-- Flags of `a − b`: `Z` when equal, `C` when below (for `eq` and `ne`, `Z` alone). -/
+def genFlags (op : Cmp) (n : Nat) (a b : Opd) : GM Unit :=
+  if n == 1 then flags8 op a b else if n == 2 then flags16 op a b else flagsW n a b
 
 def condOf : Cmp → Arg
   | .eq => .z | .ne => .nz | .lt => .c | .ge => .nc
