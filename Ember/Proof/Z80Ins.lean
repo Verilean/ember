@@ -1,6 +1,7 @@
 import Ember.Proof.Z80After
 import Ember.Proof.Z80Mem
 import Ember.Proof.Z80Eff
+import Ember.Proof.Z80Shift
 import Ember.Proof.Z80Bin16
 import Ember.Proof.Z80Una
 import Ember.Proof.Z80Ext
@@ -27,10 +28,15 @@ def size12 (n : Nat) : Bool := n == 1 || n == 2
 theorem size12_spec {n : Nat} (h : size12 n = true) : n = 1 ∨ n = 2 := by
   simpa [size12] using h
 
+def isConst : Opd → Bool
+  | .const _ => true
+  | _ => false
+
 /-- The instructions the proofs cover so far. -/
 def Covered : IR.Instr → Bool
   | .mov n _ _ | .bin _ n _ _ _ | .not n _ _ | .neg n _ _ | .cmp _ n _ _ _ | .br _ n _ _ _ => size12 n
   | .ext n _ m _ => (n == 1 && m == 2) || (n == 2 && m == 1)
+  | .shift _ n _ _ _ amt => size12 n && isConst amt
   | .lea _ p => addrCov p
   | .load n _ p | .store n p _ => size12 n && addrCov p
   | .jmp _ | .label _ | .trap => true
@@ -46,6 +52,7 @@ def Need (Z : ZCtx) (E : GEnv) (dt : Nat → Prop) : IR.Instr → Prop
   | .not n d a | .neg n d a => Rd Z E dt n a ∧ Wr Z E n d
   | .cmp _ n d a b => Rd Z E dt n a ∧ Rd Z E dt n b ∧ Wr Z E 1 d
   | .ext n d m src => Rd Z E dt m src ∧ Wr Z E n d
+  | .shift _ n d a m amt => ∀ k, amt = .const k → (Rd Z E dt n a ∧ k < 2 ^ (8 * m)) ∧ Wr Z E n d
   | .lea d p => AddrNeed Z E dt p ∧ Wr Z E 2 d
   | .load n d p => AddrNeed Z E dt p ∧ AddrData Z p n ∧ Wr Z E n d
   | .store n p src => AddrNeed Z E dt p ∧ AddrStore Z E p n ∧ Rd Z E dt n src
@@ -170,7 +177,20 @@ theorem ins0_ok (ok : Z.OK) (hT : FnLay Z E) (F : GFinal Z base sF) (hrt : RtOK 
     refine ⟨hx, fun hxF hN fr ist tmps s R hat => ?_⟩
     rw [step_call]
     exact fun w hw res hcal => h hxF hN fr ist tmps s R hat w hw res hcal
-  | shift _ _ _ _ _ _ => cases hc
+  | shift left n d a m amt =>
+    have hc' : (size12 n && isConst amt) = true := hc
+    rw [Bool.and_eq_true] at hc'
+    cases amt with
+    | slot sl => cases hc'.2
+    | tmp t => cases hc'.2
+    | const k =>
+      rcases size12_spec hc'.1 with rfl | rfl
+      · refine wpg_mono (shift1_ok (dt := dt) ok hT F hrt hdep left d a m k s0) ?_
+        intro _ s1 ⟨hx, h⟩
+        exact ⟨hx, fun hxF hN => h hxF (hN k rfl)⟩
+      · refine wpg_mono (shift2_ok (dt := dt) ok hT F hrt hdep left d a m k s0) ?_
+        intro _ s1 ⟨hx, h⟩
+        exact ⟨hx, fun hxF hN => h hxF (hN k rfl)⟩
   | ext n d m src =>
     have hnm : (n = 1 ∧ m = 2) ∨ (n = 2 ∧ m = 1) := by simpa [Covered] using hc
     rcases hnm with ⟨rfl, rfl⟩ | ⟨rfl, rfl⟩

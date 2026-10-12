@@ -50,6 +50,10 @@ def RtEff (Z : ZCtx) (e : Ember.Lang.Effect) : Prop :=
 structure RtOK (Z : ZCtx) : Prop where
   bound : RtBound Z
   eff : ∀ e, effKnown e = true → RtEff Z e
+  shl8 : RtPure Z "rt_shl8" (fun s s' => s'.a.toNat = s.a.toNat * 2 ^ s.b.toNat % 256 ∧ s'.hl = s.hl)
+  shr8 : RtPure Z "rt_shr8" (fun s s' => s'.a.toNat = s.a.toNat / 2 ^ s.b.toNat ∧ s'.hl = s.hl)
+  shl16 : RtPure Z "rt_shl16" (fun s s' => s'.hl.toNat = s.hl.toNat * 2 ^ s.b.toNat % 65536 ∧ s'.a = s.a)
+  shr16 : RtPure Z "rt_shr16" (fun s s' => s'.hl.toNat = s.hl.toNat / 2 ^ s.b.toNat ∧ s'.a = s.a)
   mul8 : RtPure Z "rt_mul8" (fun s s' => s'.a.toNat = s.a.toNat * s.e.toNat % 256 ∧ s'.hl = s.hl)
   div8 : RtPure Z "rt_div8"
     (fun s s' => s'.a.toNat = (if s.e.toNat = 0 then 0 else s.a.toNat / s.e.toNat) ∧ s'.hl = s.hl)
