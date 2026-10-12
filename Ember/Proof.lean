@@ -64,6 +64,10 @@ import Ember.Proof.IRLower
 import Ember.Proof.IRNet
 import Ember.Proof.Z80Encode
 import Ember.Proof.Z80Asm
+import Ember.Proof.Z80Run
+import Ember.Proof.Z80Wp
+import Ember.Proof.Z80Rel
+import Ember.Proof.Z80Load
 
 /-!
 # Ember.Proof — proofs (plan M5): about the reference stack (P1), and that Ember code refines it (P2)

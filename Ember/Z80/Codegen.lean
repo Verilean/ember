@@ -93,6 +93,11 @@ def call (routine : String) : GM Unit := ins .call [.imm (.sym routine)]
 
 def setRegs (f : Regs → Regs) : GM Unit := modify fun s => { s with regs := f s.regs }
 
+/-- `m`, `k` times. -/
+def rep : Nat → GM Unit → GM Unit
+  | 0, _ => pure ()
+  | k + 1, m => do m; rep k m
+
 def n8 (v : Nat) : Arg := .imm (.num (Int.ofNat (v % 256)))
 def n16 (v : Nat) : Arg := .imm (.num (Int.ofNat (v % 65536)))
 
@@ -109,19 +114,23 @@ def noteAddr (s : Slot) : GM Unit := do
 /-- Must a store of `n` bytes at `s` be made? -/
 def storeNeeded (s : Slot) (n : Nat) : GM Bool := do
   let e ← read
-  if s.area != .frame e.fn.name then return true
-  match e.live with
-  | none => return true
-  | some lv => return (List.range n).any fun k => lv.getD (s.off + k) true
+  if s.area != .frame e.fn.name then pure true
+  else
+    match e.live with
+    | none => pure true
+    | some lv => pure ((List.range n).any fun k => lv.getD (s.off + k) true)
 
 def addrOf (o : Opd) : GM Val := do
   match o with
-  | .slot s => noteRead s; return slotVal s
-  | .tmp t =>
+  | .slot s => do
+    noteRead s
+    pure (slotVal s)
+  | .tmp t => do
     let e ← read
-    unless e.spilled[t]! do throw s!"{e.fn.name}: temporary t{t} has no slot and is not at hand"
-    modify fun s => { s with missed := s.missed.set! t true }
-    return .sym (areaSym (.frame e.fn.name)) (Int.ofNat e.tmpOff[t]!)
+    if e.spilled[t]! then do
+      modify fun s => { s with missed := s.missed.set! t true }
+      pure (.sym (areaSym (.frame e.fn.name)) (Int.ofNat e.tmpOff[t]!))
+    else throw s!"{e.fn.name}: temporary t{t} has no slot and is not at hand"
   | .const _ => throw "address of a constant"
 
 /-- Address of an operand of `n` bytes; a constant is in the literal pool. -/
@@ -130,45 +139,61 @@ def ptrOf (n : Nat) (o : Opd) : GM Val := do
   | .const v =>
     let v := v % 2 ^ bits n
     modify fun s => if s.lits.contains (n, v) then s else { s with lits := s.lits.push (n, v) }
-    return .sym s!"lit{bits n}_{v}"
+    pure (.sym s!"lit{bits n}_{v}")
   | o => addrOf o
 
 /-! ### Loading -/
 
+def isSlot : Opd → Bool
+  | .slot _ => true
+  | _ => false
+
 def loadA (o : Opd) : GM Unit := do
   let r := (← get).regs
-  if r.a.contains o then return
+  if r.a.contains o then pure ()
   -- the low byte of what `HL` holds
-  if r.hl.contains o && (match o with | .slot _ => true | _ => false) then
+  else if r.hl.contains o && isSlot o then do
     ins .ld [.a, .l]
     setRegs fun r => { r with a := [o] }
-    return
-  match o with
-  | .const v => if v % 256 == 0 then ins .xor [.a] else ins .ld [.a, n8 v]
-  | o => ins .ld [.a, .mem (← addrOf o)]
-  setRegs fun r => { r with a := [o] }
+  else do
+    match o with
+    | .const v => if v % 256 == 0 then ins .xor [.a] else ins .ld [.a, n8 v]
+    | o => do
+      let p ← addrOf o
+      ins .ld [.a, .mem p]
+    setRegs fun r => { r with a := [o] }
 
 def loadHL (o : Opd) : GM Unit := do
-  if (← get).regs.hl.contains o then return
-  match o with
-  | .const v => ins .ld [.hl, n16 v]
-  | o => ins .ld [.hl, .mem (← addrOf o)]
-  setRegs fun r => { r with hl := [o] }
+  let r := (← get).regs
+  if r.hl.contains o then pure ()
+  else do
+    match o with
+    | .const v => ins .ld [.hl, n16 v]
+    | o => do
+      let p ← addrOf o
+      ins .ld [.hl, .mem p]
+    setRegs fun r => { r with hl := [o] }
 
 def loadDE (o : Opd) : GM Unit := do
-  if (← get).regs.hl.contains o then
+  let r := (← get).regs
+  if r.hl.contains o then do
     ins .ld [.d, .h]
     ins .ld [.e, .l]
-    return
-  match o with
-  | .const v => ins .ld [.de, n16 v]
-  | o => ins .ld [.de, .mem (← addrOf o)]
+  else
+    match o with
+    | .const v => ins .ld [.de, n16 v]
+    | o => do
+      let p ← addrOf o
+      ins .ld [.de, .mem p]
 
 def loadAcc (n : Nat) (o : Opd) : GM Unit := do
-  if (← get).regs.acc == some (n, o) then return
-  ins .ld [.hl, .imm (← ptrOf n o)]
-  call s!"rt_ld{bits n}"
-  setRegs fun _ => { acc := some (n, o) }
+  let r := (← get).regs
+  if r.acc == some (n, o) then pure ()
+  else do
+    let p ← ptrOf n o
+    ins .ld [.hl, .imm p]
+    call s!"rt_ld{bits n}"
+    setRegs fun _ => { acc := some (n, o) }
 
 /-! ### Storing -/
 
@@ -193,8 +218,8 @@ def killAll : GM Unit := setRegs fun _ => {}
 
 def tmpSlot (t : Nat) : GM (Option Val) := do
   let e ← read
-  if e.spilled[t]! then return some (.sym (areaSym (.frame e.fn.name)) (Int.ofNat e.tmpOff[t]!))
-  return none
+  if e.spilled[t]! then pure (some (.sym (areaSym (.frame e.fn.name)) (Int.ofNat e.tmpOff[t]!)))
+  else pure none
 
 /-- A temporary is assigned: what held its old value no longer does. -/
 def forget (o : Opd) : GM Unit :=
@@ -265,6 +290,17 @@ def routineW (op : Bin) (n : Nat) : String :=
     | .and => "and" | .or => "or" | .xor => "xor"
   s!"rt_{name}{bits n}"
 
+/-- A byte of `HL` with a constant: nothing where the constant leaves the byte alone. -/
+def logicConst (op : Bin) (reg : Arg) (m : Nat) : GM Unit :=
+  if (if op == .and then m == 255 else m == 0) then pure ()
+  else if op == .and && m == 0 then ins .ld [reg, n8 0]
+  else if op == .or && m == 255 then ins .ld [reg, n8 255]
+  else do
+    ins .ld [.a, reg]
+    alu8 op (n8 m)
+    ins .ld [reg, .a]
+    setRegs fun r => { r with a := [] }
+
 def genBin (op : Bin) (n : Nat) (a b : Opd) : GM Unit := do
   let r := (← get).regs
   if n == 1 then
@@ -321,28 +357,20 @@ def genBin (op : Bin) (n : Nat) (a b : Opd) : GM Unit := do
       | _ => none
     match op, small with
     | .add, some v =>
-      if v ≤ 3 then for _ in [0:v] do ins .inc [.hl]
-      else if v ≥ 65533 then for _ in [0:65536 - v] do ins .dec [.hl]
+      if v ≤ 3 then rep v (ins .inc [.hl])
+      else if v ≥ 65533 then rep (65536 - v) (ins .dec [.hl])
       else
         ins .ld [.de, n16 v]
         ins .add [.hl, .de]
     | .sub, some v =>
-      if v ≤ 3 then for _ in [0:v] do ins .dec [.hl]
+      if v ≤ 3 then rep v (ins .dec [.hl])
       else
         ins .ld [.de, n16 (65536 - v)]
         ins .add [.hl, .de]
     | .and, some v | .or, some v | .xor, some v =>
       -- byte by byte, and nothing where the constant leaves the byte alone
-      for (reg, m) in [(Arg.l, v % 256), (Arg.h, v / 256)] do
-        let same := if op == .and then m == 255 else m == 0
-        let fixed : Option Nat := if op == .and && m == 0 then some 0 else if op == .or && m == 255 then some 255 else none
-        if same then pure ()
-        else if let some c := fixed then ins .ld [reg, n8 c]
-        else
-          ins .ld [.a, reg]
-          alu8 op (n8 m)
-          ins .ld [reg, .a]
-          setRegs fun r => { r with a := [] }
+      logicConst op .l (v % 256)
+      logicConst op .h (v / 256)
     | _, _ =>
       if !bAtHand then loadDE b
       match op with
@@ -351,10 +379,12 @@ def genBin (op : Bin) (n : Nat) (a b : Opd) : GM Unit := do
         ins .or [.a]
         ins .sbc [.hl, .de]
       | .and | .or | .xor =>
-        for (reg, other) in [(Arg.l, Arg.e), (Arg.h, Arg.d)] do
-          ins .ld [.a, reg]
-          alu8 op other
-          ins .ld [reg, .a]
+        ins .ld [.a, .l]
+        alu8 op .e
+        ins .ld [.l, .a]
+        ins .ld [.a, .h]
+        alu8 op .d
+        ins .ld [.h, .a]
         setRegs fun r => { r with a := [] }
       | op =>
         call (routine16 op)
@@ -390,7 +420,7 @@ def genShift (left : Bool) (n : Nat) (a : Opd) (m : Nat) (amt : Opd) : GM Unit :
     -- 0 < k < 8n here
     if n == 1 then
       loadA a
-      if left && k ≤ 3 then for _ in [0:k] do ins .add [.a, .a]
+      if left && k ≤ 3 then rep k (ins .add [.a, .a])
       else if !left && k == 1 then ins .srl [.a]
       else
         ins .ld [.b, n8 k]
@@ -398,7 +428,7 @@ def genShift (left : Bool) (n : Nat) (a : Opd) (m : Nat) (amt : Opd) : GM Unit :
       setRegs fun r => { r with a := [] }
     else if n == 2 then
       loadHL a
-      if left && k ≤ 4 then for _ in [0:k] do ins .add [.hl, .hl]
+      if left && k ≤ 4 then rep k (ins .add [.hl, .hl])
       else if left && k == 8 then
         ins .ld [.h, .l]
         ins .ld [.l, n8 0]
@@ -406,9 +436,9 @@ def genShift (left : Bool) (n : Nat) (a : Opd) (m : Nat) (amt : Opd) : GM Unit :
         ins .ld [.l, .h]
         ins .ld [.h, n8 0]
       else if !left && k ≤ 2 then
-        for _ in [0:k] do
+        rep k (do
           ins .srl [.h]
-          ins .rr [.l]
+          ins .rr [.l])
       else
         ins .ld [.b, n8 k]
         call name
@@ -538,14 +568,24 @@ def genFlags (op : Cmp) (n : Nat) (a b : Opd) : GM Unit := do
 def condOf : Cmp → Arg
   | .eq => .z | .ne => .nz | .lt => .c | .ge => .nc
 
+def addOff (k : Nat) : GM Unit :=
+  if k == 0 then pure ()
+  else if k ≤ 3 then rep k (ins .inc [.hl])
+  else do
+    ins .ld [.bc, n16 k]
+    ins .add [.hl, .bc]
+
+/-- `HL` times `sc`, a power of two (`fuel`: at least its logarithm). -/
+def scaleHL : Nat → Nat → GM Unit
+  | 0, _ => pure ()
+  | fuel + 1, sc =>
+    if sc > 1 then do
+      ins .add [.hl, .hl]
+      scaleHL fuel (sc / 2)
+    else pure ()
+
 /-- The address into `HL`.  Keeps `A` and `DE`. -/
 def genAddr (p : Addr) : GM Unit := do
-  let addOff (k : Nat) : GM Unit := do
-    if k == 0 then pure ()
-    else if k ≤ 3 then for _ in [0:k] do ins .inc [.hl]
-    else
-      ins .ld [.bc, n16 k]
-      ins .add [.hl, .bc]
   match p.idx with
   | none =>
     match p.root with
@@ -582,10 +622,7 @@ def genAddr (p : Addr) : GM Unit := do
       ins .ld [.bc, n16 len]
       call "rt_bound"
     | none, _ => pure ()
-    let mut sc := x.scale
-    while sc > 1 do
-      ins .add [.hl, .hl]
-      sc := sc / 2
+    scaleHL x.scale x.scale
     match p.root with
     | .static s =>
       noteAddr s

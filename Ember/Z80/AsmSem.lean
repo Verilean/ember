@@ -281,6 +281,16 @@ def execI (i : Instr) (n : UInt8) (nn : UInt16) (s0 : Cpu) (inp : UInt16 → UIn
   | [x, y] => exec2 i.op x y n nn (op1 s0) (op2 s0) inp
   | _ => none
 
+/-- The instruction goes on to the one after it, whatever the state:
+not a jump, a call, a return, or a block instruction (those are left
+out, repeating or not). -/
+def Instr.falls (i : Instr) : Bool :=
+  match i.op with
+  | .jp | .jr | .djnz | .call | .ret | .rst | .reti | .retn
+  | .ldi | .ldd | .cpi | .cpd | .ini | .ind | .outi | .outd
+  | .ldir | .lddr | .cpir | .cpdr | .inir | .indr | .otir | .otdr => false
+  | _ => true
+
 /-- The operand that is a number or an address, if there is one. -/
 def Instr.immVal? (i : Instr) : Option Val :=
   i.args.findSome? fun

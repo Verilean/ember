@@ -89,16 +89,61 @@ theorem Placed.code {items : List Item} {origin : Nat} {a : Assembled} {addrs : 
   rw [hto]
   exact this
 
-/-- **One instruction of the image.** -/
+/-- The CPU is at item `k`. -/
+def At (addrs : List Nat) (k : Nat) (s : Cpu) : Prop := ∃ ad, addrs[k]? = some ad ∧ s.pc.toNat = ad
+
+/-- **One instruction of the image**: the step is what `Asm.exec` says,
+and after an instruction that goes on the CPU is at the next item. -/
 theorem step_item {items : List Item} {origin : Nat} {a : Assembled} {addrs : List Nat}
     (P : Placed items origin a addrs) {s s' : Cpu} (I : Img a origin s) {k ad : Nat} {i : Instr}
     (hk : items[k]? = some (.ins i)) (had : addrs[k]? = some ad) (hpc : s.pc.toNat = ad)
     (hh : s.halted = false) {inp : UInt16 → UInt8} (hx : exec (a.env ad) i s inp = some s') :
-    s.step inp = s' := by
-  obtain ⟨ad', bs, h1, h2, _, hcode⟩ := P.code I hk
+    s.step inp = s' ∧ (i.falls = true → At addrs (k + 1) s') := by
+  obtain ⟨ad', bs, h1, h2, h3, h4, h5, _⟩ := P.2 k _ hk
   rw [had] at h1
   cases h1
-  exact step_encode i h2 (hcode hpc) hh hx
+  obtain ⟨_, bs', _, h2', _, hcode⟩ := P.code I hk
+  have hst := step_encode i h2 (by
+    intro j b hj
+    have hb := h5 j b hj
+    have hlt : ad - origin + j < a.bytes.size := by
+      rcases Nat.lt_or_ge (ad - origin + j) a.bytes.data.size with h' | h'
+      · exact h'
+      · rw [Array.getElem?_eq_none h'] at hb; cases hb
+    have hrom := I.rom
+    have hr : s.ramStart.toNat < 65536 := s.ramStart.toNat_lt
+    show s.mem.get! (s.pc + UInt16.ofNat j).toNat = b
+    have hto : (s.pc + UInt16.ofNat j).toNat = origin + (ad - origin + j) := by
+      rw [UInt16.toNat_add, hpc, UInt16.toNat_ofNat']
+      omega
+    rw [hto]
+    exact I.bytes _ b hb) hh hx
+  refine ⟨hst.1, fun hf => ⟨ad + bs.length, h3, ?_⟩⟩
+  rw [hst.2 hf, UInt16.toNat_add, hpc, UInt16.toNat_ofNat']
+  have hpcl : s.pc.toNat < 65536 := s.pc.toNat_lt
+  rcases Nat.eq_zero_or_pos bs.length with h0 | hpos
+  · rw [h0]
+    omega
+  · have hb := h5 (bs.length - 1) (bs[bs.length - 1]'(by omega)) (List.getElem?_eq_getElem (by omega))
+    have hlt : ad - origin + (bs.length - 1) < a.bytes.size := by
+      rcases Nat.lt_or_ge (ad - origin + (bs.length - 1)) a.bytes.data.size with h' | h'
+      · exact h'
+      · rw [Array.getElem?_eq_none h'] at hb; cases hb
+    have hrom := I.rom
+    have hr : s.ramStart.toNat < 65536 := s.ramStart.toNat_lt
+    omega
+
+/-- An item that is not code is where the next item is. -/
+theorem at_skip {items : List Item} {origin : Nat} {a : Assembled} {addrs : List Nat}
+    (P : Placed items origin a addrs) {s : Cpu} {k : Nat} {it : Item} (hk : items[k]? = some it)
+    (he : ∀ env, it.encode env = .ok []) (h : At addrs k s) : At addrs (k + 1) s := by
+  obtain ⟨ad, bs, h1, h2, h3, _⟩ := P.2 k it hk
+  rw [he] at h2
+  cases h2
+  obtain ⟨ad', ha, hp⟩ := h
+  rw [h1] at ha
+  cases ha
+  exact ⟨ad, by simpa using h3, hp⟩
 
 /-! ## Several steps -/
 

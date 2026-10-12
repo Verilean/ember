@@ -139,18 +139,38 @@ variable {env : Env} {s s' : Cpu} {inp : UInt16 → UInt8} {bs : List UInt8}
 and `hx : exec env i s inp = some s'`, the operands of `i` being
 constructors.  The encoding computes; so does the CPU on its opcode. -/
 
+theorem wr_pc (s : Cpu) (a : UInt16) (v : UInt8) : (s.wr a v).pc = s.pc := by
+  unfold Cpu.wr
+  split <;> rfl
+
+set_option hygiene false in
+macro "pc_fin" : tactic =>
+  `(tactic| first
+    | rfl
+    | (show s.pc + 1 + 1 = _; rw [UInt16.add_assoc]; rfl)
+    | (show s.pc + 1 + 2 = _; rw [UInt16.add_assoc]; rfl)
+    | (show s.pc + 1 + 1 + 2 = _; rw [UInt16.add_assoc, UInt16.add_assoc]; rfl))
+
+set_option hygiene false in
+/-- Where the program counter is after an instruction that goes on. -/
+macro "enc_pc" : tactic =>
+  `(tactic| (intro hf; first
+    | (cases hf; done)
+    | (simp only [Cpu.tick, Cpu.push, Cpu.wr16, Cpu.setHL, Cpu.setBC, Cpu.setDE, wr_pc]; pc_fin)
+    | pc_fin))
+
 set_option hygiene false in
 /-- No immediate operand, main page. -/
 macro "enc_main" : tactic =>
-  `(tactic| (cases he; cases hx; rw [step_main _ _ _ hh (code0 hc) rfl]; rfl))
+  `(tactic| (cases he; cases hx; refine ⟨by rw [step_main _ _ _ hh (code0 hc) rfl]; rfl, ?_⟩; enc_pc))
 
 set_option hygiene false in
 macro "enc_ed" : tactic =>
-  `(tactic| (cases he; cases hx; rw [step_ed _ _ _ hh (code0 hc) (code1 hc)]; rfl))
+  `(tactic| (cases he; cases hx; refine ⟨by rw [step_ed _ _ _ hh (code0 hc) (code1 hc)]; rfl, ?_⟩; enc_pc))
 
 set_option hygiene false in
 macro "enc_cb" : tactic =>
-  `(tactic| (cases he; cases hx; rw [step_cb _ _ _ hh (code0 hc) (code1 hc)]; rfl))
+  `(tactic| (cases he; cases hx; refine ⟨by rw [step_cb _ _ _ hh (code0 hc) (code1 hc)]; rfl, ?_⟩; enc_pc))
 
 set_option hygiene false in
 /-- A byte after the opcode. -/
@@ -166,8 +186,8 @@ macro "enc_i8" : tactic =>
     have hnB : nB = s.rd (s.pc + 1) := by rw [← hB, c1]; rfl
     subst hnB
     cases hx
-    rw [step_main _ _ _ hh (code0 hc) rfl]
-    rfl))
+    refine ⟨by rw [step_main _ _ _ hh (code0 hc) rfl]; rfl, ?_⟩
+    enc_pc))
 
 set_option hygiene false in
 /-- A displacement after the opcode. -/
@@ -183,8 +203,8 @@ macro "enc_rel" : tactic =>
     have hnB : nB = s.rd (s.pc + 1) := by rw [← hB, c1]; rfl
     subst hnB
     cases hx
-    rw [step_main _ _ _ hh (code0 hc) rfl]
-    rfl))
+    refine ⟨by rw [step_main _ _ _ hh (code0 hc) rfl]; rfl, ?_⟩
+    enc_pc))
 
 set_option hygiene false in
 /-- A word after the opcode. -/
@@ -201,8 +221,8 @@ macro "enc_i16" : tactic =>
     have hnW : nW = w16 (s.rd (s.pc + 1)) (s.rd (s.pc + 1 + 1)) := by rw [← hW, c1, c2]; rfl
     subst hnW
     cases hx
-    rw [step_main _ _ _ hh (code0 hc) rfl]
-    rfl))
+    refine ⟨by rw [step_main _ _ _ hh (code0 hc) rfl]; rfl, ?_⟩
+    enc_pc))
 
 set_option hygiene false in
 /-- A word after `ED` and the opcode. -/
@@ -219,19 +239,21 @@ macro "enc_i16ed" : tactic =>
     have hnW : nW = w16 (s.rd (s.pc + 1 + 1)) (s.rd (s.pc + 1 + 1 + 1)) := by rw [← hW, c2, c3]; rfl
     subst hnW
     cases hx
-    rw [step_ed _ _ _ hh (code0 hc) (code1 hc)]
-    rfl))
+    refine ⟨by rw [step_ed _ _ _ hh (code0 hc) (code1 hc)]; rfl, ?_⟩
+    enc_pc))
 
 set_option hygiene false in
 macro "enc_any" : tactic =>
   `(tactic| first | (cases hx; done) | enc_main | enc_ed | enc_cb | enc_i8 | enc_i16 | enc_i16ed | enc_rel)
 
+set_option maxHeartbeats 0 in
 theorem arity0_ok (op : Op) (he : (encode' ⟨op, []⟩).run env = .ok bs) (hc : Code s bs) (hh : s.halted = false)
-    (hx : exec env ⟨op, []⟩ s inp = some s') : s.step inp = s' := by
+    (hx : exec env ⟨op, []⟩ s inp = some s') : s.step inp = s' ∧ (Instr.falls ⟨op, []⟩ = true → s'.pc = s.pc + UInt16.ofNat bs.length) := by
   cases op <;> enc_any
 
+set_option maxHeartbeats 0 in
 theorem rst_ok (x : Arg) (he : (encode' ⟨.rst, [x]⟩).run env = .ok bs) (hc : Code s bs) (hh : s.halted = false)
-    (hx : exec env ⟨.rst, [x]⟩ s inp = some s') : s.step inp = s' := by
+    (hx : exec env ⟨.rst, [x]⟩ s inp = some s') : s.step inp = s' ∧ (Instr.falls ⟨.rst, [x]⟩ = true → s'.pc = s.pc + UInt16.ofNat bs.length) := by
   cases x <;> try (cases hx; done)
   rename_i v
   cases v with
@@ -242,8 +264,9 @@ theorem rst_ok (x : Arg) (he : (encode' ⟨.rst, [x]⟩).run env = .ok bs) (hc :
       rcases this with rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl <;> enc_main
     · simp [exec, execI, exec1, ha] at hx
 
+set_option maxHeartbeats 0 in
 theorem im_ok (x : Arg) (he : (encode' ⟨.im, [x]⟩).run env = .ok bs) (hc : Code s bs) (hh : s.halted = false)
-    (hx : exec env ⟨.im, [x]⟩ s inp = some s') : s.step inp = s' := by
+    (hx : exec env ⟨.im, [x]⟩ s inp = some s') : s.step inp = s' ∧ (Instr.falls ⟨.im, [x]⟩ = true → s'.pc = s.pc + UInt16.ofNat bs.length) := by
   cases x <;> try (cases hx; done)
   rename_i v
   cases v with
@@ -258,8 +281,9 @@ theorem im_ok (x : Arg) (he : (encode' ⟨.im, [x]⟩).run env = .ok bs) (hc : C
       · enc_ed
       · cases hx
 
+set_option maxHeartbeats 0 in
 theorem arity1_ok (op : Op) (x : Arg) (he : (encode' ⟨op, [x]⟩).run env = .ok bs) (hc : Code s bs)
-    (hh : s.halted = false) (hx : exec env ⟨op, [x]⟩ s inp = some s') : s.step inp = s' := by
+    (hh : s.halted = false) (hx : exec env ⟨op, [x]⟩ s inp = some s') : s.step inp = s' ∧ (Instr.falls ⟨op, [x]⟩ = true → s'.pc = s.pc + UInt16.ofNat bs.length) := by
   cases op <;>
     first
       | (cases hx; done)
@@ -267,10 +291,11 @@ theorem arity1_ok (op : Op) (x : Arg) (he : (encode' ⟨op, [x]⟩).run env = .o
       | exact im_ok x he hc hh hx
       | (cases x <;> first | enc_any | (rename_i v; cases v <;> enc_any))
 
+set_option maxHeartbeats 0 in
 /-- `bit`, `res` and `set`. -/
 theorem bit_ok (op : Op) (hop : op = .bit ∨ op = .res ∨ op = .set) (x y : Arg)
     (he : (encode' ⟨op, [x, y]⟩).run env = .ok bs) (hc : Code s bs) (hh : s.halted = false)
-    (hx : exec env ⟨op, [x, y]⟩ s inp = some s') : s.step inp = s' := by
+    (hx : exec env ⟨op, [x, y]⟩ s inp = some s') : s.step inp = s' ∧ (Instr.falls ⟨op, [x, y]⟩ = true → s'.pc = s.pc + UInt16.ofNat bs.length) := by
   cases x <;> try (rcases hop with rfl | rfl | rfl <;> cases hx; done)
   rename_i v
   cases v with
@@ -282,49 +307,58 @@ theorem bit_ok (op : Op) (hop : op = .bit ∨ op = .res ∨ op = .set) (x y : Ar
         rcases this with rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl <;> cases y <;> enc_any
     · rcases hop with rfl | rfl | rfl <;> simp [exec, execI, exec2, bitNo?, hb] at hx
 
+set_option maxHeartbeats 0 in
 theorem ex2_ok (x y : Arg) (he : (encode' ⟨.ex, [x, y]⟩).run env = .ok bs) (hc : Code s bs)
-    (hh : s.halted = false) (hx : exec env ⟨.ex, [x, y]⟩ s inp = some s') : s.step inp = s' := by
+    (hh : s.halted = false) (hx : exec env ⟨.ex, [x, y]⟩ s inp = some s') : s.step inp = s' ∧ (Instr.falls ⟨.ex, [x, y]⟩ = true → s'.pc = s.pc + UInt16.ofNat bs.length) := by
   cases x <;> first | (cases hx; done) | (cases y <;> enc_any)
 
+set_option maxHeartbeats 0 in
 theorem add2_ok (x y : Arg) (he : (encode' ⟨.add, [x, y]⟩).run env = .ok bs) (hc : Code s bs)
-    (hh : s.halted = false) (hx : exec env ⟨.add, [x, y]⟩ s inp = some s') : s.step inp = s' := by
+    (hh : s.halted = false) (hx : exec env ⟨.add, [x, y]⟩ s inp = some s') : s.step inp = s' ∧ (Instr.falls ⟨.add, [x, y]⟩ = true → s'.pc = s.pc + UInt16.ofNat bs.length) := by
   cases x <;> first | (cases hx; done) | (cases y <;> enc_any)
 
+set_option maxHeartbeats 0 in
 theorem adc2_ok (x y : Arg) (he : (encode' ⟨.adc, [x, y]⟩).run env = .ok bs) (hc : Code s bs)
-    (hh : s.halted = false) (hx : exec env ⟨.adc, [x, y]⟩ s inp = some s') : s.step inp = s' := by
+    (hh : s.halted = false) (hx : exec env ⟨.adc, [x, y]⟩ s inp = some s') : s.step inp = s' ∧ (Instr.falls ⟨.adc, [x, y]⟩ = true → s'.pc = s.pc + UInt16.ofNat bs.length) := by
   cases x <;> first | (cases hx; done) | (cases y <;> enc_any)
 
+set_option maxHeartbeats 0 in
 theorem sbc2_ok (x y : Arg) (he : (encode' ⟨.sbc, [x, y]⟩).run env = .ok bs) (hc : Code s bs)
-    (hh : s.halted = false) (hx : exec env ⟨.sbc, [x, y]⟩ s inp = some s') : s.step inp = s' := by
+    (hh : s.halted = false) (hx : exec env ⟨.sbc, [x, y]⟩ s inp = some s') : s.step inp = s' ∧ (Instr.falls ⟨.sbc, [x, y]⟩ = true → s'.pc = s.pc + UInt16.ofNat bs.length) := by
   cases x <;> first | (cases hx; done) | (cases y <;> enc_any)
 
+set_option maxHeartbeats 0 in
 theorem jp2_ok (x y : Arg) (he : (encode' ⟨.jp, [x, y]⟩).run env = .ok bs) (hc : Code s bs)
-    (hh : s.halted = false) (hx : exec env ⟨.jp, [x, y]⟩ s inp = some s') : s.step inp = s' := by
+    (hh : s.halted = false) (hx : exec env ⟨.jp, [x, y]⟩ s inp = some s') : s.step inp = s' ∧ (Instr.falls ⟨.jp, [x, y]⟩ = true → s'.pc = s.pc + UInt16.ofNat bs.length) := by
   cases x <;> first | (cases hx; done) | (cases y <;> enc_any)
 
+set_option maxHeartbeats 0 in
 theorem jr2_ok (x y : Arg) (he : (encode' ⟨.jr, [x, y]⟩).run env = .ok bs) (hc : Code s bs)
-    (hh : s.halted = false) (hx : exec env ⟨.jr, [x, y]⟩ s inp = some s') : s.step inp = s' := by
+    (hh : s.halted = false) (hx : exec env ⟨.jr, [x, y]⟩ s inp = some s') : s.step inp = s' ∧ (Instr.falls ⟨.jr, [x, y]⟩ = true → s'.pc = s.pc + UInt16.ofNat bs.length) := by
   cases x <;> first | (cases hx; done) | (cases y <;> enc_any)
 
+set_option maxHeartbeats 0 in
 theorem call2_ok (x y : Arg) (he : (encode' ⟨.call, [x, y]⟩).run env = .ok bs) (hc : Code s bs)
-    (hh : s.halted = false) (hx : exec env ⟨.call, [x, y]⟩ s inp = some s') : s.step inp = s' := by
+    (hh : s.halted = false) (hx : exec env ⟨.call, [x, y]⟩ s inp = some s') : s.step inp = s' ∧ (Instr.falls ⟨.call, [x, y]⟩ = true → s'.pc = s.pc + UInt16.ofNat bs.length) := by
   cases x <;> first | (cases hx; done) | (cases y <;> enc_any)
 
+set_option maxHeartbeats 0 in
 theorem in2_ok (x y : Arg) (he : (encode' ⟨.in, [x, y]⟩).run env = .ok bs) (hc : Code s bs)
-    (hh : s.halted = false) (hx : exec env ⟨.in, [x, y]⟩ s inp = some s') : s.step inp = s' := by
+    (hh : s.halted = false) (hx : exec env ⟨.in, [x, y]⟩ s inp = some s') : s.step inp = s' ∧ (Instr.falls ⟨.in, [x, y]⟩ = true → s'.pc = s.pc + UInt16.ofNat bs.length) := by
   cases x <;> first | (cases hx; done) | (cases y <;> enc_any)
 
+set_option maxHeartbeats 0 in
 theorem out2_ok (x y : Arg) (he : (encode' ⟨.out, [x, y]⟩).run env = .ok bs) (hc : Code s bs)
-    (hh : s.halted = false) (hx : exec env ⟨.out, [x, y]⟩ s inp = some s') : s.step inp = s' := by
+    (hh : s.halted = false) (hx : exec env ⟨.out, [x, y]⟩ s inp = some s') : s.step inp = s' ∧ (Instr.falls ⟨.out, [x, y]⟩ = true → s'.pc = s.pc + UInt16.ofNat bs.length) := by
   cases x <;> first | (cases hx; done) | (cases y <;> enc_any)
 
 set_option maxHeartbeats 0 in
 theorem ld_ok (x y : Arg) (he : (encode' ⟨.ld, [x, y]⟩).run env = .ok bs) (hc : Code s bs)
-    (hh : s.halted = false) (hx : exec env ⟨.ld, [x, y]⟩ s inp = some s') : s.step inp = s' := by
+    (hh : s.halted = false) (hx : exec env ⟨.ld, [x, y]⟩ s inp = some s') : s.step inp = s' ∧ (Instr.falls ⟨.ld, [x, y]⟩ = true → s'.pc = s.pc + UInt16.ofNat bs.length) := by
   cases x <;> first | (cases hx; done) | (cases y <;> enc_any)
 
 theorem arity2_ok (op : Op) (x y : Arg) (he : (encode' ⟨op, [x, y]⟩).run env = .ok bs) (hc : Code s bs)
-    (hh : s.halted = false) (hx : exec env ⟨op, [x, y]⟩ s inp = some s') : s.step inp = s' := by
+    (hh : s.halted = false) (hx : exec env ⟨op, [x, y]⟩ s inp = some s') : s.step inp = s' ∧ (Instr.falls ⟨op, [x, y]⟩ = true → s'.pc = s.pc + UInt16.ofNat bs.length) := by
   cases op <;>
     first
       | (cases hx; done)
@@ -345,9 +379,11 @@ theorem arity2_ok (op : Op) (x y : Arg) (he : (encode' ⟨op, [x, y]⟩).run env
 /-- **The CPU does what the assembler wrote.**  If `bs` is the encoding
 of the instruction `i` (its labels resolved by `env`) and `bs` is in
 memory at the program counter of a CPU that is not halted, one step of
-the CPU is what `Asm.exec` says `i` does. -/
+the CPU is what `Asm.exec` says `i` does; and unless `i` is a jump, a
+call, a return or a block instruction, the program counter is
+then after `bs`. -/
 theorem step_encode' (i : Instr) (he : (encode' i).run env = .ok bs) (hc : Code s bs) (hh : s.halted = false)
-    (hx : exec env i s inp = some s') : s.step inp = s' := by
+    (hx : exec env i s inp = some s') : s.step inp = s' ∧ (Instr.falls i = true → s'.pc = s.pc + UInt16.ofNat bs.length) := by
   obtain ⟨op, args⟩ := i
   rcases args with _ | ⟨x, _ | ⟨y, _ | ⟨z, t⟩⟩⟩
   · exact arity0_ok op he hc hh hx
@@ -356,7 +392,7 @@ theorem step_encode' (i : Instr) (he : (encode' i).run env = .ok bs) (hc : Code 
   · cases hx
 
 theorem step_encode (i : Instr) (he : encode i env = .ok bs) (hc : Code s bs) (hh : s.halted = false)
-    (hx : exec env i s inp = some s') : s.step inp = s' := by
+    (hx : exec env i s inp = some s') : s.step inp = s' ∧ (Instr.falls i = true → s'.pc = s.pc + UInt16.ofNat bs.length) := by
   refine step_encode' i ?_ hc hh hx
   unfold encode at he
   split at he
