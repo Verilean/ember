@@ -92,7 +92,7 @@ theorem eff_core (ok : Z.OK) (hT : FnLay Z E) (F : GFinal Z base sF) (hrt : RtOK
   refine wpg_mono hm ?_
   intro _ s1 ⟨hx1, hl⟩
   simp only [wpg_call, killAll, wpg_setRegs]
-  refine wpg_mono (retStore_ok (dt := dt) ok hT F ret (fun n d h => Or.inr (hret n d h).1) _) ?_
+  refine wpg_mono (retStore_ok (dt := dt) ok hT F hrt.wide hdep ret (fun n d h => Or.inr (Or.inl (hret n d h).1)) _) ?_
   intro _ s2 ⟨hx2, hs⟩
   have hmid : GExt s1 { s1 with out := s1.out.push (.ins ⟨.call, [.imm (.sym (effectRoutine e))]⟩), regs := {} } :=
     ⟨by simp, List.suffix_refl _, List.suffix_refl _⟩
@@ -107,7 +107,7 @@ theorem eff_core (ok : Z.OK) (hT : FnLay Z E) (F : GFinal Z base sF) (hrt : RtOK
       obtain ⟨h2, hsome⟩ := hret n d hnd
       obtain ⟨r, hr⟩ := hsome ist.world (args.map fun a => IR.Sem.opd Z.c ist tmps a.1 a.2)
       subst h2
-      refine ⟨fun h => (by cases h), fun _ => ?_⟩
+      refine ⟨fun h => (by cases h), fun _ => ?_, fun h => absurd h (by decide)⟩
       rw [hr]
       exact hres r hr)
   refine ⟨s3, w', ((Steps.lift ok st1 w).trans st2).trans (Steps.lift ok st3 w'), ?_, at3, R3⟩

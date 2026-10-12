@@ -39,7 +39,7 @@ structure Entry (Z : ZCtx) (gf : IR.Fn) (st : IR.Sem.St) (v : Nat) (s : Cpu) : P
   isz : st.mem.size = 65536
   mem : ∀ x, Z.data x → s.mem.get! x = st.mem.get! x
   room : Z.stackLo + Z.depth gf.name ≤ s.sp.toNat ∧ s.sp.toNat + 2 ≤ Z.stackHi
-  arg : ∀ n sl, gf.regParam = some (n, sl) → ResIn n v s
+  arg : ∀ n sl, gf.regParam = some (n, sl) → ResIn Z n v s
 
 /-- What the function does from `s`, for the result the IR gives. -/
 def Outcome (Z : ZCtx) (f : IR.Fn) (fr : Fr) (s : Cpu) (w : Z.W) : IR.Sem.Res → Prop
@@ -108,10 +108,11 @@ theorem call_fn (ok : Z.OK) (hT : FnLay Z E) (F : GFinal Z base sF) {s0 s1 : GS}
     (hat : At Z.addrs (base + s0.out.size) s)
     (harg : ∀ n o, reg = some (n, o) → (n = 1 → s.a.toNat = IR.Sem.opd Z.c ist tmps n o) ∧
       (n = 2 → s.hl.toNat = IR.Sem.opd Z.c ist tmps n o))
+    (hreg12 : ∀ n o, reg = some (n, o) → n = 1 ∨ n = 2)
     (w : Z.W) (hw : Z.wrel ist.world w) (res : IR.Sem.Res) (hc : Callee Z g (callSt Z.c ist tmps g reg) res) :
     match res with
     | .ok r st2 => ∃ s' w', WSteps Z (s, w) (s', w') ∧ Z.wrel st2.world w' ∧ At Z.addrs (base + s1.out.size) s' ∧
-        Rel Z E fr dt {} st2 tmps s' ∧ ∀ n d, ret = some (n, d) → ResIn n (r.getD 0) s'
+        Rel Z E fr dt {} st2 tmps s' ∧ ∀ n d, ret = some (n, d) → ResIn Z n (r.getD 0) s'
     | .trap st2 => ∃ s' w', WSteps Z (s, w) (s', w') ∧ Z.wrel st2.world w' ∧ Trapped Z st2 s'
     | _ => True := by
   obtain ⟨gf, hgf⟩ := N.fn
@@ -127,7 +128,7 @@ theorem call_fn (ok : Z.OK) (hT : FnLay Z E) (F : GFinal Z base sF) {s0 s1 : GS}
   -- the argument, and the state of the IR at the entry
   have hreg := N.regSz gf hgf
   have hv : ∃ v, callSt Z.c ist tmps g reg = stArg Z.c gf ist v ∧
-      ∀ n sl, gf.regParam = some (n, sl) → ResIn n v s := by
+      ∀ n sl, gf.regParam = some (n, sl) → (n = 1 ∨ n = 2) ∧ ResIn Z n v s := by
     cases hr : reg with
     | none =>
       rw [hr] at hreg
@@ -146,7 +147,8 @@ theorem call_fn (ok : Z.OK) (hT : FnLay Z E) (F : GFinal Z base sF) {s0 s1 : GS}
         subst hn
         refine ⟨IR.Sem.opd Z.c ist tmps n o, by simp [callSt, stArg, hp, hgf], fun m sl' h => ?_⟩
         cases h
-        exact harg n o hr
+        have h12 := hreg12 n o hr
+        exact ⟨h12, (harg n o hr).1, (harg n o hr).2, fun h => by omega⟩
   obtain ⟨v, hst1, hargv⟩ := hv
   have hname : gf.name = g := by
     have := List.find?_some hgf
@@ -158,8 +160,8 @@ theorem call_fn (ok : Z.OK) (hT : FnLay Z E) (F : GFinal Z base sF) {s0 s1 : GS}
       exact hsym
     · rw [cs.mem x (by have := ok.nostack x hxd; omega)]
       exact R.mem x hxd
-    · obtain ⟨h1, h2⟩ := hargv n sl h
-      exact ⟨fun e => by rw [cs.a]; exact h1 e, fun e => by rw [hl_congr cs.h cs.l]; exact h2 e⟩
+    · obtain ⟨h12, h1, h2, _⟩ := hargv n sl h
+      exact ⟨fun e => by rw [cs.a]; exact h1 e, fun e => by rw [hl_congr cs.h cs.l]; exact h2 e, fun e => by omega⟩
   have hout := hc gf ist v c1 w hgf hst1 ent hw
   cases res with
   | fuel => trivial
@@ -258,12 +260,13 @@ theorem argLoad_ok (ok : Z.OK) (F : GFinal Z base sF) (reg : Option (Nat × Opd)
       cases h
       exact ⟨fun e => (by cases e), fun _ => hHL⟩
 
-theorem retStore_ok (ok : Z.OK) (hT : FnLay Z E) (F : GFinal Z base sF) (ret : Option (Nat × Dst))
-    (hsz : ∀ n d, ret = some (n, d) → n = 1 ∨ n = 2) (s1 : GS) :
+theorem retStore_ok (ok : Z.OK) (hT : FnLay Z E) (F : GFinal Z base sF) (hrt : RtW Z 4)
+    (hdep : Z.rtK + 2 ≤ Z.depth E.fn.name) (ret : Option (Nat × Dst))
+    (hsz : ∀ n d, ret = some (n, d) → n = 1 ∨ n = 2 ∨ n = 4) (s1 : GS) :
     wpg (retStore ret) E (fun _ s2 => GExt s1 s2 ∧
       (GExt s2 sF → (∀ n d, ret = some (n, d) → Wr Z E n d) → ∀ fr ist tmps s r,
         Rel Z E fr dt s1.regs ist tmps s → At Z.addrs (base + s1.out.size) s →
-        (∀ n d, ret = some (n, d) → ResIn n (Option.getD r 0) s) →
+        (∀ n d, ret = some (n, d) → ResIn Z n (Option.getD r 0) s) →
         ∃ s', Steps s s' ∧ At Z.addrs (base + s2.out.size) s' ∧
           Rel Z E fr (dtRet dt ret) s2.regs (IR.Sem.setRet Z.c ist tmps ret r).1
             (IR.Sem.setRet Z.c ist tmps ret r).2 s')) s1 := by
@@ -272,7 +275,7 @@ theorem retStore_ok (ok : Z.OK) (hT : FnLay Z E) (F : GFinal Z base sF) (ret : O
     exact ⟨GExt.refl _, fun _ _ fr ist tmps s r R hat _ => ⟨s, Steps.refl _, hat, R⟩⟩
   | some p =>
     obtain ⟨n, d⟩ := p
-    rcases hsz n d rfl with rfl | rfl
+    rcases hsz n d rfl with rfl | rfl | rfl
     · simp only [retStore, store, beq_self_eq_true, if_true]
       refine wpg_mono (storeA_ok (dt := dt) ok hT F d s1) ?_
       intro _ s2 ⟨hx2, _, _, hs⟩
@@ -288,17 +291,24 @@ theorem retStore_ok (ok : Z.OK) (hT : FnLay Z E) (F : GFinal Z base sF) (ret : O
       refine wpg_mono (storeHL_ok (dt := dt) ok hT F d s1) ?_
       intro _ s2 ⟨hx2, _, _, hs⟩
       refine ⟨hx2, fun hx hwr fr ist tmps s r R hat hres => ?_⟩
-      have hHL := (hres 2 d rfl).2 rfl
+      have hHL := (hres 2 d rfl).2.1 rfl
       obtain ⟨s', st, at', R', _⟩ := hs hx fr ist tmps s (r.getD 0) (hwr 2 d rfl) R hat (by
         have := s.hl.toNat_lt
         rw [← hHL]
         omega)
       exact ⟨s', st, at', R'⟩
+    · simp only [retStore, store, show ((4 : Nat) == 1) = false from rfl, show ((4 : Nat) == 2) = false from rfl,
+        Bool.false_eq_true, if_false]
+      refine wpg_mono (storeAcc_ok (dt := dt) ok hT F (by omega) hrt hdep d s1) ?_
+      intro _ s2 ⟨hx2, hs⟩
+      refine ⟨hx2, fun hx hwr fr ist tmps s r R hat hres => ?_⟩
+      exact hs hx fr ist tmps s (r.getD 0) (hwr 4 d rfl) R hat ((hres 4 d rfl).2.2 (by omega))
 
 /-- **`call`**: the argument loaded, the function called, its result stored. -/
 theorem call_ok (ok : Z.OK) (hT : FnLay Z E) (F : GFinal Z base sF) (g : String) (ret : Option (Nat × Dst))
     (reg : Option (Nat × Opd)) (hreg : ∀ n o, reg = some (n, o) → n = 1 ∨ n = 2)
-    (hret : ∀ n d, ret = some (n, d) → n = 1 ∨ n = 2) (s0 : GS) :
+    (hret : ∀ n d, ret = some (n, d) → n = 1 ∨ n = 2 ∨ n = 4) (hrt : RtW Z 4)
+    (hdep : Z.rtK + 2 ≤ Z.depth E.fn.name) (s0 : GS) :
     wpg (genInstr (.call g ret reg)) E (fun _ s1 => GExt s0 s1 ∧
       (GExt s1 sF → CallNeed Z E dt g ret reg → ∀ fr ist tmps s, Rel Z E fr dt s0.regs ist tmps s →
         At Z.addrs (base + s0.out.size) s → ∀ w, Z.wrel ist.world w →
@@ -309,7 +319,7 @@ theorem call_ok (ok : Z.OK) (hT : FnLay Z E) (F : GFinal Z base sF) (g : String)
   refine wpg_mono (argLoad_ok (dt := dt) ok F reg hreg s0) ?_
   intro _ s1 ⟨hx1, hl⟩
   simp only [wpg_call, killAll, wpg_setRegs]
-  refine wpg_mono (retStore_ok (dt := dt) ok hT F ret hret _) ?_
+  refine wpg_mono (retStore_ok (dt := dt) ok hT F hrt hdep ret hret _) ?_
   intro _ s2 ⟨hx2, hs⟩
   have hmid : GExt s1 { s1 with out := s1.out.push (.ins ⟨.call, [.imm (.sym (fnLabel g))]⟩), regs := {} } :=
     ⟨by simp, List.suffix_refl _, List.suffix_refl _⟩
@@ -317,7 +327,7 @@ theorem call_ok (ok : Z.OK) (hT : FnLay Z E) (F : GFinal Z base sF) (g : String)
   obtain ⟨s', st1, at1, R1, harg⟩ := hl (hmid.trans (hx2.trans hx)) N.rd fr ist tmps s R hat
   have hcall := call_fn ok hT F (s0 := s1)
     (s1 := { s1 with out := s1.out.push (.ins ⟨.call, [.imm (.sym (fnLabel g))]⟩) })
-    ((GExt.regs _ _).trans (hx2.trans hx)) rfl N R1 at1 harg w hw res hc
+    ((GExt.regs _ _).trans (hx2.trans hx)) rfl N R1 at1 harg hreg w hw res hc
   cases res with
   | fuel => trivial
   | bad => trivial

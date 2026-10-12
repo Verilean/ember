@@ -23,6 +23,10 @@ def RdW (Z : ZCtx) (E : GEnv) (dt : Nat → Prop) (n : Nat) : Opd → Prop
   | .const v => LitOK Z n v
   | o => Rd Z E dt n o
 
+/-- An operand of `n` bytes can be read: where it is, or (wider than two bytes) a constant from the pool. -/
+def RdN (Z : ZCtx) (E : GEnv) (dt : Nat → Prop) (n : Nat) (o : Opd) : Prop :=
+  if n ≤ 2 then Rd Z E dt n o else RdW Z E dt n o
+
 /-- Where a wide operand is, as the generator names it. -/
 def ptrVal (E : GEnv) (n : Nat) : Opd → Val
   | .const v => .sym s!"lit{bits n}_{v % 2 ^ bits n}"

@@ -76,7 +76,7 @@ theorem genFn_ok (ok : Z.OK) (hrt : RtOK Z) (S : FnStatic Z E) (F : GFinal Z bas
         (fun _ s' => s' = sF → ∃ G : FnGen, G.OK Z E.fn) sa := by
     intro sa jl hra hjl hsz
     simp only [wpg_bind]
-    have hsz12 : ∀ n d, regDst E.fn = some (n, d) → n = 1 ∨ n = 2 := by
+    have hsz12 : ∀ n d, regDst E.fn = some (n, d) → n = 1 ∨ n = 2 ∨ n = 4 := by
       intro n d h
       unfold regDst at h
       cases hp : E.fn.regParam with
@@ -84,7 +84,9 @@ theorem genFn_ok (ok : Z.OK) (hrt : RtOK Z) (S : FnStatic Z E) (F : GFinal Z bas
       | some p =>
         rw [hp] at h
         cases h
-        exact (S.regParam p.1 p.2 hp).1
+        rcases (S.regParam p.1 p.2 hp).1 with h | h
+        · exact Or.inl h
+        · exact Or.inr (Or.inl h)
     have hwr : ∀ n d, regDst E.fn = some (n, d) → Wr Z E n d := by
       intro n d h
       unfold regDst at h
@@ -94,7 +96,7 @@ theorem genFn_ok (ok : Z.OK) (hrt : RtOK Z) (S : FnStatic Z E) (F : GFinal Z bas
         rw [hp] at h
         cases h
         exact (S.regParam p.1 p.2 hp).2
-    refine wpg_mono (retStore_ok (dt := fun _ => False) ok S.lay F (regDst E.fn) hsz12 sa) ?_
+    refine wpg_mono (retStore_ok (dt := fun _ => False) ok S.lay F hrt.wide S.depth (regDst E.fn) hsz12 sa) ?_
     intro _ sb ⟨hxb, hs⟩
     refine wpg_mono (genBody_ok ok S.lay F hrt S.depth ann E.fn.body.toList 0 (fun _ => False) sb S.covered) ?_
     intro _ s' hch heq

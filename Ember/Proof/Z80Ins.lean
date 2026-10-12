@@ -43,14 +43,11 @@ def Covered : IR.Instr → Bool
   | .lea _ p => addrCov p
   | .load n _ p | .store n p _ => size12 n && addrCov p
   | .jmp _ | .label _ | .trap => true
-  | .ret v => (v.map fun p => size12 p.1).getD true
-  | .call _ ret reg => (ret.map fun p => size12 p.1).getD true && (reg.map fun p => size12 p.1).getD true
+  | .ret v => (v.map fun p => size12 p.1 || p.1 == 4).getD true
+  | .call _ ret reg =>
+    (ret.map fun p => size12 p.1 || p.1 == 4).getD true && (reg.map fun p => size12 p.1).getD true
   | .eff e args ret => effCov e args ret
   | _ => false
-
-/-- An operand of `n` bytes can be read: where it is, or (wider than two bytes) a constant from the pool. -/
-def RdN (Z : ZCtx) (E : GEnv) (dt : Nat → Prop) (n : Nat) (o : Opd) : Prop :=
-  if n ≤ 2 then Rd Z E dt n o else RdW Z E dt n o
 
 theorem size124 {n : Nat} (h : (size12 n || n == 4) = true) : n = 1 ∨ n = 2 ∨ n = 4 := by
   simpa [size12, or_assoc] using h
@@ -68,7 +65,7 @@ def Need (Z : ZCtx) (E : GEnv) (dt : Nat → Prop) : IR.Instr → Prop
   | .store n p src => AddrNeed Z E dt p ∧ AddrStore Z E p n ∧ Rd Z E dt n src
   | .br _ n a b l => RdN Z E dt n a ∧ RdN Z E dt n b ∧ ∃ j : Nat, Z.items[j]? = some (Item.label (lname E l))
   | .jmp _ | .label _ => True
-  | .ret v => ∀ n o, v = some (n, o) → Rd Z E dt n o
+  | .ret v => ∀ n o, v = some (n, o) → RdN Z E dt n o
   | .trap => ∃ j : Nat, Z.items[j]? = some (Item.label "rt_trap")
   | .call g ret reg => CallNeed Z E dt g ret reg
   | .eff _ args ret => EffNeed Z E dt args ret
@@ -180,9 +177,9 @@ theorem ins0_ok (ok : Z.OK) (hT : FnLay Z E) (F : GFinal Z base sF) (hrt : RtOK 
     intro _ s1 ⟨hx, h⟩
     exact ⟨hx, h⟩
   | ret v =>
-    refine wpg_mono (ret_ok (dt := dt) ok F v (fun n o h => by
+    refine wpg_mono (ret_ok (dt := dt) ok hT F hrt.wide hdep v (fun n o h => by
       subst h
-      exact size12_spec hc) s0) ?_
+      exact size124 hc) s0) ?_
     intro _ s1 ⟨hx, h⟩
     refine ⟨hx, fun hxF hN fr ist tmps s R hat => ?_⟩
     obtain ⟨s', st, hret⟩ := h hxF hN fr ist tmps s R hat
@@ -194,13 +191,14 @@ theorem ins0_ok (ok : Z.OK) (hT : FnLay Z E) (F : GFinal Z base sF) (hrt : RtOK 
     obtain ⟨j, hj⟩ := hN
     exact h hxF j hj fr ist tmps s R hat
   | call g ret reg =>
-    have hc' : ((ret.map fun p => size12 p.1).getD true && (reg.map fun p => size12 p.1).getD true) = true := hc
+    have hc' : ((ret.map fun p => size12 p.1 || p.1 == 4).getD true &&
+        (reg.map fun p => size12 p.1).getD true) = true := hc
     rw [Bool.and_eq_true] at hc'
     refine wpg_mono (call_ok (dt := dt) ok hT F g ret reg (fun n o h => by
       subst h
       exact size12_spec hc'.2) (fun n d h => by
       subst h
-      exact size12_spec hc'.1) s0) ?_
+      exact size124 hc'.1) hrt.wide hdep s0) ?_
     intro _ s1 ⟨hx, h⟩
     refine ⟨hx, fun hxF hN fr ist tmps s R hat => ?_⟩
     rw [step_call]
