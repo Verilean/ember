@@ -173,8 +173,9 @@ theorem Ins.ext {dt : Nat → Prop} {i : IR.Instr} {s0 s1 : GS} (h : Ins Z E bas
 
 theorem Ins.other {dt : Nat → Prop} {i : IR.Instr} {s0 s1 : GS} (hn : ∀ l, i ≠ .label l)
     (h : Ins Z E base sF dt i s0 () s1) :
-    GExt s1 sF → Need Z E dt i → ∀ fr ist tmps s, Rel Z E fr dt s0.regs ist tmps s →
-      At Z.addrs (base + s0.out.size) s → After Z E base fr dt i s1 ist tmps s (IR.Sem.step Z.c ist tmps i) := by
+    GExt s1 sF → Need Z E dt i → ∀ fr ist tmps s w, Rel Z E fr dt s0.regs ist tmps s →
+      At Z.addrs (base + s0.out.size) s → Z.wrel ist.world w →
+      MAfter Z E base fr dt i s1 ist tmps s w (IR.Sem.step Z.c ist tmps i) := by
   cases i <;> first | exact h.2 | exact absurd rfl (hn _)
 
 theorem Step1.ext {k : Nat} {dt : Nat → Prop} {i : IR.Instr} {s s1 : GS} (h : Step1 Z E base sF k dt i s s1) :
@@ -230,15 +231,15 @@ theorem labelAt_spec {f : IR.Fn} {l i : Nat} (h : IR.Sem.labelAt f l = some i) :
     rw [this]
   | _ => rw [hb] at hp; cases hp
 
-theorem Outcome.steps {f : IR.Fn} {fr : Fr} {s s' : Cpu} {res : IR.Sem.Res} (h1 : Steps s s')
-    (h : Outcome Z f fr s' res) : Outcome Z f fr s res := by
+theorem Outcome.steps {f : IR.Fn} {fr : Fr} {s s' : Cpu} {w w' : Z.W} {res : IR.Sem.Res}
+    (h1 : WSteps Z (s, w) (s', w')) (h : Outcome Z f fr s' w' res) : Outcome Z f fr s w res := by
   cases res with
   | ok r st =>
-    obtain ⟨s'', v, st2, hv, hr⟩ := h
-    exact ⟨s'', v, h1.trans st2, hv, hr⟩
+    obtain ⟨s'', w'', v, st2, hw, hv, hr⟩ := h
+    exact ⟨s'', w'', v, h1.trans st2, hw, hv, hr⟩
   | trap st =>
-    obtain ⟨s'', st2, ht⟩ := h
-    exact ⟨s'', h1.trans st2, ht⟩
+    obtain ⟨s'', w'', st2, hw, ht⟩ := h
+    exact ⟨s'', w'', h1.trans st2, hw, ht⟩
   | fuel => trivial
   | bad => trivial
 
@@ -284,13 +285,13 @@ theorem FnGen.OK.label (ok : Z.OK) {G : FnGen} {f : IR.Fn} (GK : G.OK Z f) {pc l
 /-- **The body from an instruction on.**  `hcal`: the functions called, with less fuel. -/
 theorem exec_ok (ok : Z.OK) {G : FnGen} {f : IR.Fn} (GK : G.OK Z f) :
     ∀ k, (∀ m, m < k → ∀ g st1, Callee Z g st1 (IR.Sem.callF m Z.c g st1)) →
-      ∀ pc tmps ist s fr, pc < f.body.size → (pc = 0 ∨ ∃ i', f.body[pc - 1]? = some i' ∧ canFall i' = true) →
+      ∀ pc tmps ist s w fr, pc < f.body.size → (pc = 0 ∨ ∃ i', f.body[pc - 1]? = some i' ∧ canFall i' = true) →
         At Z.addrs (G.base + (G.gs pc).out.size) s → Rel Z G.E fr (G.dts pc) (G.gs pc).regs ist tmps s →
-        Outcome Z f fr s (IR.Sem.exec k Z.c f pc tmps ist) := by
+        Z.wrel ist.world w → Outcome Z f fr s w (IR.Sem.exec k Z.c f pc tmps ist) := by
   intro k
   induction k using Nat.strongRecOn with
   | _ k ih =>
-    intro hcal pc tmps ist s fr hlt hprev hat R
+    intro hcal pc tmps ist s w fr hlt hprev hat R hw
     cases k with
     | zero =>
       rw [exec_zero]
@@ -306,27 +307,27 @@ theorem exec_ok (ok : Z.OK) {G : FnGen} {f : IR.Fn} (GK : G.OK Z f) :
         obtain ⟨l, rfl⟩ := hlab
         obtain ⟨jl, _, hafter, hbefore, harr, hfall⟩ := GK.label ok hb
         have hlt' := GK.falls pc _ hb rfl
-        show Outcome Z f fr s (IR.Sem.exec k Z.c f (pc + 1) tmps ist)
-        exact ihk (pc + 1) tmps ist s fr hlt' (Or.inr ⟨_, by simpa using hb, rfl⟩) (hafter s (hbefore s hat))
-          (harr fr _ _ ist tmps s (hfall hprev) R)
+        show Outcome Z f fr s w (IR.Sem.exec k Z.c f (pc + 1) tmps ist)
+        exact ihk (pc + 1) tmps ist s w fr hlt' (Or.inr ⟨_, by simpa using hb, rfl⟩) (hafter s (hbefore s hat))
+          (harr fr _ _ ist tmps s (hfall hprev) R) hw
       · have hnl : ∀ l, i ≠ .label l := fun l h => hlab ⟨l, h⟩
         obtain ⟨hstep, hdt⟩ := GK.step pc i hb
         have hxF : GExt (G.gs (pc + 1)) G.sF := GK.toF (by omega)
         obtain ⟨sc, hins, hregs, hstart⟩ := hstep.start ok GK.F hxF
-        have hA := hins.other hnl hxF (GK.need pc i hb) fr ist tmps s
-          ((show Rel Z G.E fr (G.dts pc) sc.regs ist tmps s by rw [hregs]; exact R).toAt pc i) (hstart s hat)
+        have hA := hins.other hnl hxF (GK.need pc i hb) fr ist tmps s w
+          ((show Rel Z G.E fr (G.dts pc) sc.regs ist tmps s by rw [hregs]; exact R).toAt pc i) (hstart s hat) hw
         cases hs : IR.Sem.step Z.c ist tmps i with
         | next ist' tmps' =>
           rw [hs] at hA
-          obtain ⟨s', st, hat', R'⟩ := hA
+          obtain ⟨s', w', st, hw', hat', R'⟩ := hA
           have hlt' := GK.falls pc i hb (canFall_of_next hs)
-          refine Outcome.steps st (ihk (pc + 1) tmps' ist' s' fr hlt'
-            (Or.inr ⟨i, by simpa using hb, canFall_of_next hs⟩) hat' ?_)
+          refine Outcome.steps st (ihk (pc + 1) tmps' ist' s' w' fr hlt'
+            (Or.inr ⟨i, by simpa using hb, canFall_of_next hs⟩) hat' ?_ hw')
           rw [hdt]
           exact R'.ofAt
         | goto l =>
           rw [hs] at hA
-          show Outcome Z f fr s (match IR.Sem.labelAt f l with
+          show Outcome Z f fr s w (match IR.Sem.labelAt f l with
             | some i => IR.Sem.exec k Z.c f i tmps ist
             | none => .bad)
           cases hl : IR.Sem.labelAt f l with
@@ -336,7 +337,7 @@ theorem exec_ok (ok : Z.OK) {G : FnGen} {f : IR.Fn} (GK : G.OK Z f) :
             obtain ⟨jl, hjl, hafter, _, harr, _⟩ := GK.label ok hbl
             obtain ⟨s', r, st, hat', hj, R'⟩ := hA jl hjl
             have hlt' := GK.falls i' _ hbl rfl
-            show Outcome Z f fr s (IR.Sem.exec k Z.c f i' tmps ist)
+            show Outcome Z f fr s w (IR.Sem.exec k Z.c f i' tmps ist)
             cases k with
             | zero =>
               rw [exec_zero]
@@ -344,14 +345,14 @@ theorem exec_ok (ok : Z.OK) {G : FnGen} {f : IR.Fn} (GK : G.OK Z f) :
             | succ k' =>
               rw [exec_succ]
               simp only [hbl]
-              show Outcome Z f fr s (IR.Sem.exec k' Z.c f (i' + 1) tmps ist)
-              refine Outcome.steps st (ih k' (by omega) (fun m hm => hcal m (by omega)) (i' + 1) tmps ist s' fr hlt'
-                (Or.inr ⟨_, by simpa using hbl, rfl⟩) (hafter s' hat') ?_)
+              show Outcome Z f fr s w (IR.Sem.exec k' Z.c f (i' + 1) tmps ist)
+              refine Outcome.steps st (ih k' (by omega) (fun m hm => hcal m (by omega)) (i' + 1) tmps ist s' w fr hlt'
+                (Or.inr ⟨_, by simpa using hbl, rfl⟩) (hafter s' hat') ?_ hw)
               exact harr fr _ r ist tmps s' (hxF.jumps.subset hj) R'.ofAt
         | call g st1 ret =>
           rw [hs] at hA
           have hA' := hA _ (hcal k (Nat.lt_succ_self k) g st1)
-          show Outcome Z f fr s (match IR.Sem.callF k Z.c g st1 with
+          show Outcome Z f fr s w (match IR.Sem.callF k Z.c g st1 with
             | .ok r st2 => IR.Sem.exec k Z.c f (pc + 1) (IR.Sem.setRet Z.c st2 tmps ret r).2
                 (IR.Sem.setRet Z.c st2 tmps ret r).1
             | .trap st2 => .trap st2
@@ -365,22 +366,22 @@ theorem exec_ok (ok : Z.OK) {G : FnGen} {f : IR.Fn} (GK : G.OK Z f) :
             exact hA'
           | ok r st2 =>
             rw [hr] at hA'
-            obtain ⟨s', st, hat', R'⟩ := hA'
+            obtain ⟨s', w', st, hw', hat', R'⟩ := hA'
             have hlt' := GK.falls pc i hb (canFall_of_call hs)
-            refine Outcome.steps st (ihk (pc + 1) _ _ s' fr hlt'
-              (Or.inr ⟨i, by simpa using hb, canFall_of_call hs⟩) hat' ?_)
+            refine Outcome.steps st (ihk (pc + 1) _ _ s' w' fr hlt'
+              (Or.inr ⟨i, by simpa using hb, canFall_of_call hs⟩) hat' ?_ (by rw [setRet_world]; exact hw'))
             rw [hdt]
             exact R'.ofAt
         | stop r =>
           rw [hs] at hA
-          show Outcome Z f fr s r
+          show Outcome Z f fr s w r
           cases r with
           | fuel => trivial
           | bad => trivial
           | trap st' => exact hA
           | ok r st' =>
-            obtain ⟨s', v, st, hi, hret⟩ := hA
-            refine ⟨s', v, st, ?_, ?_⟩
+            obtain ⟨s', w', v, st, hw', hi, hret⟩ := hA
+            refine ⟨s', w', v, st, hw', ?_, ?_⟩
             · rw [← hi]
               exact Array.mem_toList_iff.mpr (Array.mem_of_getElem? hb)
             · have hfn : (envAt G.E pc i).fn = f := GK.fn
@@ -394,7 +395,7 @@ theorem fn_ok (ok : Z.OK) (hG : ∀ g gf, Z.c.prog.fn? g = some gf → ∃ G : F
   intro k
   induction k using Nat.strongRecOn with
   | _ k ih =>
-    intro g st1 gf st v s hgf hst1 ent
+    intro g st1 gf st v s w hgf hst1 ent hw
     cases k with
     | zero =>
       rw [callF_zero]
@@ -404,8 +405,10 @@ theorem fn_ok (ok : Z.OK) (hG : ∀ g gf, Z.c.prog.fn? g = some gf → ∃ G : F
       simp only [hgf]
       obtain ⟨G, GK⟩ := hG g gf hgf
       obtain ⟨s', st', hat, R⟩ := GK.entry st v s ent
-      refine Outcome.steps st' (exec_ok ok GK k (fun m hm => ih m (by omega)) 0 _ _ s' _ GK.nonempty (Or.inl rfl) hat ?_)
-      rw [GK.dt0, hst1]
+      rw [hst1]
+      refine Outcome.steps (Steps.lift ok st' w) (exec_ok ok GK k (fun m hm => ih m (by omega)) 0 _ _ s' w _
+        GK.nonempty (Or.inl rfl) hat ?_ (by rw [stArg_world]; exact hw))
+      rw [GK.dt0]
       exact R
 
 end

@@ -54,9 +54,9 @@ def Need (Z : ZCtx) (E : GEnv) (dt : Nat → Prop) : IR.Instr → Prop
   | .call g ret reg => CallNeed Z E dt g ret reg
   | _ => False
 
-/-- **What the generator promises for the instruction `i`.**  A label
-is told apart: the states agree after it for what `jumpsOk` checks. -/
-def Ins (Z : ZCtx) (E : GEnv) (base : Nat) (sF : GS) (dt : Nat → Prop) (i : IR.Instr) (s0 : GS) (_ : Unit)
+/-- What the generator promises for an instruction `i` without effects.
+A label is told apart: the states agree after it for what `jumpsOk` checks. -/
+def Ins0 (Z : ZCtx) (E : GEnv) (base : Nat) (sF : GS) (dt : Nat → Prop) (i : IR.Instr) (s0 : GS) (_ : Unit)
     (s1 : GS) : Prop :=
   GExt s0 s1 ∧
     match i with
@@ -73,10 +73,9 @@ theorem step_call (c : IR.Ctx) (ist : IR.Sem.St) (tmps : Array Nat) (g : String)
 section
 variable {Z : ZCtx} {E : GEnv} {base : Nat} {sF : GS} {dt : Nat → Prop}
 
-/-- **Every covered instruction.** -/
-theorem ins_ok (ok : Z.OK) (hT : FnLay Z E) (F : GFinal Z base sF) (hrt : RtOK Z)
+theorem ins0_ok (ok : Z.OK) (hT : FnLay Z E) (F : GFinal Z base sF) (hrt : RtOK Z)
     (hdep : Z.rtK + 2 ≤ Z.depth E.fn.name) (i : IR.Instr) (hc : Covered i = true) (s0 : GS) :
-    wpg (genInstr i) E (Ins Z E base sF dt i s0) s0 := by
+    wpg (genInstr i) E (Ins0 Z E base sF dt i s0) s0 := by
   cases i with
   | mov n d src =>
     rcases size12_spec hc with rfl | rfl
@@ -166,7 +165,7 @@ theorem ins_ok (ok : Z.OK) (hT : FnLay Z E) (F : GFinal Z base sF) (hrt : RtOK Z
     intro _ s1 ⟨hx, h⟩
     refine ⟨hx, fun hxF hN fr ist tmps s R hat => ?_⟩
     rw [step_call]
-    exact fun res hcal => h hxF hN fr ist tmps s R hat res hcal
+    exact fun w hw res hcal => h hxF hN fr ist tmps s R hat w hw res hcal
   | shift _ _ _ _ _ _ => cases hc
   | ext n d m src =>
     have hnm : (n = 1 ∧ m = 2) ∨ (n = 2 ∧ m = 1) := by simpa [Covered] using hc
@@ -203,6 +202,40 @@ theorem ins_ok (ok : Z.OK) (hT : FnLay Z E) (F : GFinal Z base sF) (hrt : RtOK Z
     exact ⟨hx, fun hxF hN => h hxF hN⟩
   | zero _ _ => cases hc
   | eff _ _ _ => cases hc
+
+end
+
+/-- **What the generator promises for the instruction `i`**, in the machine. -/
+def Ins (Z : ZCtx) (E : GEnv) (base : Nat) (sF : GS) (dt : Nat → Prop) (i : IR.Instr) (s0 : GS) (_ : Unit)
+    (s1 : GS) : Prop :=
+  GExt s0 s1 ∧
+    match i with
+    | .label l => s1.out = s0.out.push (.label (lname E l)) ∧ (l, s1.regs) ∈ s1.labelRegs ∧
+        (prevFalls E.fn.body l = true → (l, s0.regs) ∈ s1.jumps)
+    | _ => GExt s1 sF → Need Z E dt i → ∀ fr ist tmps s w, Rel Z E fr dt s0.regs ist tmps s →
+        At Z.addrs (base + s0.out.size) s → Z.wrel ist.world w →
+        MAfter Z E base fr dt i s1 ist tmps s w (IR.Sem.step Z.c ist tmps i)
+
+theorem Ins0.lift {Z : ZCtx} {E : GEnv} {base : Nat} {sF : GS} {dt : Nat → Prop} {i : IR.Instr} {s0 s1 : GS}
+    (ok : Z.OK) (hne : ∀ e a r, i ≠ .eff e a r) (h : Ins0 Z E base sF dt i s0 () s1) :
+    Ins Z E base sF dt i s0 () s1 := by
+  cases i <;> first
+    | exact h
+    | exact absurd rfl (hne _ _ _)
+    | exact ⟨h.1, fun hxF hN fr ist tmps s w R hat hw => After.lift ok hne (h.2 hxF hN fr ist tmps s R hat) w hw⟩
+
+section
+variable {Z : ZCtx} {E : GEnv} {base : Nat} {sF : GS} {dt : Nat → Prop}
+
+/-- **Every covered instruction.** -/
+theorem ins_ok (ok : Z.OK) (hT : FnLay Z E) (F : GFinal Z base sF) (hrt : RtOK Z)
+    (hdep : Z.rtK + 2 ≤ Z.depth E.fn.name) (i : IR.Instr) (hc : Covered i = true) (s0 : GS) :
+    wpg (genInstr i) E (Ins Z E base sF dt i s0) s0 := by
+  refine wpg_mono (ins0_ok (dt := dt) ok hT F hrt hdep i hc s0) ?_
+  intro _ s1 h
+  refine Ins0.lift ok (fun e a r h' => ?_) h
+  subst h'
+  cases hc
 
 end
 

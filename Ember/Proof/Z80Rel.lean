@@ -50,12 +50,22 @@ structure ZCtx where
   globals, their frames with the slots of the temporaries, the
   accumulator, the stack. -/
   wr : String → Nat → Prop
+  /-- The machine around the CPU: its state, what its I/O bus answers a
+  read with, and what a read or a write does to it. -/
+  W : Type
+  bus : W → UInt16 → UInt8
+  dev : W → IoEvent → W
+  /-- The machine's state stands for the IR's world: the input still to
+  come, the events so far. -/
+  wrel : Ember.Lang.World → W → Prop
 
 /-- The name `n` is the number `v` in the image. -/
 def ZCtx.sym (Z : ZCtx) (n : String) (v : Nat) : Prop := Z.a.labels.reverse.lookup n = some v
 
 structure ZCtx.OK (Z : ZCtx) : Prop where
   placed : Placed Z.items 0 Z.a Z.addrs
+  /-- An instruction that does no I/O leaves the machine as it is. -/
+  quiet : ∀ w, Z.dev w .none = w
   /-- The image was built for the layout. -/
   areas : ∀ ar ad, Z.c.layout.areaAddr ar = some ad → Z.sym (areaSym ar) ad
   /-- The shared bytes are in RAM, and not in the stack. -/
@@ -72,6 +82,48 @@ structure ZCtx.OK (Z : ZCtx) : Prop where
   apart : ∀ a an b bn, Z.use (a, an) → Z.dst (b, bn) →
     IR.slotsOverlap a an b bn = true ∨ Z.c.layout.addr a + an ≤ Z.c.layout.addr b ∨
       Z.c.layout.addr b + bn ≤ Z.c.layout.addr a
+
+/-! ## The CPU in its machine -/
+
+/-- One instruction: the bus answers from the machine's state, and what
+the instruction did on the bus changes it. -/
+def wstep (Z : ZCtx) (x : Cpu × Z.W) : Cpu × Z.W :=
+  (x.1.step (Z.bus x.2), Z.dev x.2 (x.1.step (Z.bus x.2)).io)
+
+def wrun (Z : ZCtx) : Nat → Cpu × Z.W → Cpu × Z.W
+  | 0, x => x
+  | n + 1, x => wrun Z n (wstep Z x)
+
+/-- The CPU and its machine get from `x` to `y`. -/
+def WSteps (Z : ZCtx) (x y : Cpu × Z.W) : Prop := ∃ n, wrun Z n x = y
+
+theorem WSteps.refl (Z : ZCtx) (x : Cpu × Z.W) : WSteps Z x x := ⟨0, rfl⟩
+
+theorem wrun_add (Z : ZCtx) : ∀ (n m : Nat) (x : Cpu × Z.W), wrun Z (n + m) x = wrun Z m (wrun Z n x)
+  | 0, m, x => by simp [wrun]
+  | n + 1, m, x => by
+    rw [show n + 1 + m = (n + m) + 1 by omega, wrun, wrun, wrun_add Z n m]
+
+theorem WSteps.trans {Z : ZCtx} {x y z : Cpu × Z.W} (h1 : WSteps Z x y) (h2 : WSteps Z y z) : WSteps Z x z := by
+  obtain ⟨n, rfl⟩ := h1
+  obtain ⟨m, rfl⟩ := h2
+  exact ⟨n + m, wrun_add Z n m x⟩
+
+theorem wrun_quiet {Z : ZCtx} (ok : Z.OK) (w : Z.W) : ∀ (n : Nat) (s : Cpu),
+    (∀ k, k < n → (run (Z.bus w) (k + 1) s).io = .none) → wrun Z n (s, w) = (run (Z.bus w) n s, w)
+  | 0, _, _ => rfl
+  | n + 1, s, hq => by
+    have h0 : (s.step (Z.bus w)).io = .none := hq 0 (by omega)
+    have : wstep Z (s, w) = (s.step (Z.bus w), w) := by
+      show (s.step (Z.bus w), Z.dev w (s.step (Z.bus w)).io) = _
+      rw [h0, ok.quiet]
+    rw [wrun, this, wrun_quiet ok w n (s.step (Z.bus w)) (fun k hk => hq (k + 1) (by omega))]
+    rfl
+
+/-- **Steps without I/O are steps of the machine that leave it as it is.** -/
+theorem Steps.lift {Z : ZCtx} (ok : Z.OK) {s s' : Cpu} (h : Steps s s') (w : Z.W) : WSteps Z (s, w) (s', w) := by
+  obtain ⟨n, hn, hq⟩ := h (Z.bus w)
+  exact ⟨n, by rw [wrun_quiet ok w n s hq, hn]⟩
 
 /-- The slot of the temporary `t`. -/
 def tmpAddr (Z : ZCtx) (E : GEnv) (t : Nat) : Nat :=

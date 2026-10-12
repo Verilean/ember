@@ -24,6 +24,10 @@ def stArg (c : IR.Ctx) (gf : IR.Fn) (st : IR.Sem.St) (v : Nat) : IR.Sem.St :=
   | some (n, sl) => { st with mem := IR.Sem.wr st.mem (c.layout.addr sl) n v }
   | none => st
 
+theorem stArg_world (c : IR.Ctx) (gf : IR.Fn) (st : IR.Sem.St) (v : Nat) : (stArg c gf st v).world = st.world := by
+  unfold stArg
+  cases gf.regParam <;> rfl
+
 /-- The CPU is at the entry of `gf`: the return address on the stack,
 the argument `v` in its register. -/
 structure Entry (Z : ZCtx) (gf : IR.Fn) (st : IR.Sem.St) (v : Nat) (s : Cpu) : Prop where
@@ -38,16 +42,17 @@ structure Entry (Z : ZCtx) (gf : IR.Fn) (st : IR.Sem.St) (v : Nat) (s : Cpu) : P
   arg : ∀ n sl, gf.regParam = some (n, sl) → ResIn n v s
 
 /-- What the function does from `s`, for the result the IR gives. -/
-def Outcome (Z : ZCtx) (f : IR.Fn) (fr : Fr) (s : Cpu) : IR.Sem.Res → Prop
-  | .ok r st' => ∃ s' v, Steps s s' ∧ IR.Instr.ret v ∈ f.body.toList ∧ RetSt Z f fr st' (v.map (·.1)) r s'
-  | .trap st' => ∃ s', Steps s s' ∧ Trapped Z st' s'
+def Outcome (Z : ZCtx) (f : IR.Fn) (fr : Fr) (s : Cpu) (w : Z.W) : IR.Sem.Res → Prop
+  | .ok r st' => ∃ s' w' v, WSteps Z (s, w) (s', w') ∧ Z.wrel st'.world w' ∧ IR.Instr.ret v ∈ f.body.toList ∧
+      RetSt Z f fr st' (v.map (·.1)) r s'
+  | .trap st' => ∃ s' w', WSteps Z (s, w) (s', w') ∧ Z.wrel st'.world w' ∧ Trapped Z st' s'
   | _ => True
 
 /-- The function `g`, entered with the IR in the state `st1` (its
 argument stored), has the outcome of the result `res`. -/
 def Callee (Z : ZCtx) (g : String) (st1 : IR.Sem.St) (res : IR.Sem.Res) : Prop :=
-  ∀ gf st v s, Z.c.prog.fn? g = some gf → st1 = stArg Z.c gf st v → Entry Z gf st v s →
-    Outcome Z gf ⟨s.sp, s.mem⟩ s res
+  ∀ gf st v s w, Z.c.prog.fn? g = some gf → st1 = stArg Z.c gf st v → Entry Z gf st v s → Z.wrel st.world w →
+    Outcome Z gf ⟨s.sp, s.mem⟩ s w res
 
 /-- What a call needs of the program. -/
 structure CallNeed (Z : ZCtx) (E : GEnv) (dt : Nat → Prop) (g : String) (ret : Option (Nat × Dst))
@@ -68,10 +73,10 @@ structure CallNeed (Z : ZCtx) (E : GEnv) (dt : Nat → Prop) (g : String) (ret :
 
 /-- What follows a call, for the result of the function called. -/
 def AfterCall (Z : ZCtx) (E : GEnv) (fr : Fr) (dt' : Nat → Prop) (regs' : Regs) (k' : Nat) (tmps : Array Nat)
-    (ret : Option (Nat × Dst)) (s : Cpu) : IR.Sem.Res → Prop
-  | .ok r st2 => ∃ s', Steps s s' ∧ At Z.addrs k' s' ∧
+    (ret : Option (Nat × Dst)) (s : Cpu) (w : Z.W) : IR.Sem.Res → Prop
+  | .ok r st2 => ∃ s' w', WSteps Z (s, w) (s', w') ∧ Z.wrel st2.world w' ∧ At Z.addrs k' s' ∧
       Rel Z E fr dt' regs' (IR.Sem.setRet Z.c st2 tmps ret r).1 (IR.Sem.setRet Z.c st2 tmps ret r).2 s'
-  | .trap st2 => ∃ s', Steps s s' ∧ Trapped Z st2 s'
+  | .trap st2 => ∃ s' w', WSteps Z (s, w) (s', w') ∧ Z.wrel st2.world w' ∧ Trapped Z st2 s'
   | _ => True
 
 /-- The temporaries assigned once the result of a call is. -/
@@ -103,11 +108,11 @@ theorem call_fn (ok : Z.OK) (hT : FnLay Z E) (F : GFinal Z base sF) {s0 s1 : GS}
     (hat : At Z.addrs (base + s0.out.size) s)
     (harg : ∀ n o, reg = some (n, o) → (n = 1 → s.a.toNat = IR.Sem.opd Z.c ist tmps n o) ∧
       (n = 2 → s.hl.toNat = IR.Sem.opd Z.c ist tmps n o))
-    (res : IR.Sem.Res) (hc : Callee Z g (callSt Z.c ist tmps g reg) res) :
+    (w : Z.W) (hw : Z.wrel ist.world w) (res : IR.Sem.Res) (hc : Callee Z g (callSt Z.c ist tmps g reg) res) :
     match res with
-    | .ok r st2 => ∃ s', Steps s s' ∧ At Z.addrs (base + s1.out.size) s' ∧ Rel Z E fr dt {} st2 tmps s' ∧
-        ∀ n d, ret = some (n, d) → ResIn n (r.getD 0) s'
-    | .trap st2 => ∃ s', Steps s s' ∧ Trapped Z st2 s'
+    | .ok r st2 => ∃ s' w', WSteps Z (s, w) (s', w') ∧ Z.wrel st2.world w' ∧ At Z.addrs (base + s1.out.size) s' ∧
+        Rel Z E fr dt {} st2 tmps s' ∧ ∀ n d, ret = some (n, d) → ResIn n (r.getD 0) s'
+    | .trap st2 => ∃ s' w', WSteps Z (s, w) (s', w') ∧ Z.wrel st2.world w' ∧ Trapped Z st2 s'
     | _ => True := by
   obtain ⟨gf, hgf⟩ := N.fn
   obtain ⟨j, hj⟩ := N.label
@@ -155,15 +160,15 @@ theorem call_fn (ok : Z.OK) (hT : FnLay Z E) (F : GFinal Z base sF) {s0 s1 : GS}
       exact R.mem x hxd
     · obtain ⟨h1, h2⟩ := hargv n sl h
       exact ⟨fun e => by rw [cs.a]; exact h1 e, fun e => by rw [hl_congr cs.h cs.l]; exact h2 e⟩
-  have hout := hc gf ist v c1 hgf hst1 ent
+  have hout := hc gf ist v c1 w hgf hst1 ent hw
   cases res with
   | fuel => trivial
   | bad => trivial
   | trap st2 =>
-    obtain ⟨s', st2', htr⟩ := hout
-    exact ⟨s', st1.trans st2', htr⟩
+    obtain ⟨s', w', st2', hw', htr⟩ := hout
+    exact ⟨s', w', (Steps.lift ok st1 w).trans st2', hw', htr⟩
   | ok r st2 =>
-    obtain ⟨s', rv, st2', hrv, hret⟩ := hout
+    obtain ⟨s', w', rv, st2', hw', hrv, hret⟩ := hout
     have hfr : ∀ x, x < Z.stackLo ∨ Z.stackHi ≤ x → ¬ Z.wr g x → s'.mem.get! x = s.mem.get! x := by
       intro x hx1 hx2
       rw [hret.out x (by rw [hname]; exact hx2)]
@@ -172,7 +177,7 @@ theorem call_fn (ok : Z.OK) (hT : FnLay Z E) (F : GFinal Z base sF) {s0 s1 : GS}
       intro x h1 h2
       rw [hret.stk x (by show c1.sp.toNat ≤ x; omega) h2]
       exact cs.mem x (by omega)
-    refine ⟨s', st1.trans st2', ?_, ?_, ?_⟩
+    refine ⟨s', w', (Steps.lift ok st1 w).trans st2', hw', ?_, ?_, ?_⟩
     · rw [ho, Array.size_push, ← Nat.add_assoc]
       refine hback s' ?_
       rw [hret.pc]
@@ -296,8 +301,9 @@ theorem call_ok (ok : Z.OK) (hT : FnLay Z E) (F : GFinal Z base sF) (g : String)
     (hret : ∀ n d, ret = some (n, d) → n = 1 ∨ n = 2) (s0 : GS) :
     wpg (genInstr (.call g ret reg)) E (fun _ s1 => GExt s0 s1 ∧
       (GExt s1 sF → CallNeed Z E dt g ret reg → ∀ fr ist tmps s, Rel Z E fr dt s0.regs ist tmps s →
-        At Z.addrs (base + s0.out.size) s → ∀ res, Callee Z g (callSt Z.c ist tmps g reg) res →
-        AfterCall Z E fr (dtRet dt ret) s1.regs (base + s1.out.size) tmps ret s res)) s0 := by
+        At Z.addrs (base + s0.out.size) s → ∀ w, Z.wrel ist.world w →
+        ∀ res, Callee Z g (callSt Z.c ist tmps g reg) res →
+        AfterCall Z E fr (dtRet dt ret) s1.regs (base + s1.out.size) tmps ret s w res)) s0 := by
   rw [genCall_eq]
   simp only [wpg_bind]
   refine wpg_mono (argLoad_ok (dt := dt) ok F reg hreg s0) ?_
@@ -307,21 +313,21 @@ theorem call_ok (ok : Z.OK) (hT : FnLay Z E) (F : GFinal Z base sF) (g : String)
   intro _ s2 ⟨hx2, hs⟩
   have hmid : GExt s1 { s1 with out := s1.out.push (.ins ⟨.call, [.imm (.sym (fnLabel g))]⟩), regs := {} } :=
     ⟨by simp, List.suffix_refl _, List.suffix_refl _⟩
-  refine ⟨hx1.trans (hmid.trans hx2), fun hx N fr ist tmps s R hat res hc => ?_⟩
+  refine ⟨hx1.trans (hmid.trans hx2), fun hx N fr ist tmps s R hat w hw res hc => ?_⟩
   obtain ⟨s', st1, at1, R1, harg⟩ := hl (hmid.trans (hx2.trans hx)) N.rd fr ist tmps s R hat
   have hcall := call_fn ok hT F (s0 := s1)
     (s1 := { s1 with out := s1.out.push (.ins ⟨.call, [.imm (.sym (fnLabel g))]⟩) })
-    ((GExt.regs _ _).trans (hx2.trans hx)) rfl N R1 at1 harg res hc
+    ((GExt.regs _ _).trans (hx2.trans hx)) rfl N R1 at1 harg w hw res hc
   cases res with
   | fuel => trivial
   | bad => trivial
   | trap st2 =>
-    obtain ⟨s'', st2', htr⟩ := hcall
-    exact ⟨s'', st1.trans st2', htr⟩
+    obtain ⟨s'', w', st2', hw', htr⟩ := hcall
+    exact ⟨s'', w', (Steps.lift ok st1 w).trans st2', hw', htr⟩
   | ok r st2 =>
-    obtain ⟨s'', st2', at2, R2, hres⟩ := hcall
+    obtain ⟨s'', w', st2', hw', at2, R2, hres⟩ := hcall
     obtain ⟨s3, st3, at3, R3⟩ := hs hx N.wr fr st2 tmps s'' r R2 at2 hres
-    exact ⟨s3, (st1.trans st2').trans st3, at3, R3⟩
+    exact ⟨s3, w', ((Steps.lift ok st1 w).trans st2').trans (Steps.lift ok st3 w'), hw', at3, R3⟩
 
 end
 
