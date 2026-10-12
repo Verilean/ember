@@ -100,6 +100,54 @@ theorem Img.of_wr {a : Assembled} {s s' : Cpu} (I : Img a 0 s) (hr : s'.ramStart
   rw [hm, wr_get_far _ _ _ _ _ hb (by omega)]
   exact I.bytes y b hy
 
+/-- **The `call` item**: the return address pushed, the CPU at the entry;
+whatever then gets to the return address is at the item after the call. -/
+theorem call_step (ok : Z.OK) {k : Nat} {name : String} {entry : Nat}
+    (hk : Z.items[k]? = some (.ins ⟨.call, [.imm (.sym name)]⟩)) (hsym : Z.sym name entry) (hent : entry < 65536)
+    {s : Cpu} (hat : At Z.addrs k s) (I : Img Z.a 0 s) (hh : s.halted = false)
+    (hrs : s.ramStart.toNat = Z.ramStart) (hsz : s.mem.size = 65536)
+    (hroom : Z.stackLo + 2 ≤ s.sp.toNat) (htop : s.sp.toNat ≤ Z.stackHi) :
+    ∃ s1, Steps Z.inp s s1 ∧ CallSt s s1 ∧ s1.pc.toNat = entry ∧ Img Z.a 0 s1 ∧ s1.halted = false ∧
+      s1.ramStart = s.ramStart ∧
+      ∀ s' : Cpu, s'.pc.toNat = IR.Sem.rd s1.mem (s.sp.toNat - 2) 2 → At Z.addrs (k + 1) s' := by
+  obtain ⟨ad, had, hpc⟩ := hat
+  have hstk := ok.stack
+  have hspl := s.sp.toNat_lt
+  have hnn : (Instr.immW (Z.a.env ad) ⟨.call, [.imm (.sym name)]⟩).toNat = entry :=
+    immW_toNat _ _ _ _ rfl (sym_val ad hsym) hent
+  obtain ⟨hst, _⟩ := step_item ok.placed I hk had hpc hh (inp := Z.inp)
+    (s' := (callTo (skip (op1 s) 2) (Instr.immW (Z.a.env ad) ⟨.call, [.imm (.sym name)]⟩)).tick 17) rfl
+  have hpm := push_mem (skip (op1 s) 2) (skip (op1 s) 2).pc (by simp only [zsim]; omega)
+    (by simp only [zsim]; omega)
+  simp only [zsim] at hpm
+  have hmem1 : ((callTo (skip (op1 s) 2) (Instr.immW (Z.a.env ad) ⟨.call, [.imm (.sym name)]⟩)).tick 17).mem =
+      IR.Sem.wr s.mem (s.sp.toNat - 2) 2 (s.pc + 1 + 2).toNat := by
+    simp only [callTo, zsim]
+    exact hpm
+  have hsp1 : ((callTo (skip (op1 s) 2) (Instr.immW (Z.a.env ad) ⟨.call, [.imm (.sym name)]⟩)).tick 17).sp =
+      s.sp - 2 := by
+    simp only [callTo, zsim]
+  have cs : CallSt s ((callTo (skip (op1 s) 2) (Instr.immW (Z.a.env ad) ⟨.call, [.imm (.sym name)]⟩)).tick 17) := by
+    refine ⟨?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, hsp1, fun x hx => ?_, ?_⟩
+    all_goals try (simp only [callTo, zsim]; done)
+    · rw [hmem1, wr_get_far _ _ _ _ _ (by omega) (by omega)]
+    · rw [hmem1, wr_size]
+  refine ⟨_, Steps.one hst, cs, by simp only [callTo, zsim]; exact hnn,
+    Img.of_wr I (by simp only [callTo, zsim]) hmem1 (by omega) (by omega),
+    by simp only [callTo, zsim]; exact hh, by simp only [callTo, zsim], fun s' hpc' => ?_⟩
+  obtain ⟨bs, hbs, hnext, hlt⟩ := ok.placed.next I hk had
+  have hlen := call_len hbs
+  refine ⟨ad + bs.length, hnext, ?_⟩
+  rw [hpc', hmem1, rd_wr _ _ _ _ (by rw [hsz]; omega) (by rw [hsz]; exact Nat.le_refl _)]
+  have hlt' := hlt (by intro e; rw [e] at hlen; cases hlen)
+  have : (s.pc + 1 + 2).toNat = ad + 3 := by
+    rw [UInt16.toNat_add, UInt16.toNat_add, hpc]
+    show ((ad + 1) % 65536 + 2) % 65536 = _
+    omega
+  rw [this, hlen]
+  show (ad + 3) % 65536 = _
+  omega
+
 /-- **A call**: the `call` item, the routine and its return. -/
 theorem call_rule (ok : Z.OK) {k : Nat} {name : String} {entry K : Nat} {P : Cpu → Prop} {Q : Cpu → Cpu → Prop}
     (hk : Z.items[k]? = some (.ins ⟨.call, [.imm (.sym name)]⟩)) (hsym : Z.sym name entry) (hent : entry < 65536)
