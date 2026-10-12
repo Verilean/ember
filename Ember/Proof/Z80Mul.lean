@@ -20,6 +20,11 @@ structure RtOK (Z : ZCtx) : Prop where
     (fun s s' => s'.a.toNat = (if s.e.toNat = 0 then 0 else s.a.toNat / s.e.toNat) ∧ s'.hl = s.hl)
   mod8 : RtPure Z "rt_mod8"
     (fun s s' => s'.a.toNat = (if s.e.toNat = 0 then 0 else s.a.toNat % s.e.toNat) ∧ s'.hl = s.hl)
+  mul16 : RtPure Z "rt_mul16" (fun s s' => s'.hl.toNat = s.hl.toNat * s.de.toNat % 65536)
+  div16 : RtPure Z "rt_div16"
+    (fun s s' => s'.hl.toNat = (if s.de.toNat = 0 then 0 else s.hl.toNat / s.de.toNat))
+  mod16 : RtPure Z "rt_mod16"
+    (fun s s' => s'.hl.toNat = (if s.de.toNat = 0 then 0 else s.hl.toNat % s.de.toNat))
 
 section
 variable {Z : ZCtx} {E : GEnv} {base : Nat} {sF : GS} {dt : Nat → Prop} {fr : Fr}

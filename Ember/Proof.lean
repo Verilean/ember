@@ -75,6 +75,9 @@ import Ember.Proof.Z80Instr
 import Ember.Proof.Z80Call
 import Ember.Proof.Z80Alu
 import Ember.Proof.Z80Mul
+import Ember.Proof.Z80Bits
+import Ember.Proof.Z80Rep
+import Ember.Proof.Z80Bin16
 
 /-!
 # Ember.Proof — proofs (plan M5): about the reference stack (P1), and that Ember code refines it (P2)
