@@ -24,9 +24,10 @@ the shape it models and gives up (`none`) on anything else:
   (only `di` may come before it), and is otherwise moved by `push`,
   `pop`, `call` and `ret` alone, balanced within a routine;
 * an image that enables interrupts has `rt_isr` (and a `jp rt_isr`, the
-  vector of interrupt mode 1 — where it is, is not checked), and in what `rt_isr`
-  can reach an `ei` is the instruction before the final `ret`/`reti` —
-  so the routine cannot be entered again before it has returned;
+  vector of interrupt mode 1 — where it is, is not checked); in `rt_isr`
+  itself an `ei` is the instruction before its own unconditional
+  `ret`/`reti`, and no routine it calls, directly or not, has an `ei` —
+  so the routine is not entered again before it has returned;
 * non-maskable interrupts are not considered.
 -/
 
@@ -124,8 +125,12 @@ structure Bound where
 
 def Bound.total (b : Bound) : Nat := b.main + b.interrupt
 
-/-- The items a routine can reach, through jumps and calls (`none`: a target that is not a label). -/
-def reach (c : Ctx) (name : String) : Option (List Nat) := Id.run do
+/-- The items a routine can reach through jumps — and, with `calls`,
+through calls into the routines it calls (`none`: a target that is not a
+label).  Without `calls` the items are those of the routine itself: a
+jump stays in it (a tail jump is its continuation), a call returns to
+the item after. -/
+def reach (c : Ctx) (name : String) (calls : Bool) : Option (List Nat) := Id.run do
   let some start := c.labels[name]? | return none
   let mut work : List Nat := [start]
   let mut seen : Std.HashMap Nat Unit := {}
@@ -146,7 +151,7 @@ def reach (c : Ctx) (name : String) : Option (List Nat) := Id.run do
         match (target i).bind (c.labels[·]?) with
         | none => ok := false
         | some j =>
-          work := j :: work
+          if i.op != .call || calls then work := j :: work
           if isCond i || i.op == .djnz || i.op == .call then work := (k + 1) :: work
       | .rst => ok := false
       | _ => work := (k + 1) :: work
@@ -155,21 +160,32 @@ def reach (c : Ctx) (name : String) : Option (List Nat) := Id.run do
   return if ok && steps < 200000 then some (seen.toList.map (·.1)) else none
 
 /-- An interrupt routine that cannot be entered again before it
-returns: in what it reaches, `ei` is the instruction before an
-unconditional `ret`/`reti` (the interrupt is let in after the instruction
-that follows `ei`). -/
+returns.  Interrupts are let in after the instruction that follows `ei`;
+so in the routine itself (not in what it calls) an `ei` is the
+instruction before an unconditional `ret`/`reti` — its own return — and
+nothing it calls, directly or not, has an `ei`: a `ret` after an `ei` in
+a routine called would return into the interrupt routine with
+interrupts on.  (`retn` is not accepted as that return.) -/
 def isrOnce (c : Ctx) : Bool :=
-  match reach c "rt_isr" with
+  match reach c "rt_isr" false with
   | none => false
-  | some ks =>
-    ks.all fun k =>
+  | some body =>
+    let isEi (k : Nat) : Bool := match c.items[k]? with | some (.ins i) => i.op == .ei | _ => false
+    -- the routine itself
+    (body.all fun k =>
+      !isEi k ||
+        (match c.items[k + 1]? with
+         | some (.ins j) => (j.op == .ret || j.op == .reti) && j.args.isEmpty
+         | _ => false)) &&
+    -- what it calls
+    (body.all fun k =>
       match c.items[k]? with
       | some (.ins i) =>
-        i.op != .ei ||
-          (match c.items[k + 1]? with
-           | some (.ins j) => (j.op == .ret || j.op == .reti) && j.args.isEmpty
-           | _ => false)
-      | _ => true
+        i.op != .call ||
+          (match (target i).bind fun l => reach c l true with
+           | some ks => ks.all fun j => !isEi j
+           | none => false)
+      | _ => true)
 
 /-- Where the program starts with its stack set: the item after
 `rt_start: [di;] ld sp,0`. -/

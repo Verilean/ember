@@ -247,8 +247,11 @@ configuration of the stack (the globals, the functions, the profile):
   own-size` fails when the bound exceeds the room, and when the image is
   not of the shape the analysis models (the stack pointer set once to
   the top of memory, jumps and calls to labels, an interrupt routine
-  that cannot be entered again) — it then gives no number rather than a
-  wrong one.  That bound is an analysis, not a theorem; proved so far is only that the routines of the
+  that enables interrupts only as the instruction before its own return
+  and calls nothing that enables them) — outside that shape it gives no
+  number.  Inside it the number is what the analysis computes: the
+  shape was drawn to exclude the ways found so far of getting it wrong,
+  which is not a proof that there are no others.  That bound is an analysis, not a theorem; proved so far is only that the routines of the
   loopback image for the test harness use no stack at all (§4, M7.3).
 - **Time is not fixed.**  How long a call of `main` takes depends on the
   input: the loops are bounded (`for`, `loop (max := n)`), so each call
