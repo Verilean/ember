@@ -191,14 +191,18 @@ The Z80 back end (M7, begun) — `Ember.Z80.IR.Sem` is the semantics of its IR:
 * `Z80Flags`, `Z80Cmp`, `Z80Jump`, `Z80CmpI`, `Z80Ctl`: flags after a comparison, jumps to labels, `cmp`,
   `br`, `jmp` and labels — what the registers hold across a jump is checked by `Codegen.jumpsOk`
   (`arrive`);
-* `Z80Ret`, `Z80CallFn`, `Z80Ins`: `ret`, `trap`, `call` of a function of the program, and every covered
-  instruction in one statement (`ins_ok`);
+* `Z80Ext`, `Z80Addr`, `Z80Mem`: `ext`; an address into `HL` with its index check (`genAddr_ok`); `lea`,
+  `load`, `store`;
+* `Z80Ret`, `Z80CallFn`, `Z80After`, `Z80Eff`, `Z80Ins`: `ret`, `trap`, `call` of a function of the
+  program, effects through the runtime's routines (`RtEff`), and every covered instruction in one
+  statement (`ins_ok`), in the machine around the CPU (`WSteps`, `ZCtx.wrel`);
 * `Z80Fn`, `Z80FnGen`: **a function's code has the outcome of the IR's function** — it returns as
-  `IR.Sem.callF` does, or reaches `rt_trap` (`exec_ok`, `fn_ok`, by induction on the fuel; `genFn_ok`).
+  `IR.Sem.callF` does, the machine standing for the world, or reaches `rt_trap` (`exec_ok`, `fn_ok`, by
+  induction on the fuel; `genFn_ok`).
 
-By-reference parameters and `inlineCalls` are outside M7.1; of `IR → Z80` (M7.3) not proved: `ext`,
-`shift`, `load`/`store`/`lea`, `zero`, effects, values wider than two bytes; the checks for what the
-theorems assume of a program (`FnStatic`); the runtime routines; the passes on the assembly.
+By-reference parameters and `inlineCalls` are outside M7.1; of `IR → Z80` (M7.3) not proved: shifts, values
+wider than two bytes, `zero`, `note` and the MMIO effects; the checks for what the theorems assume of a
+program (`FnStatic`); the runtime routines; the passes on the assembly.
 
 Every statement is about the definitions of `Ember.Spec` as they are;
 `Ember/Proof/README.md` lists the theorems, the hypotheses they need and

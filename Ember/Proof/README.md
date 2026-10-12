@@ -725,7 +725,9 @@ footprint (`ZCtx.wr`) has changed.
 |---|---|
 | `loadA_ok`, `loadHL_ok`, `storeA_ok`, `storeHL_ok` | an operand into `A`/`HL`, and those to a destination — a store the generator leaves out included |
 | `mov1_ok` … `cmp_ok`, `br_ok`, `jmp_ok`, `label_ok`, `ret_ok`, `trap_ok`, `call_ok` | the code of each instruction, for values of one and two bytes |
-| **`ins_ok`** (`Z80Ins.lean`) | for a covered instruction and whatever `IR.Sem.step` says it does: the code reaches the next item with the states agreeing after it; or the label's item; or calls the function and stores its result; or returns (`RetSt`); or reaches `rt_trap` |
+| `genAddr_ok`, `lea_ok`, `load1_ok`, `load2_ok`, `store1_ok`, `store2_ok` | an address into `HL` — static root, an index of one or two bytes checked in line or by `rt_bound` and scaled by a power of two — and memory through it; a failed check gets to `rt_trap`, as the IR's instruction traps |
+| `eff_ok` (`Z80Eff.lean`) | an effect's code calls the effect's routine with its argument in `A`: afterwards the machine stands for the world `IR.Sem.effect` gives (`out.byte`, `out.end`, `drop`, `input.next`, `ring.pop`) |
+| **`ins_ok`** (`Z80Ins.lean`) | for a covered instruction and whatever `IR.Sem.step` says it does: the code reaches the next item with the states agreeing after it; or the label's item; or calls the function and stores its result; or returns (`RetSt`); or reaches `rt_trap` — in the machine around the CPU, which stands for the IR's world before and after (`MAfter`).  An instruction without effects is proved to do no I/O whatever the bus would answer (`Steps`, `After`) and lifted (`After.lift`) |
 | `genBody_ok`, `Chain.fns` (`Z80Fn.lean`) | the generator's states before and after every instruction of a body, each with the promise of `ins_ok` |
 | **`exec_ok`**, **`fn_ok`** | from an instruction of a body with the states agreeing — and so from a function's entry (`Entry`) — the code has the `Outcome` of `IR.Sem.exec`/`callF`: it returns with the result in `A`/`HL`, the shared bytes as the IR left them and only the footprint written, or it is at `rt_trap`; by induction on the fuel, the functions called included |
 | `genFn_ok` (`Z80FnGen.lean`) | the run of `genFnCode` whose items are in the image gives what `fn_ok` needs of a function (`FnGen`) |
@@ -735,8 +737,16 @@ generated): `jumpsOk` — what the generator assumes the registers hold
 after a label is what they held at every jump to it and at the fall
 into it (the generator records both; `arrive`).
 
+**The machine.**  `ZCtx` has a machine around the CPU: a state `W`,
+what its bus answers a read with (`bus`), what a read or a write does to
+it (`dev`), and `wrel` — the machine's state stands for the IR's world
+(the input still to come, the events so far).  Nothing is assumed of
+them but that an instruction without I/O leaves the machine as it is.
+
 **Assumed for now:** `RtOK` — the specifications of the runtime's
-routines used so far (`rt_mul8`, `rt_div8`, …, `rt_not16`, `rt_neg16`);
+routines used so far (`rt_mul8`, `rt_div8`, …, `rt_not16`, `rt_neg16`,
+`rt_bound`, and the routine of each covered effect: it returns having
+done to the machine what the effect does to the world);
 `FnStatic` — what a function needs of the program and the layout: its
 operands can be read and its destinations written where the layout puts
 them, a temporary is assigned before it is read with no label between
@@ -744,10 +754,11 @@ them, a temporary is assigned before it is read with no label between
 that does not go on, labels are unique, the stack has room.  Checkers
 for these are to come, as `irOkB` for the lowering.
 
-**Not covered yet:** `ext`, `shift`, `load`/`store`/`lea` (addresses
-and indices), `zero`, the effects (the relation has no world yet), and
-all values wider than two bytes (`Covered`); the runtime routines
-themselves; `genProg` and the whole image; the passes on the assembly
+**Not covered yet:** `shift`, `zero`, `note` and the MMIO effects, an
+address through a pointer (by-reference parameters), and all values
+wider than two bytes (`Covered`: 939 of the 1073 instructions of the
+SLIP build's IR are covered, and all 79 of the loopback program's); the
+runtime routines themselves; `genProg` and the whole image; the passes on the assembly
 (`peephole`, `sweep`, `packHigh`, `relax`).
 
 ### Not proven
