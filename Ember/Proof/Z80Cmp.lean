@@ -93,6 +93,68 @@ theorem cpM_flags (op : Cmp) (s : Cpu) : FlagsOf op s.a.toNat (s.rd s.hl).toNat 
   simp only [zsim] at this
   exact this
 
+/-! ## `HL` against zero and against a constant, in `A` -/
+
+/-- `inc a` as the model runs it. -/
+def incA (s : Cpu) : Cpu :=
+  (((op1 s).inc8 ((op1 s).reg .hl 7)).2.setReg .hl 7 ((op1 s).inc8 ((op1 s).reg .hl 7)).1).tick 4
+
+theorem does_inc_a : Does ⟨.inc, [.a]⟩ incA := ⟨fun _ _ _ => rfl, rfl, fun s => by simp only [Sys, incA, zsim, and_self]⟩
+
+theorem byte_val (v : Nat) (hv : v < 256) : (byteOf (Int.ofNat (v % 256))).toNat = v := by
+  rw [byteOf_toNat]
+  show (((v % 256 : Nat) : Int) % 256).toNat = v
+  omega
+
+/-- `ld a,h; or l`: `Z` when `HL` is 0. -/
+theorem zt16 (s : Cpu) : (aluR 6 5 (ldAR 4 s)).flag FZ = (s.hl.toNat == 0) := by
+  simp only [aluR, ldAR, zsim]
+  rw [or_z]
+  simp only [zsim]
+  rw [u8_beq, UInt8.toNat_or, hl_toNat, Bool.eq_iff_iff]
+  simp only [beq_iff_eq]
+  show s.h.toNat ||| s.l.toNat = 0 ↔ _
+  rw [or_eq_zero]
+  omega
+
+/-- `ld a,h; and l; inc a`: `Z` when `HL` is 65535. -/
+theorem eqFFFF (s : Cpu) : (incA (aluR 4 5 (ldAR 4 s))).flag FZ = (s.hl.toNat == 65535) := by
+  simp only [incA, aluR, ldAR, zsim]
+  rw [inc8_z]
+  rw [u8_beq, UInt8.toNat_add, UInt8.toNat_and, hl_toNat, Bool.eq_iff_iff]
+  simp only [beq_iff_eq]
+  have hh := s.h.toNat_lt
+  have hl := s.l.toNat_lt
+  have ha : s.h.toNat &&& s.l.toNat < 256 := Nat.lt_of_le_of_lt Nat.and_le_left hh
+  have key := and_eq_255 hh hl
+  show ((s.h.toNat &&& s.l.toNat) + 1) % 256 = 0 ↔ _
+  omega
+
+/-- `ld a,l; xor v; or h`: `Z` when `HL` is `v`, a byte. -/
+theorem eqLow (v : Nat) (hv : v < 256) (s : Cpu) : (aluR 6 4 (aluN 5 v (ldAR 5 s))).flag FZ = (s.hl.toNat == v) := by
+  simp only [aluR, aluN, ldAR, zsim]
+  rw [or_z]
+  simp only [zsim]
+  rw [u8_beq, UInt8.toNat_or, UInt8.toNat_xor, byte_val v hv, hl_toNat, Bool.eq_iff_iff]
+  simp only [beq_iff_eq]
+  show (s.l.toNat ^^^ v) ||| s.h.toNat = 0 ↔ _
+  rw [or_eq_zero, xor_eq_zero]
+  have hl := s.l.toNat_lt
+  omega
+
+/-- `ld a,h; xor v; or l`: `Z` when `HL` is `v·256`. -/
+theorem eqHigh (v : Nat) (hv : v < 256) (s : Cpu) :
+    (aluR 6 5 (aluN 5 v (ldAR 4 s))).flag FZ = (s.hl.toNat == v * 256) := by
+  simp only [aluR, aluN, ldAR, zsim]
+  rw [or_z]
+  simp only [zsim]
+  rw [u8_beq, UInt8.toNat_or, UInt8.toNat_xor, byte_val v hv, hl_toNat, Bool.eq_iff_iff]
+  simp only [beq_iff_eq]
+  show (s.h.toNat ^^^ v) ||| s.l.toNat = 0 ↔ _
+  rw [or_eq_zero, xor_eq_zero]
+  have hl := s.l.toNat_lt
+  omega
+
 section
 variable {Z : ZCtx} {E : GEnv} {base : Nat} {sF : GS} {dt : Nat → Prop} {fr : Fr}
 
@@ -267,6 +329,285 @@ theorem flags8_ok (ok : Z.OK) (F : GFinal Z base sF) (op : Cmp) (a b : Opd) (s0 
       obtain ⟨s1', st1, at1, R1, _, hA1⟩ := hl (hx2.trans hx) fr ist tmps s hra R hat0
       obtain ⟨s2', st2, at2, R2, hf⟩ := hcp hx fr ist tmps s1' hrb R1 at1 hA1
       exact ⟨s2', st1.trans st2, at2, R2, hf⟩
+
+/-! ## Two bytes -/
+
+theorem eqConst_spec {op : Cmp} {b : Opd} {v : Nat} (h : eqConst op b = some v) :
+    ∃ v0, b = .const v0 ∧ v = v0 % 65536 ∧ (op = .eq ∨ op = .ne) ∧ (v = 65535 ∨ v % 256 = 0 ∨ v / 256 = 0) := by
+  cases b with
+  | slot sl => cases h
+  | tmp t => cases h
+  | const v0 =>
+    simp only [eqConst] at h
+    split at h
+    · rename_i hc
+      cases h
+      simp only [Bool.and_eq_true, Bool.or_eq_true, beq_iff_eq] at hc
+      exact ⟨v0, rfl, rfl, hc.1.imp cmp_beq cmp_beq, by rcases hc.2 with (h | h) | h <;> simp [h]⟩
+    · cases h
+
+/-- `Z` exactly when `HL` is the constant; `HL` is kept. -/
+theorem eqHL_ok (ok : Z.OK) (F : GFinal Z base sF) (v : Nat) (hv : v < 65536)
+    (hk : v = 65535 ∨ v % 256 = 0 ∨ v / 256 = 0) (s0 : GS) :
+    wpg (eqHL v) E (fun _ s1 => GExt s0 s1 ∧ s1.regs = s0.regs ∧
+      (GExt s1 sF → ∀ s, Mach Z s → At Z.addrs (base + s0.out.size) s →
+        ∃ s', Steps Z.inp s s' ∧ At Z.addrs (base + s1.out.size) s' ∧ Sys s s' ∧ s'.hl = s.hl ∧
+          s'.flag FZ = (s.hl.toNat == v))) s0 := by
+  unfold eqHL
+  by_cases h1 : (v == 65535) = true
+  · simp only [h1, if_true, wpg_bind, wpg_ins]
+    have hv1 : v = 65535 := by simpa using h1
+    subst hv1
+    refine ⟨pushL_ext [⟨.ld, [.a, .h]⟩, ⟨.and, [.l]⟩, ⟨.inc, [.a]⟩] s0, trivial, fun hx s M hat => ?_⟩
+    obtain ⟨st, at', _, hS⟩ := run_list ok F
+      [(⟨.ld, [.a, .h]⟩, ldAR 4), (⟨.and, [.l]⟩, aluR 4 5), (⟨.inc, [.a]⟩, incA)]
+      (by
+        intro p hp
+        simp only [List.mem_cons, List.not_mem_nil, or_false] at hp
+        rcases hp with rfl | rfl | rfl
+        · exact does_ld_a_h
+        · exact does_alu_reg (op := .and) rfl rfl
+        · exact does_inc_a) s0 s hx M hat
+    exact ⟨_, st, at', hS, by simp only [List.map, runL, incA, aluR, ldAR, zsim], eqFFFF s⟩
+  · simp only [h1, Bool.false_eq_true, if_false]
+    by_cases h2 : (v / 256 == 0) = true
+    · simp only [h2, if_true, wpg_bind, wpg_ins]
+      have hv2 : v < 256 := by
+        have : v / 256 = 0 := by simpa using h2
+        omega
+      refine ⟨pushL_ext [⟨.ld, [.a, .l]⟩, ⟨.xor, [n8 v]⟩, ⟨.or, [.h]⟩] s0, trivial, fun hx s M hat => ?_⟩
+      obtain ⟨st, at', _, hS⟩ := run_list ok F
+        [(⟨.ld, [.a, .l]⟩, ldAR 5), (⟨.xor, [n8 v]⟩, aluN 5 v), (⟨.or, [.h]⟩, aluR 6 4)]
+        (by
+          intro p hp
+          simp only [List.mem_cons, List.not_mem_nil, or_false] at hp
+          rcases hp with rfl | rfl | rfl
+          · exact does_ld_a_l
+          · exact does_alu_imm (op := .xor) rfl v
+          · exact does_alu_reg (op := .or) rfl rfl) s0 s hx M hat
+      exact ⟨_, st, at', hS, by simp only [List.map, runL, aluN, aluR, ldAR, zsim], eqLow v hv2 s⟩
+    · simp only [h2, Bool.false_eq_true, if_false, wpg_bind, wpg_ins]
+      have hv3 : v % 256 = 0 := by
+        have n1 : v ≠ 65535 := by simpa using h1
+        have n2 : v / 256 ≠ 0 := by simpa using h2
+        rcases hk with h | h | h
+        · exact absurd h n1
+        · exact h
+        · exact absurd h n2
+      refine ⟨pushL_ext [⟨.ld, [.a, .h]⟩, ⟨.xor, [n8 (v / 256)]⟩, ⟨.or, [.l]⟩] s0, trivial, fun hx s M hat => ?_⟩
+      obtain ⟨st, at', _, hS⟩ := run_list ok F
+        [(⟨.ld, [.a, .h]⟩, ldAR 4), (⟨.xor, [n8 (v / 256)]⟩, aluN 5 (v / 256)), (⟨.or, [.l]⟩, aluR 6 5)]
+        (by
+          intro p hp
+          simp only [List.mem_cons, List.not_mem_nil, or_false] at hp
+          rcases hp with rfl | rfl | rfl
+          · exact does_ld_a_h
+          · exact does_alu_imm (op := .xor) rfl (v / 256)
+          · exact does_alu_reg (op := .or) rfl rfl) s0 s hx M hat
+      refine ⟨_, st, at', hS, by simp only [List.map, runL, aluN, aluR, ldAR, zsim], ?_⟩
+      have := eqHigh (v / 256) (by omega) s
+      rw [show v / 256 * 256 = v by omega] at this
+      exact this
+
+theorem u16_beq (a b : UInt16) : (a == b) = (a.toNat == b.toNat) := by
+  rw [Bool.eq_iff_iff]
+  simp only [beq_iff_eq]
+  exact ⟨fun h => by rw [h], fun h => UInt16.toNat_inj.mp h⟩
+
+/-- `sbc hl,de` as the model runs it. -/
+def sbcDE (s : Cpu) : Cpu := ((op2 s).sbc16 ((op2 s).rp .hl 1)).tick 15
+
+theorem does_sbc_de : Does ⟨.sbc, [.hl, .de]⟩ sbcDE :=
+  ⟨fun _ _ _ => rfl, rfl, fun s => by simp only [Sys, sbcDE, zsim, and_self]⟩
+
+theorem does_add_de : Does ⟨.add, [.hl, .de]⟩ addHLDE :=
+  ⟨fun _ _ _ => rfl, rfl, fun s => by simp only [Sys, addHLDE, zsim, and_self]⟩
+
+/-- `or a; sbc hl,de`: the flags compare `HL` and `DE`. -/
+theorem sub_flags (s : Cpu) :
+    (sbcDE (orA s)).flag FZ = (s.hl.toNat == s.de.toNat) ∧
+      (sbcDE (orA s)).flag FC = decide (s.hl.toNat < s.de.toNat) ∧
+      (sbcDE (orA s)).hl.toNat = (s.hl.toNat + 65536 - s.de.toNat) % 65536 ∧
+      (sbcDE (orA s)).de = s.de ∧ (sbcDE (orA s)).a = s.a := by
+  have hc : (op2 (orA s)).flag FC = false := by
+    simp only [orA, zsim]
+    exact alu6_flag _ _
+  have hhl : (op2 (orA s)).hl = s.hl := by simp only [orA, zsim]
+  have hde : (orA s).de = s.de := by simp only [orA, zsim]
+  refine ⟨?_, ?_, ?_, ?_, ?_⟩
+  · simp only [sbcDE, zsim]
+    rw [sbc16_fz _ _ hc, hhl, hde, u16_beq]
+  · simp only [sbcDE, zsim]
+    rw [sbc16_fc _ _ hc, hhl, hde]
+  · simp only [sbcDE, zsim]
+    rw [sbc16_val _ _ hc, hhl, hde]
+  · simp only [sbcDE, orA, zsim]
+  · simp only [sbcDE, zsim]
+    exact orA_a s
+
+/-- Adding the subtrahend back restores `HL` and leaves `Z` and `C`. -/
+theorem addback (s : Cpu) (x y : Nat) (hx : x < 65536) (hy : y < 65536)
+    (hhl : s.hl.toNat = (x + 65536 - y) % 65536) (hde : s.de.toNat = y) :
+    (addHLDE s).flag FZ = s.flag FZ ∧ (addHLDE s).flag FC = decide (x < y) ∧ (addHLDE s).hl.toNat = x := by
+  refine ⟨?_, ?_, ?_⟩
+  · simp only [addHLDE, zsim]
+    exact add16_fz _ _ _
+  · simp only [addHLDE, zsim]
+    rw [add16_fc, hhl, hde]
+    by_cases h : x < y <;> simp [h] <;> omega
+  · rw [addHLDE_hl, hhl, hde]
+    omega
+
+theorem sub16_ok (ok : Z.OK) (F : GFinal Z base sF) (op : Cmp) (a b : Opd) (s0 : GS) :
+    wpg (sub16 a b) E (Flags Z E base sF dt op 2 a b True s0) s0 := by
+  -- the subtraction, from `HL` and `DE` holding the operands
+  have fin : ∀ (s1 : GS), GExt s0 s1 →
+      (∀ s2, GExt s1 s2 → GExt s2 sF → ∀ fr ist tmps s, Rd Z E dt 2 a → Rd Z E dt 2 b →
+        Rel Z E fr dt s0.regs ist tmps s → At Z.addrs (base + s0.out.size) s →
+        ∃ s', Steps Z.inp s s' ∧ At Z.addrs (base + s1.out.size) s' ∧ Rel Z E fr dt s1.regs ist tmps s' ∧
+          s'.hl.toNat = IR.Sem.opd Z.c ist tmps 2 a ∧ s'.de.toNat = IR.Sem.opd Z.c ist tmps 2 b) →
+      wpg (do
+        ins .or [.a]
+        ins .sbc [.hl, .de]
+        let e ← read
+        if readAgain e a then ins .add [.hl, .de] else setRegs fun r => { r with hl := [] }) E
+        (Flags Z E base sF dt op 2 a b True s0) s1 := by
+    intro s1 hx1 hpre
+    simp only [wpg_bind, wpg_ins, wpg_read]
+    by_cases hag : readAgain E a = true
+    · simp only [hag, if_true, wpg_ins]
+      refine ⟨hx1.trans (pushL_ext [⟨.or, [.a]⟩, ⟨.sbc, [.hl, .de]⟩, ⟨.add, [.hl, .de]⟩] s1),
+        fun hx _ fr ist tmps s hra hrb R hat => ?_⟩
+      obtain ⟨s', st1, at1, R1, hHL, hDE⟩ := hpre _ (pushL_ext [⟨.or, [.a]⟩, ⟨.sbc, [.hl, .de]⟩, ⟨.add, [.hl, .de]⟩] s1)
+        hx fr ist tmps s hra hrb R hat
+      obtain ⟨st2, at2, _, hS⟩ := run_list ok F
+        [(⟨.or, [.a]⟩, orA), (⟨.sbc, [.hl, .de]⟩, sbcDE), (⟨.add, [.hl, .de]⟩, addHLDE)]
+        (by
+          intro p hp
+          simp only [List.mem_cons, List.not_mem_nil, or_false] at hp
+          rcases hp with rfl | rfl | rfl
+          · exact does_or_a
+          · exact does_sbc_de
+          · exact does_add_de) s1 s' hx R1.mach at1
+      obtain ⟨fz, fc, hv, hde, ha⟩ := sub_flags s'
+      obtain ⟨bz, bc, bhl⟩ := addback (sbcDE (orA s')) s'.hl.toNat s'.de.toNat s'.hl.toNat_lt s'.de.toNat_lt hv
+        (by rw [hde])
+      have hhl' : (addHLDE (sbcDE (orA s'))).hl = s'.hl := UInt16.toNat_inj.mp bhl
+      have ha' : (addHLDE (sbcDE (orA s'))).a = s'.a := by
+        rw [← ha]
+        simp only [addHLDE, zsim]
+      refine ⟨_, st1.trans st2, at2, R1.keep hS ha' hhl', FlagsOf.both ?_ ?_⟩
+      · show (addHLDE (sbcDE (orA s'))).flag FZ = _
+        rw [bz, fz, hHL, hDE]
+      · show (addHLDE (sbcDE (orA s'))).flag FC = _
+        rw [bc, hHL, hDE]
+    · simp only [hag, Bool.false_eq_true, if_false, wpg_setRegs]
+      refine ⟨hx1.trans ((pushL_ext [⟨.or, [.a]⟩, ⟨.sbc, [.hl, .de]⟩] s1).trans (GExt.regs _ _)),
+        fun hx _ fr ist tmps s hra hrb R hat => ?_⟩
+      obtain ⟨s', st1, at1, R1, hHL, hDE⟩ := hpre _
+        ((pushL_ext [⟨.or, [.a]⟩, ⟨.sbc, [.hl, .de]⟩] s1).trans (GExt.regs _ _)) hx fr ist tmps s hra hrb R hat
+      obtain ⟨st2, at2, _, hS⟩ := run_list ok F
+        [(⟨.or, [.a]⟩, orA), (⟨.sbc, [.hl, .de]⟩, sbcDE)]
+        (by
+          intro p hp
+          simp only [List.mem_cons, List.not_mem_nil, or_false] at hp
+          rcases hp with rfl | rfl
+          · exact does_or_a
+          · exact does_sbc_de) s1 s' ((GExt.regs _ _).trans hx) R1.mach at1
+      obtain ⟨fz, fc, _, _, ha⟩ := sub_flags s'
+      refine ⟨_, st1.trans st2, at2, R1.hl_gone hS rfl (Or.inr ⟨rfl, ha⟩) (fun n o h => h), FlagsOf.both ?_ ?_⟩
+      · show (sbcDE (orA s')).flag FZ = _
+        rw [fz, hHL, hDE]
+      · show (sbcDE (orA s')).flag FC = _
+        rw [fc, hHL, hDE]
+  unfold sub16
+  simp only [wpg_bind, wpg_get]
+  by_cases hat : (s0.regs.hl.contains b && a != b) = true
+  · simp only [hat, if_true, wpg_bind, wpg_ins, wpg_setRegs]
+    have hbmem : b ∈ s0.regs.hl := by
+      simp only [Bool.and_eq_true] at hat
+      simpa using hat.1
+    refine wpg_mono (loadHL_ok (dt := dt) ok F a _) ?_
+    intro _ s1 ⟨hx1, _, _, hl⟩
+    refine fin s1 (((GExt.push _ _).trans (GExt.regs _ _)).trans hx1) (fun s2 hx2 hxF fr ist tmps s hra hrb R hat0 => ?_)
+    obtain ⟨st1, at1, M1⟩ := run_reg ok F (s0 := s0) (s1 := { s0 with out := s0.out.push (.ins ⟨.ex, [.de, .hl]⟩) })
+      (((GExt.regs _ _).trans hx1).trans (hx2.trans hxF)) rfl R.mach hat0 (exDEHL s) (fun ad _ => rfl) rfl
+      (by simp only [Sys, exDEHL, zsim, and_self])
+    have R1 : Rel Z E fr dt { s0.regs with hl := [] } ist tmps (exDEHL s) :=
+      R.hl_gone (by simp only [Sys, exDEHL, zsim, and_self]) rfl (Or.inr ⟨rfl, by simp only [exDEHL, zsim]⟩)
+        (fun n o h => h)
+    obtain ⟨s2', st2, at2, R2, hk2, hHL⟩ := hl (hx2.trans hxF) fr ist tmps _ hra R1 at1
+    refine ⟨s2', st1.trans st2, at2, R2, hHL, ?_⟩
+    rw [de_congr hk2.2.2.2.2.1 hk2.2.2.2.2.2.1, ← R.rhl b hbmem hrb.own, de_toNat, hl_toNat]
+    simp only [exDEHL, zsim]
+  · simp only [hat, Bool.false_eq_true, if_false, wpg_bind]
+    refine wpg_mono (loadHL_ok (dt := dt) ok F a s0) ?_
+    intro _ s1 ⟨hx1, _, _, hl⟩
+    refine wpg_mono (loadDE_ok (dt := dt) ok F b s1) ?_
+    intro _ s2 ⟨hx2, hr2, hd⟩
+    refine fin s2 (hx1.trans hx2) (fun s3 hx3 hxF fr ist tmps s hra hrb R hat0 => ?_)
+    obtain ⟨s1', st1, at1, R1, _, hHL⟩ := hl (hx2.trans (hx3.trans hxF)) fr ist tmps s hra R hat0
+    obtain ⟨s2', st2, at2, R2, hhl, _, hDE⟩ := hd (hx3.trans hxF) fr ist tmps s1' hrb R1 at1
+    exact ⟨s2', st1.trans st2, at2, R2, by rw [hhl, hHL], hDE⟩
+
+theorem flags16_ok (ok : Z.OK) (F : GFinal Z base sF) (op : Cmp) (a b : Opd) (s0 : GS) :
+    wpg (flags16 op a b) E (Flags Z E base sF dt op 2 a b True s0) s0 := by
+  unfold flags16
+  by_cases hz : zeroTest op b = true
+  · simp only [hz, if_true, wpg_bind]
+    obtain ⟨rfl, hop⟩ := zeroTest_spec hz
+    refine wpg_mono (loadHL_ok (dt := dt) ok F a s0) ?_
+    intro _ s1 ⟨hx1, _, _, hl⟩
+    simp only [wpg_ins, wpg_setRegs]
+    refine ⟨hx1.trans ((pushL_ext [⟨.ld, [.a, .h]⟩, ⟨.or, [.l]⟩] s1).trans (GExt.regs _ _)),
+      fun hx _ fr ist tmps s hra _ R hat => ?_⟩
+    obtain ⟨s', st1, at1, R1, _, hHL⟩ := hl ((pushL_ext [⟨.ld, [.a, .h]⟩, ⟨.or, [.l]⟩] s1).trans ((GExt.regs _ _).trans hx))
+      fr ist tmps s hra R hat
+    obtain ⟨st2, at2, _, hS⟩ := run_list ok F [(⟨.ld, [.a, .h]⟩, ldAR 4), (⟨.or, [.l]⟩, aluR 6 5)]
+      (by
+        intro p hp
+        simp only [List.mem_cons, List.not_mem_nil, or_false] at hp
+        rcases hp with rfl | rfl
+        · exact does_ld_a_h
+        · exact does_alu_reg (op := .or) rfl rfl) s1 s' ((GExt.regs _ _).trans hx) R1.mach at1
+    refine ⟨_, st1.trans st2, at2, R1.of_sys hS rfl (fun o ho => ho) (fun o ho hown => ?_) (fun n o h => h), ?_⟩
+    · have : (runL (List.map (·.2) [((⟨.ld, [.a, .h]⟩ : Instr), ldAR 4), (⟨.or, [.l]⟩, aluR 6 5)]) s').hl = s'.hl := by
+        simp only [List.map, runL, aluR, ldAR, zsim]
+      rw [this]
+      exact R1.rhl o ho hown
+    · have hf : (aluR 6 5 (ldAR 4 s')).flag FZ =
+          (IR.Sem.opd Z.c ist tmps 2 a == IR.Sem.opd Z.c ist tmps 2 (.const 0)) := by
+        rw [zt16, hHL]
+        rfl
+      rcases hop with rfl | rfl <;> exact hf
+  · simp only [hz, Bool.false_eq_true, if_false]
+    cases he : eqConst op b with
+    | none => exact sub16_ok ok F op a b s0
+    | some v =>
+      obtain ⟨v0, rfl, rfl, hop, hk⟩ := eqConst_spec he
+      simp only [wpg_bind]
+      refine wpg_mono (loadHL_ok (dt := dt) ok F a s0) ?_
+      intro _ s1 ⟨hx1, _, _, hl⟩
+      refine wpg_mono (eqHL_ok ok F (v0 % 65536) (Nat.mod_lt _ (by decide)) hk s1) ?_
+      intro _ s2 ⟨hx2, hr2, hq⟩
+      rw [wpg_setRegs]
+      refine ⟨hx1.trans (hx2.trans (GExt.regs _ _)), fun hx _ fr ist tmps s hra _ R hat => ?_⟩
+      obtain ⟨s', st1, at1, R1, _, hHL⟩ := hl (hx2.trans ((GExt.regs _ _).trans hx)) fr ist tmps s hra R hat
+      obtain ⟨s'', st2, at2, hS, hhl, hf⟩ := hq ((GExt.regs _ _).trans hx) s' R1.mach at1
+      refine ⟨s'', st1.trans st2, at2, R1.of_sys hS rfl (fun o ho => by rw [← hr2]; exact ho)
+        (fun o ho hown => by rw [hhl]; exact R1.rhl o (by rw [← hr2]; exact ho) hown)
+        (fun n o h => by rw [← hr2]; exact h), ?_⟩
+      have hf' : s''.flag FZ = (IR.Sem.opd Z.c ist tmps 2 a == IR.Sem.opd Z.c ist tmps 2 (.const v0)) := by
+        rw [hf, hHL]
+        rfl
+      rcases hop with rfl | rfl <;> exact hf'
+
+/-- **A comparison of one or two bytes leaves its result in the flags.** -/
+theorem genFlags_ok (ok : Z.OK) (F : GFinal Z base sF) (op : Cmp) (n : Nat) (hn : n = 1 ∨ n = 2) (a b : Opd)
+    (s0 : GS) : wpg (genFlags op n a b) E (Flags Z E base sF dt op n a b True s0) s0 := by
+  rcases hn with rfl | rfl
+  · exact flags8_ok ok F op a b s0
+  · exact flags16_ok ok F op a b s0
 
 end
 

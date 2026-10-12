@@ -73,9 +73,40 @@ theorem xor_split (a b c d : Nat) (hb : b < 256) (hd : d < 256) :
     testBit_split _ _ _ (Nat.xor_lt_two_pow (n := 8) hb hd)]
   split <;> simp [Nat.testBit_xor]
 
+theorem or_eq_zero {a b : Nat} : a ||| b = 0 ↔ a = 0 ∧ b = 0 := by
+  constructor
+  · intro h
+    have h1 : a ≤ a ||| b := Nat.left_le_or
+    have h2 : b ≤ a ||| b := Nat.right_le_or
+    omega
+  · rintro ⟨rfl, rfl⟩
+    rfl
+
+theorem xor_eq_zero {a b : Nat} : a ^^^ b = 0 ↔ a = b := by
+  constructor
+  · intro h
+    apply Nat.eq_of_testBit_eq
+    intro i
+    have := congrArg (·.testBit i) h
+    simp only [Nat.testBit_xor, Nat.zero_testBit] at this
+    cases ha : a.testBit i <;> cases hb : b.testBit i <;> simp [ha, hb] at this ⊢
+  · rintro rfl
+    exact Nat.xor_self _
+
+theorem and_eq_255 {h l : Nat} (hh : h < 256) (hl : l < 256) : h &&& l = 255 ↔ h = 255 ∧ l = 255 := by
+  constructor
+  · intro e
+    have h1 : h &&& l ≤ h := Nat.and_le_left
+    have h2 : h &&& l ≤ l := Nat.and_le_right
+    omega
+  · rintro ⟨rfl, rfl⟩
+    rfl
+
 section
 variable (s : Cpu) (w x : UInt16)
 
+@[zsim] theorem flag_setReg7 (v m : UInt8) : (s.setReg .hl 7 v).flag m = s.flag m := rfl
+@[zsim] theorem flag_setHL (w : UInt16) (m : UInt8) : (s.setHL w).flag m = s.flag m := rfl
 @[zsim] theorem flag_tick (n : UInt64) (m : UInt8) : (s.tick n).flag m = s.flag m := rfl
 @[zsim] theorem flag_op1 (m : UInt8) : (op1 s).flag m = s.flag m := rfl
 @[zsim] theorem flag_op2 (m : UInt8) : (op2 s).flag m = s.flag m := rfl
