@@ -484,6 +484,207 @@ theorem shift2_ok (ok : Z.OK) (hT : FnLay Z E) (F : GFinal Z base sF) (hrt : RtO
                   rw [Nat.shiftLeft_eq]
                   rfl
 
+theorem sym_off (pc : Nat) {name : String} {entry : Nat} (h : Z.sym name entry) (off : Nat) :
+    (Z.a.env pc).val (.sym name (Int.ofNat off)) = Int.ofNat (entry + off) := by
+  unfold ZCtx.sym at h
+  rw [val_sym _ _ _ (Int.ofNat entry) (by simp [Assembled.env, h])]
+  show ((entry : Int) + (off : Int)) = ((entry + off : Nat) : Int)
+  omega
+
+/-- A word written at `A` (in RAM) from `HL`. -/
+theorem wr16_mem (s : Cpu) (x : UInt16) {A v : Nat} (hx : x.toNat = A) (hb : A + 2 ≤ 65536)
+    (hram : s.ramStart.toNat ≤ A) (hHL : s.hl.toNat = v % 65536) :
+    (((skip (op1 s) 2).wr16 x (op1 s).hl).tick 16).mem = IR.Sem.wr s.mem A 2 v := by
+  have hx1 : (x + 1).toNat = A + 1 := by
+    rw [UInt16.toNat_add, hx]
+    show (A + 1) % 65536 = _
+    omega
+  simp only [zsim, Cpu.wr16]
+  rw [cpu_wr_mem _ _ _ (by simp only [zsim]; rw [hx1]; omega),
+    cpu_wr_mem _ _ _ (by simp only [zsim]; rw [hx]; exact hram)]
+  simp only [zsim]
+  rw [hx, hx1]
+  refine wr_two _ _ _ (by omega) _ _ ?_ ?_
+  · rw [UInt16.toNat_toUInt8, hHL]
+    omega
+  · rw [UInt16.toNat_toUInt8, UInt16.toNat_shiftRight, hHL]
+    rw [show (8 : UInt16).toNat % 16 = 8 from rfl, Nat.shiftRight_eq_div_pow]
+    omega
+
+/-- `ld hl,(p); ld (q),hl; ld hl,0; ld (p),hl`: the word at `P` moved to `Q`, `P` cleared. -/
+theorem moveWord (ok : Z.OK) (F : GFinal Z base sF) {s1 : GS} (vp vq : Val) (P Q : Nat)
+    (hvp : ∀ pc, (Z.a.env pc).val vp = Int.ofNat P) (hvq : ∀ pc, (Z.a.env pc).val vq = Int.ofNat Q)
+    (hP : Z.ramStart ≤ P ∧ P + 2 ≤ 65536) (hQ : Z.ramStart ≤ Q ∧ Q + 2 ≤ 65536)
+    (hx : GExt (pushL [⟨.ld, [.hl, .mem vp]⟩, ⟨.ld, [.mem vq, .hl]⟩, ⟨.ld, [.hl, n16 0]⟩, ⟨.ld, [.mem vp, .hl]⟩] s1) sF)
+    {s : Cpu} (M : Mach Z s) (hrs : s.ramStart.toNat = Z.ramStart) (hsz : s.mem.size = 65536)
+    (hat : At Z.addrs (base + s1.out.size) s) :
+    ∃ s', Steps s s' ∧
+      At Z.addrs (base + (pushL [⟨.ld, [.hl, .mem vp]⟩, ⟨.ld, [.mem vq, .hl]⟩, ⟨.ld, [.hl, n16 0]⟩,
+        ⟨.ld, [.mem vp, .hl]⟩] s1).out.size) s' ∧
+      s'.mem = IR.Sem.wr (IR.Sem.wr s.mem Q 2 (IR.Sem.rd s.mem P 2)) P 2 0 ∧ s'.sp = s.sp ∧
+      s'.halted = s.halted ∧ s'.ramStart = s.ramStart := by
+  obtain ⟨ad, had, hpc⟩ := hat
+  -- ld hl,(p)
+  have hnn1 : (Instr.immW (Z.a.env ad) ⟨.ld, [.hl, .mem vp]⟩).toNat = P := immW_toNat _ _ _ _ rfl (hvp ad) (by omega)
+  obtain ⟨c1, hc1⟩ : ∃ c1 : Cpu, c1 = ((skip (op1 s) 2).setHL
+      ((op1 s).rd16 (Instr.immW (Z.a.env ad) ⟨.ld, [.hl, .mem vp]⟩))).tick 16 := ⟨_, rfl⟩
+  have hS1 : Sys s c1 := by rw [hc1]; simp only [Sys, zsim, and_self]
+  obtain ⟨st1, at1, M1⟩ := run_reg ok F (s0 := s1) (s1 := { s1 with out := s1.out.push (.ins ⟨.ld, [.hl, .mem vp]⟩) })
+    ((pushL_ext [⟨.ld, [.mem vq, .hl]⟩, ⟨.ld, [.hl, n16 0]⟩, ⟨.ld, [.mem vp, .hl]⟩] _).trans hx) rfl M
+    ⟨ad, had, hpc⟩ c1 (fun ad' had' => by
+      rw [had] at had'
+      cases had'
+      intro _
+      rw [hc1]
+      rfl) rfl hS1 (by rw [hc1]; simp only [zsim])
+  have hhl1 : c1.hl.toNat = IR.Sem.rd s.mem P 2 := by
+    rw [hc1]
+    simp only [zsim]
+    rw [cpu_rd16 _ _ (by rw [hnn1]; omega), hnn1]
+  -- ld (q),hl
+  obtain ⟨ad2, had2, hpc2⟩ := at1
+  have hnn2 : (Instr.immW (Z.a.env ad2) ⟨.ld, [.mem vq, .hl]⟩).toNat = Q := immW_toNat _ _ _ _ rfl (hvq ad2) (by omega)
+  obtain ⟨c2, hc2⟩ : ∃ c2 : Cpu, c2 = ((skip (op1 c1) 2).wr16 (Instr.immW (Z.a.env ad2) ⟨.ld, [.mem vq, .hl]⟩)
+      (op1 c1).hl).tick 16 := ⟨_, rfl⟩
+  obtain ⟨st2, at2⟩ := run_ins ok F (s0 := { s1 with out := s1.out.push (.ins ⟨.ld, [.hl, .mem vp]⟩) })
+    (s1 := pushL [⟨.ld, [.hl, .mem vp]⟩, ⟨.ld, [.mem vq, .hl]⟩] s1) (i := ⟨.ld, [.mem vq, .hl]⟩)
+    ((pushL_ext [⟨.ld, [.hl, n16 0]⟩, ⟨.ld, [.mem vp, .hl]⟩] _).trans hx) rfl M1.1 M1.2 ⟨ad2, had2, hpc2⟩
+    (s' := c2) (fun ad' had' => by
+      rw [had2] at had'
+      cases had'
+      intro _
+      rw [hc2]
+      rfl) rfl (by rw [hc2]; simp only [zsim])
+  have hm2 : c2.mem = IR.Sem.wr s.mem Q 2 (IR.Sem.rd s.mem P 2) := by
+    rw [hc2, wr16_mem c1 _ hnn2 hQ.2 (by rw [hS1.2.1, hrs]; exact hQ.1)
+      (v := IR.Sem.rd s.mem P 2) (by rw [hhl1]; exact (Nat.mod_eq_of_lt (rd_lt _ _ 2)).symm), hS1.1]
+  have hrs2 : c2.ramStart = s.ramStart := by rw [hc2]; simp only [zsim]; exact hS1.2.1
+  have hh2 : c2.halted = s.halted := by rw [hc2]; simp only [zsim]; exact hS1.2.2.1
+  have hsp2 : c2.sp = s.sp := by rw [hc2]; simp only [zsim]; exact hS1.2.2.2
+  have M2 : Mach Z c2 :=
+    ⟨Img.of_wr M.1 hrs2 hm2 (by rw [hrs]; exact hQ.1) hQ.2, by rw [hh2]; exact M.2⟩
+  -- ld hl,0
+  obtain ⟨c3, hc3⟩ : ∃ c3 : Cpu, c3 = ((skip (op1 c2) 2).setHL
+      (w16 (byteOf (Int.ofNat (0 % 65536))) (byteOf (Int.ofNat (0 % 65536) / 256)))).tick 10 := ⟨_, rfl⟩
+  have hS3 : Sys c2 c3 := by rw [hc3]; simp only [Sys, zsim, and_self]
+  obtain ⟨st3, at3, M3⟩ := run_reg ok F (s0 := pushL [⟨.ld, [.hl, .mem vp]⟩, ⟨.ld, [.mem vq, .hl]⟩] s1)
+    (s1 := pushL [⟨.ld, [.hl, .mem vp]⟩, ⟨.ld, [.mem vq, .hl]⟩, ⟨.ld, [.hl, n16 0]⟩] s1)
+    ((pushL_ext [⟨.ld, [.mem vp, .hl]⟩] _).trans hx) rfl M2 at2 c3 (fun _ _ => by intro _; rw [hc3]; rfl) rfl hS3
+    (by rw [hc3]; simp only [zsim])
+  have hhl3 : c3.hl.toNat = 0 := by
+    rw [hc3]
+    simp only [zsim]
+    exact w16_val 0 (by decide)
+  -- ld (p),hl
+  obtain ⟨ad4, had4, hpc4⟩ := at3
+  have hnn4 : (Instr.immW (Z.a.env ad4) ⟨.ld, [.mem vp, .hl]⟩).toNat = P := immW_toNat _ _ _ _ rfl (hvp ad4) (by omega)
+  obtain ⟨c4, hc4⟩ : ∃ c4 : Cpu, c4 = ((skip (op1 c3) 2).wr16 (Instr.immW (Z.a.env ad4) ⟨.ld, [.mem vp, .hl]⟩)
+      (op1 c3).hl).tick 16 := ⟨_, rfl⟩
+  obtain ⟨st4, at4⟩ := run_ins ok F (s0 := pushL [⟨.ld, [.hl, .mem vp]⟩, ⟨.ld, [.mem vq, .hl]⟩, ⟨.ld, [.hl, n16 0]⟩] s1)
+    (s1 := pushL [⟨.ld, [.hl, .mem vp]⟩, ⟨.ld, [.mem vq, .hl]⟩, ⟨.ld, [.hl, n16 0]⟩, ⟨.ld, [.mem vp, .hl]⟩] s1)
+    (i := ⟨.ld, [.mem vp, .hl]⟩) hx rfl M3.1 M3.2 ⟨ad4, had4, hpc4⟩
+    (s' := c4) (fun ad' had' => by
+      rw [had4] at had'
+      cases had'
+      intro _
+      rw [hc4]
+      rfl) rfl (by rw [hc4]; simp only [zsim])
+  have hm4 : c4.mem = IR.Sem.wr c2.mem P 2 0 := by
+    rw [hc4, wr16_mem c3 _ hnn4 hP.2 (by rw [hS3.2.1, hrs2, hrs]; exact hP.1) (v := 0) (by rw [hhl3]), hS3.1]
+  refine ⟨c4, ((st1.trans st2).trans st3).trans st4, at4, by rw [hm4, hm2], ?_, ?_, ?_⟩
+  · rw [hc4]
+    simp only [zsim]
+    rw [hS3.2.2.2, hsp2]
+  · rw [hc4]
+    simp only [zsim]
+    rw [hS3.2.2.1, hh2]
+  · rw [hc4]
+    simp only [zsim]
+    rw [hS3.2.1, hrs2]
+
+theorem shift4_ok (ok : Z.OK) (hT : FnLay Z E) (F : GFinal Z base sF) (hrt : RtOK Z)
+    (hdep : Z.rtK + 2 ≤ Z.depth E.fn.name) (left : Bool) (d : Dst) (a : Opd) (m : Nat) (s0 : GS) :
+    wpg (genInstr (.shift left 4 d a m (.const 16))) E
+      (InsPost Z E base sF dt (dtAfter dt d) (.shift left 4 d a m (.const 16))
+        ((RdW Z E dt 4 a ∧ 16 < 2 ^ (8 * m)) ∧ Wr Z E 4 d) s0) s0 := by
+  simp only [genInstr, genShift, store, Codegen.load, bits, show ¬ ((16 : Nat) ≥ 8 * 4) from by decide, if_false,
+    show ((16 : Nat) == 0) = false from rfl, show ((4 : Nat) == 1) = false from rfl,
+    show ((4 : Nat) == 2) = false from rfl, Bool.false_eq_true, beq_self_eq_true, Bool.and_self, if_true]
+  have hacr := ok.accRam
+  -- the word moved within the accumulator (`P` to `Q`), then the accumulator stored
+  have core : ∀ (vp vq : Val) (P Q : Nat), (∀ pc, (Z.a.env pc).val vp = Int.ofNat P) →
+      (∀ pc, (Z.a.env pc).val vq = Int.ofNat Q) → Z.acc ≤ P → P + 2 ≤ Z.acc + 8 → Z.acc ≤ Q → Q + 2 ≤ Z.acc + 8 →
+      (∀ m : ByteArray, m.size = 65536 →
+        IR.Sem.rd (IR.Sem.wr (IR.Sem.wr m Q 2 (IR.Sem.rd m P 2)) P 2 0) Z.acc 4 =
+          shiftVal left 4 (IR.Sem.rd m Z.acc 4) 16) →
+      wpg (do
+        (do
+          loadAcc 4 a
+          ins .ld [.hl, .mem vp]
+          ins .ld [.mem vq, .hl]
+          ins .ld [.hl, n16 0]
+          ins .ld [.mem vp, .hl]
+          killAll)
+        storeAcc 4 d) E
+        (InsPost Z E base sF dt (dtAfter dt d) (.shift left 4 d a m (.const 16))
+          ((RdW Z E dt 4 a ∧ 16 < 2 ^ (8 * m)) ∧ Wr Z E 4 d) s0) s0 := by
+    intro vp vq P Q hvp hvq hP1 hP2 hQ1 hQ2 hval
+    simp only [wpg_bind]
+    refine wpg_mono (loadAcc_ok (dt := dt) ok hT F (by omega) hrt.wide hdep a s0) ?_
+    intro _ s1 ⟨hx1, hacc1, hl⟩
+    simp only [wpg_ins, killAll, wpg_setRegs]
+    refine wpg_mono (storeAcc_ok (dt := dt) ok hT F (by omega) hrt.wide hdep d _) ?_
+    intro _ s2 ⟨hx2, hs⟩
+    have hxp : GExt s1 (pushL [⟨.ld, [.hl, .mem vp]⟩, ⟨.ld, [.mem vq, .hl]⟩, ⟨.ld, [.hl, n16 0]⟩,
+        ⟨.ld, [.mem vp, .hl]⟩] s1) := pushL_ext _ _
+    refine ⟨hx1.trans ((hxp.trans (GExt.regs _ _)).trans hx2), fun hxF ⟨⟨hrd, hk⟩, hwr⟩ fr ist tmps s R hat => ?_⟩
+    have hxm : GExt (pushL [⟨.ld, [.hl, .mem vp]⟩, ⟨.ld, [.mem vq, .hl]⟩, ⟨.ld, [.hl, n16 0]⟩,
+        ⟨.ld, [.mem vp, .hl]⟩] s1) sF := (GExt.regs _ _).trans (hx2.trans hxF)
+    obtain ⟨s', st1, at1, R1⟩ := hl (hxp.trans hxm) fr ist tmps s hrd R hat
+    obtain ⟨s'', st2, at2, hmem, hsp', hh', hrs'⟩ := moveWord ok F vp vq P Q hvp hvq ⟨by omega, by omega⟩
+      ⟨by omega, by omega⟩ hxm R1.mach R1.rs R1.msz at1
+    have hfree : AccFree Z s' s'' := by
+      intro x _ _ hx
+      rw [hmem, wr_get_far _ _ _ _ _ (by omega) (by omega), wr_get_far _ _ _ _ _ (by omega) (by omega)]
+    have R2 : Rel Z E fr dt {} ist tmps s'' :=
+      R1.acc_free ok hT hfree (by rw [hmem, wr_size, wr_size]; exact R1.msz) hrs' hh' hsp' (fun o ho => by cases ho)
+        (fun o ho => by cases ho) (fun sl h => by cases h) (fun sl h => by cases h) (fun k o h => by cases h)
+        (fun k sl h => by cases h) (fun k o h => by cases h)
+    obtain ⟨s3, st3, at3, R3⟩ := hs hxF fr ist tmps s'' (shiftVal left 4 (IR.Sem.opd Z.c ist tmps 4 a) 16) hwr R2 at2
+      (by rw [hmem, hval _ R1.msz, R1.racc 4 a hacc1 (Rd.own_w hrd)])
+    have hkk : IR.Sem.opd Z.c ist tmps m (.const 16) = 16 := Nat.mod_eq_of_lt hk
+    simp only [IR.Sem.step, hkk]
+    exact ⟨s3, (st1.trans st2).trans st3, at3, R3⟩
+  have h16 : (2 : Nat) ^ (8 * 2) = 65536 := by decide
+  have h32 : (2 : Nat) ^ (8 * 4) = 4294967296 := by decide
+  cases left with
+  | true =>
+    simp only [if_true]
+    refine core (.sym "rt_acc") (.sym "rt_acc" 2) Z.acc (Z.acc + 2) (fun pc => sym_val pc ok.accSym)
+      (fun pc => sym_off pc ok.accSym 2) (by omega) (by omega) (by omega) (by omega) (fun mm hm => ?_)
+    rw [rd_add _ _ 2 2, rd_wr _ _ _ _ (by rw [wr_size, hm]; omega) (by rw [wr_size, hm]; exact Nat.le_refl _),
+      rd_wr_other _ _ _ _ _ 2 (by omega) (by omega) (Or.inl (Nat.le_refl _)),
+      rd_wr _ _ _ _ (by rw [hm]; omega) (by rw [hm]; exact Nat.le_refl _), rd_low mm Z.acc 2 2]
+    rw [show IR.Sem.rd mm Z.acc (2 + 2) = IR.Sem.rd mm Z.acc 4 from rfl]
+    show _ = (if 16 ≥ 8 * 4 then 0 else if true = true then (IR.Sem.rd mm Z.acc 4 <<< 16) % 2 ^ (8 * 4) else _)
+    rw [if_neg (by decide), if_pos rfl, Nat.shiftLeft_eq, h16, h32]
+    have := rd_lt mm Z.acc 4
+    rw [h32] at this
+    omega
+  | false =>
+    simp only [Bool.false_eq_true, if_false]
+    refine core (.sym "rt_acc" 2) (.sym "rt_acc") (Z.acc + 2) Z.acc (fun pc => sym_off pc ok.accSym 2)
+      (fun pc => sym_val pc ok.accSym) (by omega) (by omega) (by omega) (by omega) (fun mm hm => ?_)
+    rw [rd_add _ _ 2 2, rd_wr_other _ _ _ _ _ 2 (by omega) (by omega) (Or.inr (Nat.le_refl _)),
+      rd_wr _ _ _ _ (by rw [hm]; omega) (by rw [hm]; exact Nat.le_refl _),
+      rd_wr _ _ _ _ (by rw [wr_size, hm]; omega) (by rw [wr_size, hm]; exact Nat.le_refl _), rd_high mm Z.acc 2 2]
+    rw [show IR.Sem.rd mm Z.acc (2 + 2) = IR.Sem.rd mm Z.acc 4 from rfl]
+    show _ = (if 16 ≥ 8 * 4 then 0 else if false = true then _ else IR.Sem.rd mm Z.acc 4 >>> 16)
+    rw [if_neg (by decide), if_neg (by decide), Nat.shiftRight_eq_div_pow, h16]
+    have := rd_lt mm Z.acc 4
+    rw [h32] at this
+    omega
+
 end
 
 end Ember.Proof.Z80Gen

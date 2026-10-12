@@ -35,13 +35,17 @@ def isConst : Opd → Bool
   | .const _ => true
   | _ => false
 
+def isConst16 : Opd → Bool
+  | .const k => k == 16
+  | _ => false
+
 /-- The instructions the proofs cover so far. -/
 def Covered : IR.Instr → Bool
   | .mov n _ _ | .bin _ n _ _ _ | .cmp _ n _ _ _ | .br _ n _ _ _ => size12 n || n == 4
   | .not n _ _ | .neg n _ _ => size12 n
   | .ext n _ m _ => (n == 1 && m == 2) || (n == 2 && m == 1) || (n == 4 && m == 2) || (n == 4 && m == 1) ||
       (n == 2 && m == 4)
-  | .shift _ n _ _ _ amt => size12 n && isConst amt
+  | .shift _ n _ _ _ amt => (size12 n && isConst amt) || (n == 4 && isConst16 amt)
   | .lea _ p => addrCov p
   | .load n _ p | .store n p _ => size12 n && addrCov p
   | .jmp _ | .label _ | .trap => true
@@ -61,7 +65,7 @@ def Need (Z : ZCtx) (E : GEnv) (dt : Nat → Prop) : IR.Instr → Prop
   | .not n d a | .neg n d a => Rd Z E dt n a ∧ Wr Z E n d
   | .cmp _ n d a b => RdN Z E dt n a ∧ RdN Z E dt n b ∧ Wr Z E 1 d
   | .ext n d m src => (if m = 4 then ∀ v, src ≠ .const v → Rd Z E dt 4 src else Rd Z E dt m src) ∧ Wr Z E n d
-  | .shift _ n d a m amt => ∀ k, amt = .const k → (Rd Z E dt n a ∧ k < 2 ^ (8 * m)) ∧ Wr Z E n d
+  | .shift _ n d a m amt => ∀ k, amt = .const k → (RdN Z E dt n a ∧ k < 2 ^ (8 * m)) ∧ Wr Z E n d
   | .lea d p => AddrNeed Z E dt p ∧ Wr Z E 2 d
   | .load n d p => AddrNeed Z E dt p ∧ AddrData Z p n ∧ Wr Z E n d
   | .store n p src => AddrNeed Z E dt p ∧ AddrStore Z E p n ∧ Rd Z E dt n src
@@ -206,19 +210,23 @@ theorem ins0_ok (ok : Z.OK) (hT : FnLay Z E) (F : GFinal Z base sF) (hrt : RtOK 
     rw [step_call]
     exact fun w hw res hcal => h hxF hN fr ist tmps s R hat w hw res hcal
   | shift left n d a m amt =>
-    have hc' : (size12 n && isConst amt) = true := hc
-    rw [Bool.and_eq_true] at hc'
+    have hc' : ((size12 n && isConst amt) || (n == 4 && isConst16 amt)) = true := hc
     cases amt with
-    | slot sl => cases hc'.2
-    | tmp t => cases hc'.2
+    | slot sl => simp [isConst, isConst16] at hc'
+    | tmp t => simp [isConst, isConst16] at hc'
     | const k =>
-      rcases size12_spec hc'.1 with rfl | rfl
+      have hnk : n = 1 ∨ n = 2 ∨ (n = 4 ∧ k = 16) := by
+        simpa [size12, isConst, isConst16, or_assoc] using hc'
+      rcases hnk with rfl | rfl | ⟨rfl, rfl⟩
       · refine wpg_mono (shift1_ok (dt := dt) ok hT F hrt hdep left d a m k s0) ?_
         intro _ s1 ⟨hx, h⟩
         exact ⟨hx, fun hxF hN => h hxF (hN k rfl)⟩
       · refine wpg_mono (shift2_ok (dt := dt) ok hT F hrt hdep left d a m k s0) ?_
         intro _ s1 ⟨hx, h⟩
         exact ⟨hx, fun hxF hN => h hxF (hN k rfl)⟩
+      · refine wpg_mono (shift4_ok (dt := dt) ok hT F hrt hdep left d a m s0) ?_
+        intro _ s1 ⟨hx, h⟩
+        exact ⟨hx, fun hxF hN => h hxF (hN 16 rfl)⟩
   | ext n d m src =>
     have hnm : (n = 1 ∧ m = 2) ∨ (n = 2 ∧ m = 1) ∨ (n = 4 ∧ m = 2) ∨ (n = 4 ∧ m = 1) ∨ (n = 2 ∧ m = 4) := by
       simpa [Covered, or_assoc] using hc
