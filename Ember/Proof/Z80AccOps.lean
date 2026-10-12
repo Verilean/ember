@@ -35,7 +35,7 @@ theorem accHL_ok (ok : Z.OK) (hT : FnLay Z E) (F : GFinal Z base sF) {n : Nat} (
             IR.Sem.rd c.mem c.hl.toNat n = IR.Sem.opd Z.c ist tmps n b))) s0 := by
   simp only [wpg_bind]
   refine wpg_mono (ptrOf_ok n b s0) ?_
-  intro pb s1 ⟨ho1, hr1, hp, hsp, hj1, hl1⟩
+  intro pb s1 ⟨ho1, hr1, hp, hsp, hj1, hl1, hlv⟩
   subst hp
   have hx01 : GExt s0 s1 := ⟨by simp [ho1], by simp [hj1], by simp [hl1]⟩
   refine wpg_mono (loadAcc_ok (dt := dt) ok hT F hn hrt hdep a s1) ?_
@@ -45,7 +45,7 @@ theorem accHL_ok (ok : Z.OK) (hT : FnLay Z E) (F : GFinal Z base sF) {n : Nat} (
   obtain ⟨s', st1, at1, R1⟩ := hl ((GExt.push _ _).trans hx) fr ist tmps s hra
     (by rw [hr1]; exact R) (by rw [ho1]; exact hat)
   obtain ⟨ad, had, hpc⟩ := at1
-  obtain ⟨B, hv, hb, hns, hmem⟩ := ptr_ok (fr := fr) ok hT hn.1 hrb hsp ad
+  obtain ⟨B, hv, hb, hns, hmem⟩ := ptr_ok (fr := fr) ok hT hn.1 hrb hsp hlv ad
   have hnn : (Instr.immW (Z.a.env ad) ⟨.ld, [.hl, .imm (ptrVal E n b)]⟩).toNat = B :=
     immW_toNat _ _ _ _ rfl hv (by omega)
   have hS : Sys s' (((skip (op1 s') 2).setHL (Instr.immW (Z.a.env ad) ⟨.ld, [.hl, .imm (ptrVal E n b)]⟩)).tick 10) := by

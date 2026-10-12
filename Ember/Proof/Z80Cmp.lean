@@ -201,7 +201,7 @@ theorem cp8Opd_ok (ok : Z.OK) (F : GFinal Z base sF) (op : Cmp) (a b : Opd) (s0 
     · rw [if_neg hab]
       simp only [wpg_bind]
       refine wpg_mono (addrOf_ok b s0) ?_
-      intro p s1 ⟨ho1, hr1, hp, hsp, _, hj1, hl1⟩
+      intro p s1 ⟨ho1, hr1, hp, hsp, _, hj1, hl1, hlv⟩
       subst hp
       simp only [wpg_ins, wpg_setRegs]
       refine ⟨GExt.of_out (by simp [ho1]) hj1 hl1, fun hx fr ist tmps s hrd R hat hA => ?_⟩
@@ -234,7 +234,7 @@ theorem cp8Opd_ok (ok : Z.OK) (F : GFinal Z base sF) (op : Cmp) (a b : Opd) (s0 
         simp only [zsim]
         show (s.mem.get! _).toNat = _
         rw [hnn, ← rd_one _ _ (by omega)]
-        exact opd_mem hrd hsp hc R
+        exact opd_mem hrd hsp hc hlv R
       rw [e1, e2, hA] at this
       exact this
   cases b with

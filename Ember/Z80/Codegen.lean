@@ -114,7 +114,14 @@ def bits (n : Nat) : Nat := 8 * n
 
 /-- Address of a variable or of a temporary's slot. -/
 def noteRead (s : Slot) : GM Unit := do
-  if s.area == .frame (← read).fn.name then
+  let e ← read
+  if s.area == .frame e.fn.name then
+    -- second pass: a read from memory is at a place the first pass saw read (stores there are made)
+    match e.live with
+    | some lv =>
+      if !lv.getD s.off true then
+        throw s!"{e.fn.name}: the two passes disagree on a read of the frame at {s.off}"
+    | none => pure ()
     modify fun st => if s.off < st.reads.size then { st with reads := st.reads.set! s.off true } else st
 
 def noteAddr (s : Slot) : GM Unit := do

@@ -194,7 +194,7 @@ theorem alu8Opd_ok (ok : Z.OK) (F : GFinal Z base sF) {op : Bin} {k : UInt8} (hk
     · rw [if_neg hab]
       simp only [wpg_bind]
       refine wpg_mono (addrOf_ok b s0) ?_
-      intro p s1 ⟨ho1, hr1, hp, hsp, _, hj1, hl1⟩
+      intro p s1 ⟨ho1, hr1, hp, hsp, _, hj1, hl1, hlv⟩
       subst hp
       simp only [wpg_ins, wpg_alu8 hk, wpg_setRegs]
       refine ⟨GExt.of_out (by simp [ho1]) hj1 hl1, (by show s1.regs.a = s0.regs.a; rw [hr1]),
@@ -228,7 +228,7 @@ theorem alu8Opd_ok (ok : Z.OK) (F : GFinal Z base sF) {op : Bin} {k : UInt8} (hk
       congr 1
       show (s.mem.get! _).toNat = _
       rw [hnn, ← rd_one _ _ (by omega)]
-      exact opd_mem hrd hsp hc R
+      exact opd_mem hrd hsp hc hlv R
   cases b with
   | const v =>
     simp only []

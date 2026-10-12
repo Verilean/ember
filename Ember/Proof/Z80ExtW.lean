@@ -140,7 +140,7 @@ theorem ext24_ok (ok : Z.OK) (hT : FnLay Z E) (F : GFinal Z base sF) (d : Dst) (
     intro o hc
     simp only [wpg_bind]
     refine wpg_mono (addrOf_ok o s0) ?_
-    intro p s1 ⟨ho1, hr1, hp, hsp, _, hj1, hl1⟩
+    intro p s1 ⟨ho1, hr1, hp, hsp, _, hj1, hl1, hlv⟩
     subst hp
     simp only [wpg_ins, wpg_setRegs]
     refine wpg_mono (thenStoreHL (dt := dt) ok hT F d s0 _ (∀ v, o ≠ .const v → Rd Z E dt 4 o)
@@ -168,7 +168,7 @@ theorem ext24_ok (ok : Z.OK) (hT : FnLay Z E) (F : GFinal Z base sF) (d : Dst) (
     refine ⟨_, hst, hat', R.hl_gone hS rfl (Or.inr ⟨by rw [hr1], by simp only [zsim]⟩)
       (fun n o h => by rw [← hr1]; exact h), ?_⟩
     simp only [zsim]
-    rw [cpu_rd16 _ _ (by rw [hnn]; omega), hnn, low4 _ (opd_lt Z.c ist tmps 4 o), ← opd_mem hrd hsp hc R,
+    rw [cpu_rd16 _ _ (by rw [hnn]; omega), hnn, low4 _ (opd_lt Z.c ist tmps 4 o), ← opd_mem hrd hsp hc hlv R,
       rd_low s.mem _ 2 2]
   by_cases hacc : (s0.regs.acc == some (4, src)) = true
   · simp only [hacc, if_true, wpg_bind, wpg_ins, wpg_setRegs]

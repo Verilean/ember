@@ -8,7 +8,8 @@ two passes.  `genProg_spec`: every function with code has a run of
 `genFnCode` (its second pass) that `jumpsOk` accepted, and the items of
 that run are in the program's items at an offset.  `prog_gen`: so, in an
 image that holds those items, every function has the `FnGen` that
-`fn_ok` asks for — given `FnStatic` of each.
+`fn_ok` asks for — given `FnStatic` of each in the environment its
+second pass ran in (`progEnvs`), and in no other.
 -/
 
 namespace Ember.Proof.Z80Gen
@@ -24,11 +25,35 @@ def genEnv (f : IR.Fn) (spilled : Array Bool) (live : Option (Array Bool)) : GEn
 def genStart (f : IR.Fn) (lits : Array (Nat × Nat)) : GS :=
   { missed := Array.replicate f.tmps.size false, lits, reads := Array.replicate f.frame false }
 
-/-- A run of the generator for `f` that `jumpsOk` accepted, with the items `code`. -/
-def GenRun (p : IR.Prog) (ann : Bool) (f : IR.Fn) (code : Array Item) : Prop :=
-  ∃ spilled live lits st,
+/-- A run of the generator for `f` in the environment of `spilled` and
+`live` that `jumpsOk` accepted, with the items `code`. -/
+def GenRun (p : IR.Prog) (ann : Bool) (f : IR.Fn) (spilled : Array Bool) (live : Option (Array Bool))
+    (code : Array Item) : Prop :=
+  ∃ lits st,
     genFnCode f (f.name == p.entry) ann (genEnv f spilled live) (genStart f lits) = .ok ((), st) ∧
       jumpsOk st = true ∧ st.out = code
+
+/-- The environments the functions with code are generated in (their
+second pass): the temporaries the first pass saw read from their slot,
+and where it saw reads of the frame start.  It follows `Codegen.genFns`. -/
+def envFns (p : IR.Prog) (ann : Bool) :
+    List IR.Fn → Array (Nat × Nat) → Except String (List (IR.Fn × Array Bool × Option (Array Bool)))
+  | [], _ => .ok []
+  | f :: r, lits =>
+    if f.dead then envFns p ann r lits
+    else
+      match genFn f (Array.replicate f.tmps.size true) lits with
+      | .error e => .error e
+      | .ok (_, missed, _, _, live) =>
+        match genFn f missed lits (f.name == p.entry) live ann with
+        | .error e => .error e
+        | .ok (_, _, lits2, _, _) =>
+          match envFns p ann r lits2 with
+          | .error e => .error e
+          | .ok es => .ok ((f, missed, live) :: es)
+
+def progEnvs (p : IR.Prog) (ann : Bool := false) : Except String (List (IR.Fn × Array Bool × Option (Array Bool))) :=
+  envFns p ann p.fns #[]
 
 theorem genFn_run {f : IR.Fn} {spilled : Array Bool} {lits : Array (Nat × Nat)} {isEntry : Bool}
     {live : Option (Array Bool)} {ann : Bool} {r : Array Item × Array Bool × Array (Nat × Nat) × Nat × Option (Array Bool)}
@@ -52,20 +77,23 @@ theorem genFn_run {f : IR.Fn} {spilled : Array Bool} {lits : Array (Nat × Nat)}
     · simp only [hj, Bool.false_eq_true, if_false] at h
       cases h
 
-theorem genOne_run {p : IR.Prog} {ann : Bool} {f : IR.Fn} {lits : Array (Nat × Nat)}
-    {r : Array Item × Array (Nat × Nat) × Nat} (h : genOne p ann f lits = .ok r) : GenRun p ann f r.1 := by
+/-- The two passes of `genOne`. -/
+theorem genOne_inv {p : IR.Prog} {ann : Bool} {f : IR.Fn} {lits : Array (Nat × Nat)}
+    {r : Array Item × Array (Nat × Nat) × Nat} (h : genOne p ann f lits = .ok r) :
+    ∃ c1 missed l1 s1 live missed2 lv2,
+      genFn f (Array.replicate f.tmps.size true) lits = .ok (c1, missed, l1, s1, live) ∧
+      genFn f missed lits (f.name == p.entry) live ann = .ok (r.1, missed2, r.2.1, r.2.2, lv2) := by
   unfold genOne at h
   split at h
   · cases h
-  · rename_i missed _ _ live _
+  · rename_i c1 missed l1 s1 live h1
     split at h
     · cases h
-    · rename_i code missed2 lits2 size _ h2
+    · rename_i code missed2 lits2 size lv2 h2
       split at h
       · cases h
       · cases h
-        obtain ⟨st, hst, hj, ho⟩ := genFn_run h2
-        exact ⟨missed, live, lits, st, hst, hj, ho⟩
+        exact ⟨c1, missed, l1, s1, live, missed2, lv2, h1, h2⟩
 
 theorem getElem?_of_prefix {α : Type} {a b : Array α} (h : a.toList <+: b.toList) {j : Nat} {x : α}
     (hj : a[j]? = some x) : b[j]? = some x := by
@@ -79,22 +107,25 @@ theorem getElem?_of_prefix {α : Type} {a b : Array α} (h : a.toList <+: b.toLi
     simpa using hj
   simpa using this
 
-/-- **The functions of the program**, in its items. -/
+/-- **The functions of the program**, in its items, each generated in its environment. -/
 theorem genFns_spec (p : IR.Prog) (ann : Bool) :
     ∀ (fs : List IR.Fn) (acc acc' : Array Item × Array (String × Nat) × Array (Nat × Nat)),
       genFns p ann fs acc = .ok acc' →
       acc.1.toList <+: acc'.1.toList ∧
+        ∃ envs, envFns p ann fs acc.2.2 = .ok envs ∧
         ∀ f, f ∈ fs → f.dead = false →
-          ∃ (base : Nat) (code : Array Item), GenRun p ann f code ∧ ∀ (j : Nat) it, code[j]? = some it → acc'.1[base + j]? = some it
+          ∃ (base : Nat) (code : Array Item) (sp : Array Bool) (lv : Option (Array Bool)),
+            (f, sp, lv) ∈ envs ∧ GenRun p ann f sp lv code ∧
+              ∀ (j : Nat) it, code[j]? = some it → acc'.1[base + j]? = some it
   | [], acc, acc', h => by
     cases h
-    exact ⟨List.prefix_refl _, fun f hf => by cases hf⟩
+    exact ⟨List.prefix_refl _, [], rfl, fun f hf => by cases hf⟩
   | f :: r, (items, frames, lits), acc', h => by
     rw [genFns] at h
     by_cases hd : f.dead = true
     · rw [if_pos hd] at h
-      obtain ⟨hp, hall⟩ := genFns_spec p ann r _ acc' h
-      refine ⟨hp, fun g hg hgd => ?_⟩
+      obtain ⟨hp, envs, he, hall⟩ := genFns_spec p ann r _ acc' h
+      refine ⟨hp, envs, by rw [envFns, if_pos hd]; exact he, fun g hg hgd => ?_⟩
       rcases List.mem_cons.mp hg with rfl | hg'
       · rw [hd] at hgd; cases hgd
       · exact hall g hg' hgd
@@ -104,19 +135,30 @@ theorem genFns_spec (p : IR.Prog) (ann : Bool) :
       | ok q =>
         obtain ⟨code, lits2, size⟩ := q
         rw [hone] at h
-        obtain ⟨hp, hall⟩ := genFns_spec p ann r _ acc' h
+        obtain ⟨hp, envs, he, hall⟩ := genFns_spec p ann r _ acc' h
+        obtain ⟨c1, missed, l1, s1, live, missed2, lv2, h1, h2⟩ := genOne_inv hone
         have hp1 : (items ++ code).toList <+: acc'.1.toList := hp
-        refine ⟨(by simp : items.toList <+: (items ++ code).toList).trans hp1, fun g hg hgd => ?_⟩
+        have he' : envFns p ann (f :: r) lits = .ok ((f, missed, live) :: envs) := by
+          rw [envFns, if_neg hd]
+          simp only [h1, h2]
+          have he2 : envFns p ann r lits2 = .ok envs := he
+          rw [he2]
+        refine ⟨(by simp : items.toList <+: (items ++ code).toList).trans hp1, _, he', fun g hg hgd => ?_⟩
         rcases List.mem_cons.mp hg with rfl | hg'
-        · refine ⟨items.size, code, genOne_run hone, fun j it hj => ?_⟩
+        · obtain ⟨st, hst, hj, ho⟩ := genFn_run h2
+          refine ⟨items.size, code, missed, live, List.mem_cons_self, ⟨lits, st, hst, hj, ho⟩, fun j it hj => ?_⟩
           refine getElem?_of_prefix hp1 ?_
           rw [Array.getElem?_append_right (by omega)]
           simpa using hj
-        · exact hall g hg' hgd
+        · obtain ⟨base, code', sp, lv, hm, hrun, hat⟩ := hall g hg' hgd
+          exact ⟨base, code', sp, lv, List.mem_cons_of_mem _ hm, hrun, hat⟩
 
 theorem genProg_spec {p : IR.Prog} {ann : Bool} {c : Compiled} (h : genProg p ann = .ok c) :
+    ∃ envs, progEnvs p ann = .ok envs ∧
     ∀ f, f ∈ p.fns → f.dead = false →
-      ∃ (base : Nat) (code : Array Item), GenRun p ann f code ∧ ∀ (j : Nat) it, code[j]? = some it → c.items[base + j]? = some it := by
+      ∃ (base : Nat) (code : Array Item) (sp : Array Bool) (lv : Option (Array Bool)),
+        (f, sp, lv) ∈ envs ∧ GenRun p ann f sp lv code ∧
+          ∀ (j : Nat) it, code[j]? = some it → c.items[base + j]? = some it := by
   unfold genProg at h
   cases hf : genFns p ann p.fns (#[], #[], #[]) with
   | error e => rw [hf] at h; cases h
@@ -124,24 +166,29 @@ theorem genProg_spec {p : IR.Prog} {ann : Bool} {c : Compiled} (h : genProg p an
     obtain ⟨items, frames, lits⟩ := q
     rw [hf] at h
     cases h
-    intro f hfm hd
-    obtain ⟨base, code, hrun, hat⟩ := (genFns_spec p ann p.fns _ _ hf).2 f hfm hd
-    exact ⟨base, code, hrun, fun j it hj => by simpa using hat j it hj⟩
+    obtain ⟨_, envs, he, hall⟩ := genFns_spec p ann p.fns _ _ hf
+    refine ⟨envs, he, fun f hfm hd => ?_⟩
+    obtain ⟨base, code, sp, lv, hm, hrun, hat⟩ := hall f hfm hd
+    exact ⟨base, code, sp, lv, hm, hrun, fun j it hj => by simpa using hat j it hj⟩
 
 /-- **Every function of a generated program has its `FnGen`**, in an
 image that holds the program's items from `off` on. -/
 theorem prog_gen {Z : ZCtx} (ok : Z.OK) (hrt : RtOK Z) {ann : Bool} {c : Compiled}
     (hgen : genProg Z.c.prog ann = .ok c) {off : Nat}
     (hitems : ∀ j it, c.items[j]? = some it → Z.items[off + j]? = some it)
-    (hstatic : ∀ f, f ∈ Z.c.prog.fns → ∀ spilled live, FnStatic Z (genEnv f spilled live)) :
+    {envs : List (IR.Fn × Array Bool × Option (Array Bool))} (henvs : progEnvs Z.c.prog ann = .ok envs)
+    (hstatic : ∀ e, e ∈ envs → FnStatic Z (genEnv e.1 e.2.1 e.2.2)) :
     ∀ g gf, Z.c.prog.fn? g = some gf → gf.dead = false → ∃ G : FnGen, G.OK Z gf := by
   intro g gf hgf hd
   have hmem : gf ∈ Z.c.prog.fns := List.mem_of_find?_eq_some hgf
-  obtain ⟨base, code, ⟨spilled, live, lits, st, hrun, hj, ho⟩, hat⟩ := genProg_spec hgen gf hmem hd
+  obtain ⟨envs', he', hall⟩ := genProg_spec hgen
+  rw [henvs] at he'
+  cases he'
+  obtain ⟨base, code, spilled, live, hm, ⟨lits, st, hrun, hj, ho⟩, hat⟩ := hall gf hmem hd
   have F : GFinal Z (off + base) st := ⟨fun j it h => by
     rw [Nat.add_assoc]
     exact hitems _ it (hat j it (by rw [← ho]; exact h))⟩
-  have h := genFn_ok (E := genEnv gf spilled live) ok hrt (hstatic gf hmem spilled live) F hj
+  have h := genFn_ok (E := genEnv gf spilled live) ok hrt (hstatic _ hm) F hj
     (gf.name == Z.c.prog.entry) ann (genStart gf lits) rfl rfl
   have hfn : (genEnv gf spilled live).fn = gf := rfl
   rw [hfn] at h
@@ -156,9 +203,10 @@ standing for the world it leaves — or gets to `rt_trap`. -/
 theorem prog_ok {Z : ZCtx} (ok : Z.OK) (hrt : RtOK Z) {ann : Bool} {c : Compiled}
     (hgen : genProg Z.c.prog ann = .ok c) {off : Nat}
     (hitems : ∀ j it, c.items[j]? = some it → Z.items[off + j]? = some it)
-    (hstatic : ∀ f, f ∈ Z.c.prog.fns → ∀ spilled live, FnStatic Z (genEnv f spilled live)) :
+    {envs : List (IR.Fn × Array Bool × Option (Array Bool))} (henvs : progEnvs Z.c.prog ann = .ok envs)
+    (hstatic : ∀ e, e ∈ envs → FnStatic Z (genEnv e.1 e.2.1 e.2.2)) :
     ∀ k g st1, Callee Z g st1 (IR.Sem.callF k Z.c g st1) :=
-  fn_ok ok (prog_gen ok hrt hgen hitems hstatic)
+  fn_ok ok (prog_gen ok hrt hgen hitems henvs hstatic)
 
 /-- info: 'Ember.Proof.Z80Gen.prog_ok' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in #print axioms prog_ok

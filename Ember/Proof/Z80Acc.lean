@@ -37,20 +37,21 @@ variable {Z : ZCtx} {E : GEnv} {base : Nat} {sF : GS} {dt : Nat → Prop} {fr : 
 
 theorem ptrOf_ok (n : Nat) (o : Opd) (s : GS) :
     wpg (ptrOf n o) E (fun p s1 => s1.out = s.out ∧ s1.regs = s.regs ∧ p = ptrVal E n o ∧
-      (∀ t, o = .tmp t → E.spilled[t]! = true) ∧ s1.jumps = s.jumps ∧ s1.labelRegs = s.labelRegs) s := by
+      (∀ t, o = .tmp t → E.spilled[t]! = true) ∧ s1.jumps = s.jumps ∧ s1.labelRegs = s.labelRegs ∧
+      MemLive E o) s := by
   unfold ptrOf
   cases o with
   | const v =>
     simp only [wpg_bind, wpg_modify, wpg_pure]
-    refine ⟨?_, ?_, rfl, fun t h => (by cases h), ?_, ?_⟩ <;> split <;> rfl
+    refine ⟨?_, ?_, rfl, fun t h => (by cases h), ?_, ?_, trivial⟩ <;> split <;> rfl
   | slot sl =>
     refine wpg_mono (addrOf_ok (.slot sl) s) ?_
-    intro p s1 ⟨h1, h2, h3, h4, _, h6, h7⟩
-    exact ⟨h1, h2, h3, h4, h6, h7⟩
+    intro p s1 ⟨h1, h2, h3, h4, _, h6, h7, h8⟩
+    exact ⟨h1, h2, h3, h4, h6, h7, h8⟩
   | tmp t =>
     refine wpg_mono (addrOf_ok (.tmp t) s) ?_
-    intro p s1 ⟨h1, h2, h3, h4, _, h6, h7⟩
-    exact ⟨h1, h2, h3, h4, h6, h7⟩
+    intro p s1 ⟨h1, h2, h3, h4, _, h6, h7, h8⟩
+    exact ⟨h1, h2, h3, h4, h6, h7, h8⟩
 
 theorem Rd.own_w {n : Nat} {o : Opd} (h : RdW Z E dt n o) : Own E o := by
   cases o with
@@ -60,7 +61,7 @@ theorem Rd.own_w {n : Nat} {o : Opd} (h : RdW Z E dt n o) : Own E o := by
 
 /-- **The address of a wide operand**, what is there, and that it is not in the stack. -/
 theorem ptr_ok (ok : Z.OK) (hT : FnLay Z E) {n : Nat} (hn : 0 < n) {o : Opd} (hrd : RdW Z E dt n o)
-    (hsp : ∀ t, o = .tmp t → E.spilled[t]! = true) (pc : Nat) :
+    (hsp : ∀ t, o = .tmp t → E.spilled[t]! = true) (hlv : MemLive E o) (pc : Nat) :
     ∃ A, (Z.a.env pc).val (ptrVal E n o) = Int.ofNat A ∧ A + n ≤ 65536 ∧
       (∀ j, j < n → A + j < Z.stackLo ∨ Z.stackHi ≤ A + j) ∧
       ∀ regs ist tmps (s : Cpu), Rel Z E fr dt regs ist tmps s →
@@ -75,8 +76,8 @@ theorem ptr_ok (ok : Z.OK) (hT : FnLay Z E) {n : Nat} (hn : 0 < n) {o : Opd} (hr
     rfl
   | slot sl =>
     obtain ⟨hv, hb⟩ := opd_val (dt := dt) ok (o := .slot sl) hrd hsp (fun v h => by cases h) pc
-    refine ⟨_, hv, hb, fun j hj => ok.nostack _ (hrd.2.2.1 j hj), fun regs ist tmps s R => ?_⟩
-    exact opd_mem (dt := dt) (o := .slot sl) hrd hsp (fun v h => by cases h) R
+    refine ⟨_, hv, hb, fun j hj => ok.nostack _ (hrd.2.2.1 hlv j hj), fun regs ist tmps s R => ?_⟩
+    exact opd_mem (dt := dt) (o := .slot sl) hrd hsp (fun v h => by cases h) hlv R
   | tmp t =>
     obtain ⟨hv, hb⟩ := opd_val (dt := dt) ok (o := .tmp t) hrd hsp (fun v h => by cases h) pc
     have hns := hT.nostack t (hsp t rfl)
@@ -84,7 +85,7 @@ theorem ptr_ok (ok : Z.OK) (hT : FnLay Z E) {n : Nat} (hn : 0 < n) {o : Opd} (hr
     refine ⟨_, hv, hb, fun j hj => ?_, fun regs ist tmps s R => ?_⟩
     · show tmpAddr Z E t + j < Z.stackLo ∨ Z.stackHi ≤ tmpAddr Z E t + j
       omega
-    · exact opd_mem (dt := dt) (o := .tmp t) hrd hsp (fun v h => by cases h) R
+    · exact opd_mem (dt := dt) (o := .tmp t) hrd hsp (fun v h => by cases h) hlv R
 
 /-- What `loadAcc n o` promises: the operand in the accumulator. -/
 def LoadAcc (Z : ZCtx) (E : GEnv) (base : Nat) (sF : GS) (dt : Nat → Prop) (n : Nat) (o : Opd) (s0 : GS) (_ : Unit)
@@ -105,7 +106,7 @@ theorem loadAcc_ok (ok : Z.OK) (hT : FnLay Z E) (F : GFinal Z base sF) {n : Nat}
     exact ⟨GExt.refl _, hacc, fun _ fr ist tmps s _ R hat => ⟨s, Steps.refl _, hat, R⟩⟩
   · simp only [h1, Bool.false_eq_true, if_false, wpg_bind]
     refine wpg_mono (ptrOf_ok n o s0) ?_
-    intro p s1 ⟨ho1, hr1, hp, hsp, hj1, hl1⟩
+    intro p s1 ⟨ho1, hr1, hp, hsp, hj1, hl1, hlv⟩
     subst hp
     simp only [wpg_ins, wpg_call, wpg_setRegs]
     have hx01 : GExt s0 s1 := ⟨by simp [ho1], by simp [hj1], by simp [hl1]⟩
@@ -115,7 +116,7 @@ theorem loadAcc_ok (ok : Z.OK) (hT : FnLay Z E) (F : GFinal Z base sF) {n : Nat}
     have hxm : GExt (pushL [⟨.ld, [.hl, .imm (ptrVal E n o)]⟩, ⟨.call, [.imm (.sym s!"rt_ld{bits n}")]⟩] s1) sF :=
       (GExt.regs _ _).trans hx
     obtain ⟨ad, had, hpc⟩ := hat
-    obtain ⟨A, hv, hb, hns, hmem⟩ := ptr_ok (fr := fr) ok hT hn.1 hrd hsp ad
+    obtain ⟨A, hv, hb, hns, hmem⟩ := ptr_ok (fr := fr) ok hT hn.1 hrd hsp hlv ad
     have hnn : (Instr.immW (Z.a.env ad) ⟨.ld, [.hl, .imm (ptrVal E n o)]⟩).toNat = A :=
       immW_toNat _ _ _ _ rfl hv (by omega)
     have hS : Sys s (((skip (op1 s) 2).setHL (Instr.immW (Z.a.env ad) ⟨.ld, [.hl, .imm (ptrVal E n o)]⟩)).tick 10) := by

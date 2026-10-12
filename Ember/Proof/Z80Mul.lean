@@ -142,7 +142,7 @@ theorem loadE_ok (ok : Z.OK) (F : GFinal Z base sF) (a b : Opd) (s0 : GS) :
     · rw [if_neg hab]
       simp only [wpg_bind]
       refine wpg_mono (addrOf_ok b s0) ?_
-      intro p s1 ⟨ho1, hr1, hp, hsp, _, hj1, hl1⟩
+      intro p s1 ⟨ho1, hr1, hp, hsp, _, hj1, hl1, hlv⟩
       subst hp
       simp only [wpg_ins, wpg_setRegs]
       refine ⟨GExt.of_out (by simp [ho1]) hj1 hl1, (by show s1.regs.a = s0.regs.a; rw [hr1]),
@@ -177,7 +177,7 @@ theorem loadE_ok (ok : Z.OK) (F : GFinal Z base sF) (a b : Opd) (s0 : GS) :
       · simp only [zsim]
         show (s.mem.get! _).toNat = _
         rw [hnn, ← rd_one _ _ (by omega)]
-        exact opd_mem hrd hsp hc R
+        exact opd_mem hrd hsp hc hlv R
   cases b with
   | slot sl => exact mem_case (.slot sl) (fun v h => by cases h)
   | tmp t => exact mem_case (.tmp t) (fun v h => by cases h)

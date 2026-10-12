@@ -587,7 +587,7 @@ theorem loadDE_ok (ok : Z.OK) (F : GFinal Z base sF) (o : Opd) (s0 : GS) :
       intro o hc
       simp only [wpg_bind]
       refine wpg_mono (addrOf_ok o s0) ?_
-      intro p s1 ⟨ho1, hr1, hp, hsp, _, hj1, hl1⟩
+      intro p s1 ⟨ho1, hr1, hp, hsp, _, hj1, hl1, hlv⟩
       subst hp
       simp only [wpg_ins]
       refine ⟨GExt.of_out (by simp [ho1]) hj1 hl1, hr1, fun hx fr ist tmps s hrd R hat => ?_⟩
@@ -609,7 +609,7 @@ theorem loadDE_ok (ok : Z.OK) (F : GFinal Z base sF) (o : Opd) (s0 : GS) :
         exact R.keep (by simp only [Sys, zsim, and_self]) (by simp only [zsim]) (by simp only [zsim])
       · simp only [zsim]
         rw [cpu_rd16 _ _ (by rw [hnn]; omega), hnn]
-        exact opd_mem hrd hsp hc R
+        exact opd_mem hrd hsp hc hlv R
     cases o with
     | slot sl => exact mem_case (.slot sl) (fun v h => by cases h)
     | tmp t => exact mem_case (.tmp t) (fun v h => by cases h)

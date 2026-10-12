@@ -395,7 +395,7 @@ theorem store1_ok (ok : Z.OK) (hT : FnLay Z E) (F : GFinal Z base sF) (hrt : RtO
       refine wpg_mono (genAddr_ok (dt := dt) ok hT F hrt hdep p hcov s0) ?_
       intro _ s1 ⟨hx1, hhl1, ha1, ha⟩
       refine wpg_mono (addrOf_ok o s1) ?_
-      intro q s2 ⟨ho2, hr2, hq, hsp, _, hj2, hl2⟩
+      intro q s2 ⟨ho2, hr2, hq, hsp, _, hj2, hl2, hlv⟩
       subst hq
       simp only [wpg_ins, wpg_setRegs, wpg_killSlots]
       have hx12 : GExt s1 s2 := ⟨by simp [ho2], by simp [hj2], by simp [hl2]⟩
@@ -436,7 +436,7 @@ theorem store1_ok (ok : Z.OK) (hT : FnLay Z E) (F : GFinal Z base sF) (hrt : RtO
         simp only [zsim]
         show (s'.mem.get! _).toNat = _
         rw [hnn, ← rd_one _ _ (by omega)]
-        exact opd_mem hrd hsp hc R'
+        exact opd_mem hrd hsp hc hlv R'
       have hm2 : c2.mem = s'.mem := by rw [hc2]; simp only [zsim]
       have hrs2 : c2.ramStart = s'.ramStart := by rw [hc2]; simp only [zsim]
       have hh2 : c2.halted = s'.halted := by rw [hc2]; simp only [zsim]

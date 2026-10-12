@@ -13,11 +13,21 @@ open Ember.Z80 Ember.Z80.Cpu Ember.Z80.Codegen Ember.Z80.Asm
 open Ember.Proof.Z80Enc Ember.Proof.IRSim
 open Ember.Z80.IR (Opd Dst Slot Area)
 
-/-- The operand can be read from where it is, `n` bytes of it. -/
+/-- A read of the operand from memory is one the generator allows: in
+the second pass, a read of the function's own frame starts where the
+first pass saw one start (`Codegen.noteRead`). -/
+def MemLive (E : GEnv) : Opd → Prop
+  | .slot sl => sl.area = .frame E.fn.name → ∀ lv, E.live = some lv → lv.getD sl.off true = true
+  | _ => True
+
+/-- The operand can be read from where it is, `n` bytes of it.  Its
+bytes are shared where the generator may read them from memory: a slot
+whose value is always at hand in a register need not be. -/
 def Rd (Z : ZCtx) (E : GEnv) (dt : Nat → Prop) (n : Nat) : Opd → Prop
   | .const _ => True
   | .slot sl => (∃ ad, Z.c.layout.areaAddr sl.area = some ad) ∧ Z.c.layout.addr sl + n ≤ 65536 ∧
-      (∀ j, j < n → Z.data (Z.c.layout.addr sl + j)) ∧ Own E (.slot sl) ∧ Z.use E.fn.name (sl, n)
+      (MemLive E (.slot sl) → ∀ j, j < n → Z.data (Z.c.layout.addr sl + j)) ∧ Own E (.slot sl) ∧
+      Z.use E.fn.name (sl, n)
   | .tmp t => E.spilled[t]! = true →
       dt t ∧ (∃ ad, Z.c.layout.areaAddr (.frame E.fn.name) = some ad) ∧
         tmpAddr Z E t + E.fn.tmps[t]! ≤ 65536 ∧ n ≤ E.fn.tmps[t]!
@@ -47,34 +57,46 @@ section
 variable {Z : ZCtx} {E : GEnv} {base : Nat} {sF : GS} {dt : Nat → Prop} {fr : Fr}
 
 theorem wpg_noteRead (sl : Slot) (s : GS) (Q : Unit → GS → Prop)
-    (h : ∀ s1 : GS, s1.out = s.out → s1.regs = s.regs → s1.jumps = s.jumps → s1.labelRegs = s.labelRegs → Q () s1) :
+    (h : MemLive E (.slot sl) → ∀ s1 : GS, s1.out = s.out → s1.regs = s.regs → s1.jumps = s.jumps →
+      s1.labelRegs = s.labelRegs → Q () s1) :
     wpg (noteRead sl) E Q s := by
   unfold noteRead
   simp only [wpg_bind, wpg_read]
-  split
-  · rw [wpg_modify]
-    refine h _ ?_ ?_ ?_ ?_ <;> split <;> rfl
-  · exact h s rfl rfl rfl rfl
+  by_cases har : sl.area = .frame E.fn.name
+  · rw [if_pos (by simpa using har)]
+    cases hl : E.live with
+    | none =>
+      simp only [wpg_modify]
+      refine h (fun _ lv e => by rw [hl] at e; cases e) _ ?_ ?_ ?_ ?_ <;> split <;> rfl
+    | some lv =>
+      by_cases hb : lv.getD sl.off true = true
+      · simp only [hb, Bool.not_true, Bool.false_eq_true, if_false, wpg_modify]
+        refine h (fun _ lv' e => by rw [hl] at e; cases e; exact hb) _ ?_ ?_ ?_ ?_ <;> split <;> rfl
+      · simp only [Bool.not_eq_true] at hb
+        simp only [hb, Bool.not_false, if_true, wpg_bind]
+        exact wpg_throw _ _
+  · rw [if_neg (by simpa using har)]
+    exact h (fun e => absurd e har) s rfl rfl rfl rfl
 
 /-- `addrOf`: the operand's place, for an operand that has one. -/
 theorem addrOf_ok (o : Opd) (s : GS) :
     wpg (addrOf o) E (fun p s1 => s1.out = s.out ∧ s1.regs = s.regs ∧ p = opdVal E o ∧
       (∀ t, o = .tmp t → E.spilled[t]! = true) ∧ (∀ v, o ≠ .const v) ∧ s1.jumps = s.jumps ∧
-      s1.labelRegs = s.labelRegs) s := by
+      s1.labelRegs = s.labelRegs ∧ MemLive E o) s := by
   unfold addrOf
   cases o with
   | const v => exact wpg_throw _ _
   | slot sl =>
     simp only [wpg_bind]
-    refine wpg_noteRead sl s _ (fun s1 h1 h2 h3 h4 => ?_)
+    refine wpg_noteRead sl s _ (fun hlv s1 h1 h2 h3 h4 => ?_)
     rw [wpg_pure]
-    exact ⟨h1, h2, rfl, (fun t ht => by cases ht), (fun v hv => by cases hv), h3, h4⟩
+    exact ⟨h1, h2, rfl, (fun t ht => by cases ht), (fun v hv => by cases hv), h3, h4, hlv⟩
   | tmp t =>
     simp only [wpg_bind, wpg_read]
     split
     · rename_i hsp
       rw [wpg_bind, wpg_modify, wpg_pure]
-      exact ⟨rfl, rfl, rfl, (fun t' ht => by cases ht; exact hsp), (fun v hv => by cases hv), rfl, rfl⟩
+      exact ⟨rfl, rfl, rfl, (fun t' ht => by cases ht; exact hsp), (fun v hv => by cases hv), rfl, rfl, trivial⟩
     · exact wpg_throw _ _
 
 /-- The address of a readable operand, as the image has it. -/
@@ -94,7 +116,7 @@ theorem opd_val (ok : Z.OK) {n : Nat} {o : Opd} (hrd : Rd Z E dt n o) (hsp : ∀
 
 /-- What is at a readable operand's address is its value. -/
 theorem opd_mem {n : Nat} {o : Opd} (hrd : Rd Z E dt n o) (hsp : ∀ t, o = .tmp t → E.spilled[t]! = true)
-    (hc : ∀ v, o ≠ .const v) {regs : Regs} {ist : IR.Sem.St} {tmps : Array Nat} {s : Cpu}
+    (hc : ∀ v, o ≠ .const v) (hlv : MemLive E o) {regs : Regs} {ist : IR.Sem.St} {tmps : Array Nat} {s : Cpu}
     (R : Rel Z E fr dt regs ist tmps s) :
     IR.Sem.rd s.mem (opdAddr Z E o) n = IR.Sem.opd Z.c ist tmps n o := by
   cases o with
@@ -102,7 +124,7 @@ theorem opd_mem {n : Nat} {o : Opd} (hrd : Rd Z E dt n o) (hsp : ∀ t, o = .tmp
   | slot sl =>
     obtain ⟨_, hb, hd, _⟩ := hrd
     exact rd_congr _ _ _ _ hb (fun x h1 h2 => by
-      have := hd (x - Z.c.layout.addr sl) (by omega)
+      have := hd hlv (x - Z.c.layout.addr sl) (by omega)
       rw [show Z.c.layout.addr sl + (x - Z.c.layout.addr sl) = x by omega] at this
       exact (R.mem x this).symm) |>.symm
   | tmp t =>
@@ -202,7 +224,7 @@ theorem loadA_ok (ok : Z.OK) (F : GFinal Z base sF) (o : Opd) (s0 : GS) :
         intro o hc
         simp only [wpg_bind]
         refine wpg_mono (addrOf_ok o s0) ?_
-        intro p s1 ⟨ho1, hr1, hp, hsp, _, hj1, hl1⟩
+        intro p s1 ⟨ho1, hr1, hp, hsp, _, hj1, hl1, hlv⟩
         subst hp
         simp only [wpg_ins, wpg_setRegs]
         refine ⟨GExt.of_out (by simp [ho1]) hj1 hl1, (by show s1.regs.hl = s0.regs.hl; rw [hr1]), by simp, fun hx fr ist tmps s hrd R hat => ?_⟩
@@ -227,7 +249,7 @@ theorem loadA_ok (ok : Z.OK) (F : GFinal Z base sF) (o : Opd) (s0 : GS) :
           simp only [zsim]
           show (s.mem.get! _).toNat = _
           rw [hnn, ← rd_one _ _ (by omega)]
-          exact opd_mem hrd hsp hc R
+          exact opd_mem hrd hsp hc hlv R
         refine ⟨_, hst, hat', R.regs_only (by simp only [zsim]) (by simp only [zsim]) (by simp only [zsim]) (by simp only [zsim]) (fun o' ho' _ => ?_)
           (fun o' ho' => R.rhl o' (by rw [← hr1]; exact ho'))
           (fun sl hsl _ => by simp only [List.mem_singleton] at hsl; first | (subst hsl; exact hrd.use) | cases hsl)
@@ -305,7 +327,7 @@ theorem loadHL_ok (ok : Z.OK) (F : GFinal Z base sF) (o : Opd) (s0 : GS) :
       intro o hc
       simp only [wpg_bind]
       refine wpg_mono (addrOf_ok o s0) ?_
-      intro p s1 ⟨ho1, hr1, hp, hsp, _, hj1, hl1⟩
+      intro p s1 ⟨ho1, hr1, hp, hsp, _, hj1, hl1, hlv⟩
       subst hp
       simp only [wpg_ins, wpg_setRegs]
       refine ⟨GExt.of_out (by simp [ho1]) hj1 hl1, (by show s1.regs.a = s0.regs.a; rw [hr1]), by simp,
@@ -328,7 +350,7 @@ theorem loadHL_ok (ok : Z.OK) (F : GFinal Z base sF) (o : Opd) (s0 : GS) :
           IR.Sem.opd Z.c ist tmps 2 o := by
         simp only [zsim]
         rw [cpu_rd16 _ _ (by rw [hnn]; omega), hnn]
-        exact opd_mem hrd hsp hc R
+        exact opd_mem hrd hsp hc hlv R
       refine ⟨_, hst, hat', R.regs_only (by simp only [zsim]) (by simp only [zsim]) (by simp only [zsim]) (by simp only [zsim]) (fun o' ho' => R.ra o' (by rw [← hr1]; exact ho'))
         (fun o' ho' _ => ?_) (fun sl hsl => R.ina sl (by rw [← hr1]; exact hsl))
         (fun sl hsl _ => by simp only [List.mem_singleton] at hsl; first | (subst hsl; exact hrd.use) | cases hsl)

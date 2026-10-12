@@ -85,7 +85,7 @@ theorem ext12_ok (ok : Z.OK) (hT : FnLay Z E) (F : GFinal Z base sF) (d : Dst) (
     omega
   · simp only [h1, Bool.false_eq_true, if_false, wpg_bind]
     refine wpg_mono (addrOf_ok src s0) ?_
-    intro p s1 ⟨ho1, hr1, hp, hsp, hc, hj1, hl1⟩
+    intro p s1 ⟨ho1, hr1, hp, hsp, hc, hj1, hl1, hlv⟩
     subst hp
     simp only [wpg_ins, wpg_setRegs]
     refine wpg_mono (thenStoreA (dt := dt) ok hT F d s0 _ (Rd Z E dt 2 src)
@@ -112,7 +112,7 @@ theorem ext12_ok (ok : Z.OK) (hT : FnLay Z E) (F : GFinal Z base sF) (d : Dst) (
       (fun o ho hown => R.rhl o (by rw [← hr1]; exact ho) hown) (fun n o h => by rw [← hr1]; exact h), ?_⟩
     simp only [zsim]
     show (s.mem.get! _).toNat = _
-    rw [hnn, ← rd_one _ _ (by omega), modN1_mod, ← opd_mem hrd hsp hc R, rd_low s.mem _ 1 1]
+    rw [hnn, ← rd_one _ _ (by omega), modN1_mod, ← opd_mem hrd hsp hc hlv R, rd_low s.mem _ 1 1]
 
 theorem byte0 : (byteOf (Int.ofNat (0 % 256))).toNat = 0 := by decide
 
@@ -142,7 +142,7 @@ theorem loadHLByte_ok (ok : Z.OK) (F : GFinal Z base sF) (o : Opd) (s0 : GS) :
     intro o hc
     simp only [wpg_bind]
     refine wpg_mono (addrOf_ok o s0) ?_
-    intro p s1 ⟨ho1, hr1, hp, hsp, _, hj1, hl1⟩
+    intro p s1 ⟨ho1, hr1, hp, hsp, _, hj1, hl1, hlv⟩
     subst hp
     simp only [wpg_ins]
     refine ⟨⟨by simp [ho1], by simp [hj1], by simp [hl1]⟩, hr1, fun hx fr ist tmps s hrd R hat => ?_⟩
@@ -171,7 +171,7 @@ theorem loadHLByte_ok (ok : Z.OK) (F : GFinal Z base sF) (o : Opd) (s0 : GS) :
       hxa rfl (R.mach.sys hS1) hat' (ldH0 _) (fun _ _ => rfl) rfl (does_ld_h_0.sys _)
     refine ⟨_, hst.trans st2, at2, ⟨hS1.trans (does_ld_h_0.sys _), by simp only [ldH0, zsim],
       by simp only [ldH0, zsim]⟩, ?_⟩
-    rw [← opd_mem hrd hsp hc R, rd_one _ _ (by omega), hl_toNat]
+    rw [← opd_mem hrd hsp hc hlv R, rd_one _ _ (by omega), hl_toNat]
     simp only [ldH0, zsim]
     rw [← hnn]
     show (byteOf (Int.ofNat (0 % 256))).toNat * 256 +
