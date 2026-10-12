@@ -428,7 +428,7 @@ theorem storeA_ok {base : Nat} {sF : GS} (ok : Z.OK) (hT : FnLay Z E) (F : GFina
     cases b with
     | true =>
       simp only [if_true, wpg_ins, wpg_setRegs]
-      refine ⟨GExt.push _ _, by simp [Dst.opd], fun o ho => (List.mem_filter.mp ho).1,
+      refine ⟨GExt.of_out (by simp) rfl rfl, by simp [Dst.opd], fun o ho => (List.mem_filter.mp ho).1,
         fun hx fr ist tmps s v W R hat hA => ?_⟩
       obtain ⟨ad, had, hpc⟩ := hat
       obtain ⟨ad0, harea⟩ := W.area
@@ -464,7 +464,7 @@ theorem storeA_ok {base : Nat} {sF : GS} (ok : Z.OK) (hT : FnLay Z E) (F : GFina
     | false =>
       simp only [Bool.false_eq_true, if_false, wpg_pure, wpg_setRegs]
       obtain ⟨harea', lv, hlv, hdeadk⟩ := hb rfl
-      refine ⟨GExt.refl _, by simp [Dst.opd], fun o ho => (List.mem_filter.mp ho).1,
+      refine ⟨GExt.of_out (List.prefix_refl _) rfl rfl, by simp [Dst.opd], fun o ho => (List.mem_filter.mp ho).1,
         fun hx fr ist tmps s v W R hat hA => ?_⟩
       have hb := ok.dbound sl 1 W.dst
       obtain ⟨ka, khl⟩ := kill_keep ok R W.dst v
@@ -495,7 +495,7 @@ theorem storeA_ok {base : Nat} {sF : GS} (ok : Z.OK) (hT : FnLay Z E) (F : GFina
       simp [Array.getD_eq_getD_getElem?, Array.getElem?_setIfInBounds_self_of_lt hlt, IR.modN, hA]
     by_cases hsp : E.spilled[t]! = true
     · simp only [hsp, if_true, wpg_ins, wpg_setRegs]
-      refine ⟨GExt.push _ _, by simp [Dst.opd], fun o ho => (List.mem_filter.mp ho).1,
+      refine ⟨GExt.of_out (by simp) rfl rfl, by simp [Dst.opd], fun o ho => (List.mem_filter.mp ho).1,
         fun hx fr ist tmps s v W R hat hA => ?_⟩
       obtain ⟨ad, had, hpc⟩ := hat
       obtain ⟨ad0, harea⟩ := hT.area
@@ -530,7 +530,7 @@ theorem storeA_ok {base : Nat} {sF : GS} (ok : Z.OK) (hT : FnLay Z E) (F : GFina
         · exact R.ina a (List.mem_filter.mp ha').1 hown
       · exact R.inhl a (List.mem_filter.mp ha).1 hown
     · simp only [hsp, Bool.false_eq_true, if_false, wpg_pure, wpg_setRegs]
-      refine ⟨GExt.refl _, by simp [Dst.opd], fun o ho => (List.mem_filter.mp ho).1,
+      refine ⟨GExt.of_out (List.prefix_refl _) rfl rfl, by simp [Dst.opd], fun o ho => (List.mem_filter.mp ho).1,
         fun hx fr ist tmps s v W R hat hA => ?_⟩
       obtain ⟨ka, khl⟩ := forget_keep R t (IR.modN 1 v)
       refine ⟨s, Steps.refl _ _, hat, ?_, KeepR.refl s⟩
@@ -612,7 +612,7 @@ theorem storeHL_ok {base : Nat} {sF : GS} (ok : Z.OK) (hT : FnLay Z E) (F : GFin
     cases b with
     | true =>
       simp only [if_true, wpg_ins, wpg_setRegs]
-      refine ⟨GExt.push _ _, by simp [Dst.opd], fun o ho => (List.mem_filter.mp ho).1,
+      refine ⟨GExt.of_out (by simp) rfl rfl, by simp [Dst.opd], fun o ho => (List.mem_filter.mp ho).1,
         fun hx fr ist tmps s v W R hat hHL => ?_⟩
       obtain ⟨ad, had, hpc⟩ := hat
       obtain ⟨ad0, harea⟩ := W.area
@@ -647,7 +647,7 @@ theorem storeHL_ok {base : Nat} {sF : GS} (ok : Z.OK) (hT : FnLay Z E) (F : GFin
     | false =>
       simp only [Bool.false_eq_true, if_false, wpg_pure, wpg_setRegs]
       obtain ⟨harea', lv, hlv, hdeadk⟩ := hb rfl
-      refine ⟨GExt.refl _, by simp [Dst.opd], fun o ho => (List.mem_filter.mp ho).1,
+      refine ⟨GExt.of_out (List.prefix_refl _) rfl rfl, by simp [Dst.opd], fun o ho => (List.mem_filter.mp ho).1,
         fun hx fr ist tmps s v W R hat hHL => ?_⟩
       have hb := ok.dbound sl 2 W.dst
       obtain ⟨ka, khl⟩ := kill_keep ok R W.dst v
@@ -677,7 +677,7 @@ theorem storeHL_ok {base : Nat} {sF : GS} (ok : Z.OK) (hT : FnLay Z E) (F : GFin
       simp [Array.getD_eq_getD_getElem?, Array.getElem?_setIfInBounds_self_of_lt hlt, IR.modN, hHL]
     by_cases hsp : E.spilled[t]! = true
     · simp only [hsp, if_true, wpg_ins, wpg_setRegs]
-      refine ⟨GExt.push _ _, by simp [Dst.opd], fun o ho => (List.mem_filter.mp ho).1,
+      refine ⟨GExt.of_out (by simp) rfl rfl, by simp [Dst.opd], fun o ho => (List.mem_filter.mp ho).1,
         fun hx fr ist tmps s v W R hat hHL => ?_⟩
       obtain ⟨ad, had, hpc⟩ := hat
       obtain ⟨ad0, harea⟩ := hT.area
@@ -712,7 +712,7 @@ theorem storeHL_ok {base : Nat} {sF : GS} (ok : Z.OK) (hT : FnLay Z E) (F : GFin
         · cases h
         · exact R.inhl a (List.mem_filter.mp ha').1 hown
     · simp only [hsp, Bool.false_eq_true, if_false, wpg_pure, wpg_setRegs]
-      refine ⟨GExt.refl _, by simp [Dst.opd], fun o ho => (List.mem_filter.mp ho).1,
+      refine ⟨GExt.of_out (List.prefix_refl _) rfl rfl, by simp [Dst.opd], fun o ho => (List.mem_filter.mp ho).1,
         fun hx fr ist tmps s v W R hat hHL => ?_⟩
       obtain ⟨ka, khl⟩ := forget_keep R t (IR.modN 2 v)
       refine ⟨s, Steps.refl _ _, hat, ?_, KeepR.refl s⟩

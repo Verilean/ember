@@ -150,7 +150,7 @@ theorem alu8Opd_ok (ok : Z.OK) (F : GFinal Z base sF) {op : Bin} {k : UInt8} (hk
         (f s).a.toNat = IR.binOp op 1 (IR.Sem.opd Z.c ist tmps 1 a) (IR.Sem.opd Z.c ist tmps 1 b)) →
       AluOpd Z E base sF dt op a b s0 () { s0 with out := s0.out.push (.ins i) } := by
     intro i f hexec hfalls hsys hhl hval
-    refine ⟨GExt.push _ _, rfl, fun o ho => ho, fun hx fr ist tmps s hrd R hat hA => ?_⟩
+    refine ⟨GExt.of_out (by simp) rfl rfl, rfl, fun o ho => ho, fun hx fr ist tmps s hrd R hat hA => ?_⟩
     obtain ⟨hst, hat', _⟩ := run_reg ok F (s0 := s0) hx rfl R.mach hat (f s) (fun ad _ => hexec _ _ _) hfalls (hsys s)
     exact ⟨_, hst, hat', R.of_sys (hsys s) rfl (fun o ho => ho) (fun o ho hown => by rw [hhl]; exact R.rhl o ho hown)
       (fun n o h => h), hval s ist tmps hA⟩
@@ -180,7 +180,7 @@ theorem alu8Opd_ok (ok : Z.OK) (F : GFinal Z base sF) {op : Bin} {k : UInt8} (hk
     · rw [if_pos hab, wpg_alu8 hk]
       have hab' : a = b := by simpa using hab
       subst hab'
-      refine ⟨GExt.push _ _, rfl, fun o ho => ho, fun hx fr ist tmps s hrd R hat hA => ?_⟩
+      refine ⟨GExt.of_out (by simp) rfl rfl, rfl, fun o ho => ho, fun hx fr ist tmps s hrd R hat hA => ?_⟩
       obtain ⟨hst, hat', _⟩ := run_reg ok F (s0 := s0) hx rfl R.mach hat
         (((op1 s).alu k ((op1 s).reg .hl 7)).tick 4) (fun ad _ => exec_alu_reg _ _ _ hk rfl) (aluIns_falls _ _)
         (by simp only [Sys, zsim, and_self])
@@ -193,10 +193,10 @@ theorem alu8Opd_ok (ok : Z.OK) (F : GFinal Z base sF) {op : Bin} {k : UInt8} (hk
     · rw [if_neg hab]
       simp only [wpg_bind]
       refine wpg_mono (addrOf_ok b s0) ?_
-      intro p s1 ⟨ho1, hr1, hp, hsp, _⟩
+      intro p s1 ⟨ho1, hr1, hp, hsp, _, hj1, hl1⟩
       subst hp
       simp only [wpg_ins, wpg_alu8 hk, wpg_setRegs]
-      refine ⟨by simp [GExt, ho1], (by show s1.regs.a = s0.regs.a; rw [hr1]),
+      refine ⟨GExt.of_out (by simp [ho1]) hj1 hl1, (by show s1.regs.a = s0.regs.a; rw [hr1]),
         (fun o ho => by cases ho), fun hx fr ist tmps s hrd R hat hA => ?_⟩
       obtain ⟨ad, had, hpc⟩ := hat
       obtain ⟨hv, hb⟩ := opd_val ok hrd hsp hc ad

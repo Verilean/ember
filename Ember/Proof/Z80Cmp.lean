@@ -191,7 +191,7 @@ theorem cp8Opd_ok (ok : Z.OK) (F : GFinal Z base sF) (op : Cmp) (a b : Opd) (s0 
     · rw [if_pos hab, wpg_ins]
       have hab' : a = b := by simpa using hab
       subst hab'
-      refine ⟨GExt.push _ _, fun hx fr ist tmps s hrd R hat hA => ?_⟩
+      refine ⟨GExt.of_out (by simp) rfl rfl, fun hx fr ist tmps s hrd R hat hA => ?_⟩
       obtain ⟨st, at', _⟩ := run_reg ok F (s0 := s0) hx rfl R.mach hat (cpR 7 s) (fun ad _ => does_cp_a.exec _ _ _)
         rfl (does_cp_a.sys s)
       refine ⟨_, st, at', R.keep (does_cp_a.sys s) (by simp only [cpR, zsim]) (by simp only [cpR, zsim]), ?_⟩
@@ -201,10 +201,10 @@ theorem cp8Opd_ok (ok : Z.OK) (F : GFinal Z base sF) (op : Cmp) (a b : Opd) (s0 
     · rw [if_neg hab]
       simp only [wpg_bind]
       refine wpg_mono (addrOf_ok b s0) ?_
-      intro p s1 ⟨ho1, hr1, hp, hsp, _⟩
+      intro p s1 ⟨ho1, hr1, hp, hsp, _, hj1, hl1⟩
       subst hp
       simp only [wpg_ins, wpg_setRegs]
-      refine ⟨by simp [GExt, ho1], fun hx fr ist tmps s hrd R hat hA => ?_⟩
+      refine ⟨GExt.of_out (by simp [ho1]) hj1 hl1, fun hx fr ist tmps s hrd R hat hA => ?_⟩
       obtain ⟨ad, had, hpc⟩ := hat
       obtain ⟨hv, hb⟩ := opd_val ok hrd hsp hc ad
       have hnn : (Instr.immW (Z.a.env ad) ⟨.ld, [.hl, .imm (opdVal E b)]⟩).toNat = opdAddr Z E b :=
@@ -241,7 +241,7 @@ theorem cp8Opd_ok (ok : Z.OK) (F : GFinal Z base sF) (op : Cmp) (a b : Opd) (s0 
   | tmp t => exact mem_case (.tmp t) (fun v h => by cases h)
   | const v =>
     simp only [wpg_ins]
-    refine ⟨GExt.push _ _, fun hx fr ist tmps s hrd R hat hA => ?_⟩
+    refine ⟨GExt.of_out (by simp) rfl rfl, fun hx fr ist tmps s hrd R hat hA => ?_⟩
     obtain ⟨st, at', _⟩ := run_reg ok F (s0 := s0) hx rfl R.mach hat (cpN v s) (fun ad _ => (does_cp_n v).exec _ _ _)
       rfl ((does_cp_n v).sys s)
     refine ⟨_, st, at', R.keep ((does_cp_n v).sys s) (by simp only [cpN, zsim]) (by simp only [cpN, zsim]), ?_⟩

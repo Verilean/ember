@@ -126,7 +126,7 @@ theorem mat_eq (ok : Z.OK) (F : GFinal Z base sF) (z : Bool) (op : Cmp)
       ins .inc [.a]
       modify fun s => { s with out := s.out.push (.label l) }) E (Mat Z base sF op s1) s1 := by
   simp only [wpg_bind, wpg_newLabel, wpg_ins, wpg_modify]
-  refine ⟨by simp [GExt], rfl, fun hx s x y M hat hf => ?_⟩
+  refine ⟨GExt.of_out (by simp) rfl rfl, rfl, fun hx s x y M hat hf => ?_⟩
   -- the four items
   have i0 := F.at hx (push4_get _ _ _ _ _).1
   have i1 := F.at hx (push4_get _ _ _ _ _).2.1

@@ -133,26 +133,36 @@ theorem Rel.regs_only {Z : ZCtx} {E : GEnv} {fr : Fr} {dt : Nat → Prop} {regs 
 structure GFinal (Z : ZCtx) (base : Nat) (sF : GS) : Prop where
   code : ∀ j it, sF.out[j]? = some it → Z.items[base + j]? = some it
 
-/-- `s'` is `s` with more items emitted. -/
-def GExt (s s' : GS) : Prop := s.out.toList <+: s'.out.toList
+/-- `s'` is `s` with more items emitted — and more jumps and labels recorded. -/
+structure GExt (s s' : GS) : Prop where
+  out : s.out.toList <+: s'.out.toList
+  jumps : s.jumps <:+ s'.jumps
+  labels : s.labelRegs <:+ s'.labelRegs
 
-theorem GExt.refl (s : GS) : GExt s s := List.prefix_refl _
+theorem GExt.refl (s : GS) : GExt s s := ⟨List.prefix_refl _, List.suffix_refl _, List.suffix_refl _⟩
 
-theorem GExt.trans {s s' s'' : GS} (h1 : GExt s s') (h2 : GExt s' s'') : GExt s s'' := List.IsPrefix.trans h1 h2
+theorem GExt.trans {s s' s'' : GS} (h1 : GExt s s') (h2 : GExt s' s'') : GExt s s'' :=
+  ⟨h1.out.trans h2.out, h1.jumps.trans h2.jumps, h1.labels.trans h2.labels⟩
 
-theorem GExt.push (s : GS) (it : Item) : GExt s { s with out := s.out.push it } := by
-  simp [GExt]
+/-- More items, the records as they were. -/
+theorem GExt.of_out {s s' : GS} (h : s.out.toList <+: s'.out.toList) (hj : s'.jumps = s.jumps)
+    (hl : s'.labelRegs = s.labelRegs) : GExt s s' :=
+  ⟨h, by rw [hj]; exact List.suffix_refl _, by rw [hl]; exact List.suffix_refl _⟩
 
-theorem GExt.regs (s : GS) (r : Regs) : GExt s { s with regs := r } := List.prefix_refl _
+theorem GExt.push (s : GS) (it : Item) : GExt s { s with out := s.out.push it } :=
+  GExt.of_out (by simp) rfl rfl
+
+theorem GExt.regs (s : GS) (r : Regs) : GExt s { s with regs := r } :=
+  GExt.of_out (List.prefix_refl _) rfl rfl
 
 theorem GExt.size {s s' : GS} (h : GExt s s') : s.out.size ≤ s'.out.size := by
-  simpa using h.length_le
+  simpa using h.out.length_le
 
 /-- The item just emitted. -/
 theorem GFinal.emitted {Z : ZCtx} {base : Nat} {sF : GS} (F : GFinal Z base sF) {s : GS} {out : Array Item}
     {it : Item} (hx : GExt s sF) (ho : s.out = out.push it) : Z.items[base + out.size]? = some it := by
   refine F.code out.size it ?_
-  obtain ⟨rest, hr⟩ := hx
+  obtain ⟨rest, hr⟩ := hx.out
   have : sF.out.toList[out.size]? = some it := by
     rw [← hr, ho]
     simp
@@ -162,7 +172,7 @@ theorem GFinal.emitted {Z : ZCtx} {base : Nat} {sF : GS} (F : GFinal Z base sF) 
 theorem GFinal.at {Z : ZCtx} {base : Nat} {sF : GS} (F : GFinal Z base sF) {s : GS} (hx : GExt s sF) {j : Nat}
     {it : Item} (h : s.out[j]? = some it) : Z.items[base + j]? = some it := by
   refine F.code j it ?_
-  obtain ⟨rest, hr⟩ := hx
+  obtain ⟨rest, hr⟩ := hx.out
   have hj : j < s.out.size := by
     rcases Nat.lt_or_ge j s.out.size with h' | h'
     · exact h'

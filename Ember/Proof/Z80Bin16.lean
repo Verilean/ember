@@ -158,7 +158,7 @@ def HlDePost (Z : ZCtx) (E : GEnv) (base : Nat) (sF : GS) (dt : Nat → Prop) (H
 theorem addReg_ok (ok : Z.OK) (F : GFinal Z base sF) (s0 : GS) :
     wpg (bin16Reg .add) E (HlDePost Z E base sF dt True (IR.binOp .add 2) s0) s0 := by
   simp only [bin16Reg, wpg_ins]
-  refine ⟨GExt.push _ _, fun hx _ fr ist tmps s R hat => ?_⟩
+  refine ⟨GExt.of_out (by simp) rfl rfl, fun hx _ fr ist tmps s R hat => ?_⟩
   obtain ⟨st, at', _⟩ := run_reg ok F (s0 := s0) hx rfl R.mach hat (addHLDE s) (fun ad _ => rfl) rfl
     (by simp only [Sys, addHLDE, zsim, and_self])
   exact ⟨_, st, at', R.hl_gone (by simp only [Sys, addHLDE, zsim, and_self]) rfl
@@ -280,7 +280,7 @@ theorem logicConstL_ok (ok : Z.OK) (F : GFinal Z base sF) {op : Bin} {k : UInt8}
   unfold logicConst
   by_cases h1 : (if (op == Bin.and) = true then m == 255 else m == 0) = true
   · rw [if_pos h1, wpg_pure]
-    refine ⟨GExt.refl _, rfl, rfl, fun _ s M hat => ⟨s, Steps.refl _ _, hat, M, Sys.refl s, ?_, rfl, Or.inr ⟨rfl, rfl⟩⟩⟩
+    refine ⟨GExt.of_out (List.prefix_refl _) rfl rfl, rfl, rfl, fun _ s M hat => ⟨s, Steps.refl _ _, hat, M, Sys.refl s, ?_, rfl, Or.inr ⟨rfl, rfl⟩⟩⟩
     have hx := s.l.toNat_lt
     rcases hl with rfl | rfl | rfl
     · have : m = 255 := by
@@ -310,7 +310,7 @@ theorem logicConstL_ok (ok : Z.OK) (F : GFinal Z base sF) {op : Bin} {k : UInt8}
       have hop : op = .and := bin_beq (by simp only [Bool.and_eq_true] at h2; exact h2.1)
       have hm0 : m = 0 := by simp only [Bool.and_eq_true, beq_iff_eq] at h2; exact h2.2
       subst hop hm0
-      refine ⟨GExt.push _ _, rfl, rfl, fun hx s M hat => ?_⟩
+      refine ⟨GExt.of_out (by simp) rfl rfl, rfl, rfl, fun hx s M hat => ?_⟩
       obtain ⟨st, at', M'⟩ := run_reg ok F (s0 := s0) hx rfl M hat
         (((skip (op1 s) 1).setReg .hl 5 (byteOf (Int.ofNat (0 % 256)))).tick 7) (fun ad _ => rfl) rfl
         (by simp only [Sys, zsim, and_self])
@@ -324,7 +324,7 @@ theorem logicConstL_ok (ok : Z.OK) (F : GFinal Z base sF) {op : Bin} {k : UInt8}
         have hop : op = .or := bin_beq (by simp only [Bool.and_eq_true] at h3; exact h3.1)
         have hm0 : m = 255 := by simp only [Bool.and_eq_true, beq_iff_eq] at h3; exact h3.2
         subst hop hm0
-        refine ⟨GExt.push _ _, rfl, rfl, fun hx s M hat => ?_⟩
+        refine ⟨GExt.of_out (by simp) rfl rfl, rfl, rfl, fun hx s M hat => ?_⟩
         obtain ⟨st, at', M'⟩ := run_reg ok F (s0 := s0) hx rfl M hat
           (((skip (op1 s) 1).setReg .hl 5 (byteOf (Int.ofNat (255 % 256)))).tick 7) (fun ad _ => rfl) rfl
           (by simp only [Sys, zsim, and_self])
@@ -368,7 +368,7 @@ theorem logicConstH_ok (ok : Z.OK) (F : GFinal Z base sF) {op : Bin} {k : UInt8}
   unfold logicConst
   by_cases h1 : (if (op == Bin.and) = true then m == 255 else m == 0) = true
   · rw [if_pos h1, wpg_pure]
-    refine ⟨GExt.refl _, rfl, rfl, fun _ s M hat => ⟨s, Steps.refl _ _, hat, M, Sys.refl s, ?_, rfl, Or.inr ⟨rfl, rfl⟩⟩⟩
+    refine ⟨GExt.of_out (List.prefix_refl _) rfl rfl, rfl, rfl, fun _ s M hat => ⟨s, Steps.refl _ _, hat, M, Sys.refl s, ?_, rfl, Or.inr ⟨rfl, rfl⟩⟩⟩
     have hx := s.h.toNat_lt
     rcases hl with rfl | rfl | rfl
     · have : m = 255 := by
@@ -398,7 +398,7 @@ theorem logicConstH_ok (ok : Z.OK) (F : GFinal Z base sF) {op : Bin} {k : UInt8}
       have hop : op = .and := bin_beq (by simp only [Bool.and_eq_true] at h2; exact h2.1)
       have hm0 : m = 0 := by simp only [Bool.and_eq_true, beq_iff_eq] at h2; exact h2.2
       subst hop hm0
-      refine ⟨GExt.push _ _, rfl, rfl, fun hx s M hat => ?_⟩
+      refine ⟨GExt.of_out (by simp) rfl rfl, rfl, rfl, fun hx s M hat => ?_⟩
       obtain ⟨st, at', M'⟩ := run_reg ok F (s0 := s0) hx rfl M hat
         (((skip (op1 s) 1).setReg .hl 4 (byteOf (Int.ofNat (0 % 256)))).tick 7) (fun ad _ => rfl) rfl
         (by simp only [Sys, zsim, and_self])
@@ -412,7 +412,7 @@ theorem logicConstH_ok (ok : Z.OK) (F : GFinal Z base sF) {op : Bin} {k : UInt8}
         have hop : op = .or := bin_beq (by simp only [Bool.and_eq_true] at h3; exact h3.1)
         have hm0 : m = 255 := by simp only [Bool.and_eq_true, beq_iff_eq] at h3; exact h3.2
         subst hop hm0
-        refine ⟨GExt.push _ _, rfl, rfl, fun hx s M hat => ?_⟩
+        refine ⟨GExt.of_out (by simp) rfl rfl, rfl, rfl, fun hx s M hat => ?_⟩
         obtain ⟨st, at', M'⟩ := run_reg ok F (s0 := s0) hx rfl M hat
           (((skip (op1 s) 1).setReg .hl 4 (byteOf (Int.ofNat (255 % 256)))).tick 7) (fun ad _ => rfl) rfl
           (by simp only [Sys, zsim, and_self])
@@ -587,10 +587,10 @@ theorem loadDE_ok (ok : Z.OK) (F : GFinal Z base sF) (o : Opd) (s0 : GS) :
       intro o hc
       simp only [wpg_bind]
       refine wpg_mono (addrOf_ok o s0) ?_
-      intro p s1 ⟨ho1, hr1, hp, hsp, _⟩
+      intro p s1 ⟨ho1, hr1, hp, hsp, _, hj1, hl1⟩
       subst hp
       simp only [wpg_ins]
-      refine ⟨by simp [GExt, ho1], hr1, fun hx fr ist tmps s hrd R hat => ?_⟩
+      refine ⟨GExt.of_out (by simp [ho1]) hj1 hl1, hr1, fun hx fr ist tmps s hrd R hat => ?_⟩
       obtain ⟨ad, had, hpc⟩ := hat
       obtain ⟨hv, hb⟩ := opd_val ok hrd hsp hc ad
       have hnn : (Instr.immW (Z.a.env ad) ⟨.ld, [.de, .mem (opdVal E o)]⟩).toNat = opdAddr Z E o :=
@@ -614,7 +614,7 @@ theorem loadDE_ok (ok : Z.OK) (F : GFinal Z base sF) (o : Opd) (s0 : GS) :
     | tmp t => exact mem_case (.tmp t) (fun v h => by cases h)
     | const v =>
       simp only [wpg_ins]
-      refine ⟨GExt.push _ _, rfl, fun hx fr ist tmps s hrd R hat => ?_⟩
+      refine ⟨GExt.of_out (by simp) rfl rfl, rfl, fun hx fr ist tmps s hrd R hat => ?_⟩
       obtain ⟨st, at', _⟩ := run_reg ok F (s0 := s0) hx rfl R.mach hat (ldDE v s) (fun ad _ => rfl) rfl
         (by simp only [Sys, ldDE, zsim, and_self])
       refine ⟨_, st, at', R.keep (by simp only [Sys, ldDE, zsim, and_self]) (by simp only [ldDE, zsim])

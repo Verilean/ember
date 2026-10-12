@@ -47,32 +47,34 @@ section
 variable {Z : ZCtx} {E : GEnv} {base : Nat} {sF : GS} {dt : Nat → Prop} {fr : Fr}
 
 theorem wpg_noteRead (sl : Slot) (s : GS) (Q : Unit → GS → Prop)
-    (h : ∀ s1 : GS, s1.out = s.out → s1.regs = s.regs → Q () s1) : wpg (noteRead sl) E Q s := by
+    (h : ∀ s1 : GS, s1.out = s.out → s1.regs = s.regs → s1.jumps = s.jumps → s1.labelRegs = s.labelRegs → Q () s1) :
+    wpg (noteRead sl) E Q s := by
   unfold noteRead
   simp only [wpg_bind, wpg_read]
   split
   · rw [wpg_modify]
-    refine h _ ?_ ?_ <;> split <;> rfl
-  · exact h s rfl rfl
+    refine h _ ?_ ?_ ?_ ?_ <;> split <;> rfl
+  · exact h s rfl rfl rfl rfl
 
 /-- `addrOf`: the operand's place, for an operand that has one. -/
 theorem addrOf_ok (o : Opd) (s : GS) :
     wpg (addrOf o) E (fun p s1 => s1.out = s.out ∧ s1.regs = s.regs ∧ p = opdVal E o ∧
-      (∀ t, o = .tmp t → E.spilled[t]! = true) ∧ ∀ v, o ≠ .const v) s := by
+      (∀ t, o = .tmp t → E.spilled[t]! = true) ∧ (∀ v, o ≠ .const v) ∧ s1.jumps = s.jumps ∧
+      s1.labelRegs = s.labelRegs) s := by
   unfold addrOf
   cases o with
   | const v => exact wpg_throw _ _
   | slot sl =>
     simp only [wpg_bind]
-    refine wpg_noteRead sl s _ (fun s1 h1 h2 => ?_)
+    refine wpg_noteRead sl s _ (fun s1 h1 h2 h3 h4 => ?_)
     rw [wpg_pure]
-    exact ⟨h1, h2, rfl, (fun t ht => by cases ht), (fun v hv => by cases hv)⟩
+    exact ⟨h1, h2, rfl, (fun t ht => by cases ht), (fun v hv => by cases hv), h3, h4⟩
   | tmp t =>
     simp only [wpg_bind, wpg_read]
     split
     · rename_i hsp
       rw [wpg_bind, wpg_modify, wpg_pure]
-      exact ⟨rfl, rfl, rfl, (fun t' ht => by cases ht; exact hsp), (fun v hv => by cases hv)⟩
+      exact ⟨rfl, rfl, rfl, (fun t' ht => by cases ht; exact hsp), (fun v hv => by cases hv), rfl, rfl⟩
     · exact wpg_throw _ _
 
 /-- The address of a readable operand, as the image has it. -/
@@ -162,7 +164,7 @@ theorem loadA_ok (ok : Z.OK) (F : GFinal Z base sF) (o : Opd) (s0 : GS) :
     · simp only [h2, if_true, wpg_bind, wpg_ins, wpg_setRegs]
       simp only [Bool.and_eq_true] at h2
       have hmem : o ∈ s0.regs.hl := by simpa using h2.1
-      refine ⟨GExt.push _ _, rfl, by simp, fun hx fr ist tmps s hrd R hat => ?_⟩
+      refine ⟨GExt.of_out (by simp) rfl rfl, rfl, by simp, fun hx fr ist tmps s hrd R hat => ?_⟩
       obtain ⟨hst, hat'⟩ := run_ins ok F (s0 := s0) hx rfl R.img R.run hat
         (s' := ((op1 s).setReg .hl 7 ((op1 s).reg .hl 5)).tick 4) (fun ad _ => rfl) rfl
       have hval : s.l.toNat = IR.Sem.opd Z.c ist tmps 1 o := by
@@ -199,10 +201,10 @@ theorem loadA_ok (ok : Z.OK) (F : GFinal Z base sF) (o : Opd) (s0 : GS) :
         intro o hc
         simp only [wpg_bind]
         refine wpg_mono (addrOf_ok o s0) ?_
-        intro p s1 ⟨ho1, hr1, hp, hsp, _⟩
+        intro p s1 ⟨ho1, hr1, hp, hsp, _, hj1, hl1⟩
         subst hp
         simp only [wpg_ins, wpg_setRegs]
-        refine ⟨by simp [GExt, ho1], (by show s1.regs.hl = s0.regs.hl; rw [hr1]), by simp, fun hx fr ist tmps s hrd R hat => ?_⟩
+        refine ⟨GExt.of_out (by simp [ho1]) hj1 hl1, (by show s1.regs.hl = s0.regs.hl; rw [hr1]), by simp, fun hx fr ist tmps s hrd R hat => ?_⟩
         obtain ⟨ad, had, hpc⟩ := hat
         obtain ⟨hv, hb⟩ := opd_val ok hrd hsp hc ad
         have hnn : (Instr.immW (Z.a.env ad) ⟨.ld, [.a, .mem (opdVal E o)]⟩).toNat = opdAddr Z E o := by
@@ -239,7 +241,7 @@ theorem loadA_ok (ok : Z.OK) (F : GFinal Z base sF) (o : Opd) (s0 : GS) :
         simp only [wpg_bind]
         by_cases hz : (v % 256 == 0) = true
         · simp only [hz, if_true, wpg_ins, wpg_setRegs]
-          refine ⟨GExt.push _ _, rfl, by simp, fun hx fr ist tmps s hrd R hat => ?_⟩
+          refine ⟨GExt.of_out (by simp) rfl rfl, rfl, by simp, fun hx fr ist tmps s hrd R hat => ?_⟩
           obtain ⟨hst, hat'⟩ := run_ins ok F (s0 := s0) (i := ⟨.xor, [.a]⟩) hx rfl R.img R.run hat
             (s' := ((op1 s).alu 5 ((op1 s).reg .hl 7)).tick 4) (fun ad _ => rfl) rfl
           have hval : (((op1 s).alu 5 ((op1 s).reg .hl 7)).tick 4).a.toNat = IR.Sem.opd Z.c ist tmps 1 (.const v) := by
@@ -255,7 +257,7 @@ theorem loadA_ok (ok : Z.OK) (F : GFinal Z base sF) (o : Opd) (s0 : GS) :
           subst ho'
           exact hval
         · simp only [hz, Bool.false_eq_true, if_false, wpg_ins, wpg_setRegs]
-          refine ⟨GExt.push _ _, rfl, by simp, fun hx fr ist tmps s hrd R hat => ?_⟩
+          refine ⟨GExt.of_out (by simp) rfl rfl, rfl, by simp, fun hx fr ist tmps s hrd R hat => ?_⟩
           obtain ⟨hst, hat'⟩ := run_ins ok F (s0 := s0) (i := ⟨.ld, [.a, n8 v]⟩) hx rfl R.img R.run hat
             (s' := ((skip (op1 s) 1).setReg .hl 7 (byteOf (Int.ofNat (v % 256)))).tick 7) (fun ad _ => rfl) rfl
           have hval : (((skip (op1 s) 1).setReg .hl 7 (byteOf (Int.ofNat (v % 256)))).tick 7).a.toNat =
@@ -301,10 +303,10 @@ theorem loadHL_ok (ok : Z.OK) (F : GFinal Z base sF) (o : Opd) (s0 : GS) :
       intro o hc
       simp only [wpg_bind]
       refine wpg_mono (addrOf_ok o s0) ?_
-      intro p s1 ⟨ho1, hr1, hp, hsp, _⟩
+      intro p s1 ⟨ho1, hr1, hp, hsp, _, hj1, hl1⟩
       subst hp
       simp only [wpg_ins, wpg_setRegs]
-      refine ⟨by simp [GExt, ho1], (by show s1.regs.a = s0.regs.a; rw [hr1]), by simp,
+      refine ⟨GExt.of_out (by simp [ho1]) hj1 hl1, (by show s1.regs.a = s0.regs.a; rw [hr1]), by simp,
         fun hx fr ist tmps s hrd R hat => ?_⟩
       obtain ⟨ad, had, hpc⟩ := hat
       obtain ⟨hv, hb⟩ := opd_val ok hrd hsp hc ad
@@ -336,7 +338,7 @@ theorem loadHL_ok (ok : Z.OK) (F : GFinal Z base sF) (o : Opd) (s0 : GS) :
     | tmp t => exact mem_case (.tmp t) (fun v h => by cases h)
     | const v =>
       simp only [wpg_bind, wpg_ins, wpg_setRegs]
-      refine ⟨GExt.push _ _, rfl, by simp, fun hx fr ist tmps s hrd R hat => ?_⟩
+      refine ⟨GExt.of_out (by simp) rfl rfl, rfl, by simp, fun hx fr ist tmps s hrd R hat => ?_⟩
       obtain ⟨hst, hat'⟩ := run_ins ok F (s0 := s0) (i := ⟨.ld, [.hl, n16 v]⟩) hx rfl R.img R.run hat
         (s' := ((skip (op1 s) 2).setHL (w16 (byteOf (Int.ofNat (v % 65536))) (byteOf (Int.ofNat (v % 65536) / 256)))).tick 10)
         (fun ad _ => rfl) rfl

@@ -57,7 +57,7 @@ theorem loadE_ok (ok : Z.OK) (F : GFinal Z base sF) (a b : Opd) (s0 : GS) :
         (f s).e.toNat = IR.Sem.opd Z.c ist tmps 1 b) →
       LoadE Z E base sF dt a b s0 () { s0 with out := s0.out.push (.ins i) } := by
     intro b i f hexec hfalls hsys hhl ha hval
-    refine ⟨GExt.push _ _, rfl, fun o ho => ho, fun hx fr ist tmps s hrd R hat hA => ?_⟩
+    refine ⟨GExt.of_out (by simp) rfl rfl, rfl, fun o ho => ho, fun hx fr ist tmps s hrd R hat hA => ?_⟩
     obtain ⟨hst, hat', _⟩ := run_reg ok F (s0 := s0) hx rfl R.mach hat (f s) (fun ad _ => hexec _ _ _) hfalls (hsys s)
     exact ⟨_, hst, hat', R.keep (hsys s) (ha s) (hhl s), ha s, hval s ist tmps hA⟩
   have mem_case : ∀ b : Opd, (∀ v, b ≠ .const v) →
@@ -78,10 +78,10 @@ theorem loadE_ok (ok : Z.OK) (F : GFinal Z base sF) (a b : Opd) (s0 : GS) :
     · rw [if_neg hab]
       simp only [wpg_bind]
       refine wpg_mono (addrOf_ok b s0) ?_
-      intro p s1 ⟨ho1, hr1, hp, hsp, _⟩
+      intro p s1 ⟨ho1, hr1, hp, hsp, _, hj1, hl1⟩
       subst hp
       simp only [wpg_ins, wpg_setRegs]
-      refine ⟨by simp [GExt, ho1], (by show s1.regs.a = s0.regs.a; rw [hr1]),
+      refine ⟨GExt.of_out (by simp [ho1]) hj1 hl1, (by show s1.regs.a = s0.regs.a; rw [hr1]),
         (fun o ho => by cases ho), fun hx fr ist tmps s hrd R hat hA => ?_⟩
       obtain ⟨ad, had, hpc⟩ := hat
       obtain ⟨hv, hb⟩ := opd_val ok hrd hsp hc ad
