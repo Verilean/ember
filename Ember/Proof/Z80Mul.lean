@@ -53,7 +53,7 @@ structure RtW (Z : ZCtx) (n : Nat) : Prop where
     (fun s s' => IR.Sem.rd s'.mem Z.acc n = IR.Sem.rd s.mem s.hl.toNat n)
   /-- the `n` bytes at `HL` (in RAM) := accumulator -/
   st : ∃ entry, Z.sym s!"rt_st{bits n}" entry ∧ entry < 65536 ∧
-    Routine Z entry Z.rtK (fun s => s.ramStart.toNat ≤ s.hl.toNat ∧ s.hl.toNat + n ≤ 65536)
+    Routine Z entry Z.rtK (fun s => Z.ramStart ≤ s.hl.toNat ∧ s.hl.toNat + n ≤ 65536)
       (fun s s' => ∀ x, x < Z.stackLo ∨ s.sp.toNat ≤ x → ¬ Z.rt x →
         s'.mem.get! x = (IR.Sem.wr s.mem s.hl.toNat n (IR.Sem.rd s.mem Z.acc n)).get! x)
   /-- accumulator := accumulator `op` the `n` bytes at `HL` -/

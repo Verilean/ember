@@ -2,6 +2,7 @@ import Ember.Proof.Z80After
 import Ember.Proof.Z80Mem
 import Ember.Proof.Z80Eff
 import Ember.Proof.Z80Shift
+import Ember.Proof.Z80Acc
 import Ember.Proof.Z80Bin16
 import Ember.Proof.Z80Una
 import Ember.Proof.Z80Ext
@@ -34,7 +35,8 @@ def isConst : Opd → Bool
 
 /-- The instructions the proofs cover so far. -/
 def Covered : IR.Instr → Bool
-  | .mov n _ _ | .bin _ n _ _ _ | .not n _ _ | .neg n _ _ | .cmp _ n _ _ _ | .br _ n _ _ _ => size12 n
+  | .mov n _ _ => size12 n || n == 4
+  | .bin _ n _ _ _ | .not n _ _ | .neg n _ _ | .cmp _ n _ _ _ | .br _ n _ _ _ => size12 n
   | .ext n _ m _ => (n == 1 && m == 2) || (n == 2 && m == 1)
   | .shift _ n _ _ _ amt => size12 n && isConst amt
   | .lea _ p => addrCov p
@@ -47,7 +49,7 @@ def Covered : IR.Instr → Bool
 
 /-- What an instruction needs of the program. -/
 def Need (Z : ZCtx) (E : GEnv) (dt : Nat → Prop) : IR.Instr → Prop
-  | .mov n d src => Rd Z E dt n src ∧ Wr Z E n d
+  | .mov n d src => (if n ≤ 2 then Rd Z E dt n src else RdW Z E dt n src) ∧ Wr Z E n d
   | .bin _ n d a b => Rd Z E dt n a ∧ Rd Z E dt n b ∧ Wr Z E n d
   | .not n d a | .neg n d a => Rd Z E dt n a ∧ Wr Z E n d
   | .cmp _ n d a b => Rd Z E dt n a ∧ Rd Z E dt n b ∧ Wr Z E 1 d
@@ -89,11 +91,17 @@ theorem ins0_ok (ok : Z.OK) (hT : FnLay Z E) (F : GFinal Z base sF) (hrt : RtOK 
     wpg (genInstr i) E (Ins0 Z E base sF dt i s0) s0 := by
   cases i with
   | mov n d src =>
-    rcases size12_spec hc with rfl | rfl
+    have hn : n = 1 ∨ n = 2 ∨ n = 4 := by
+      have : (size12 n || n == 4) = true := hc
+      simpa [size12, or_assoc] using this
+    rcases hn with rfl | rfl | rfl
     · refine wpg_mono (mov1_ok (dt := dt) ok hT F d src s0) ?_
       intro _ s1 ⟨hx, h⟩
       exact ⟨hx, fun hxF hN => h hxF hN⟩
     · refine wpg_mono (mov2_ok (dt := dt) ok hT F d src s0) ?_
+      intro _ s1 ⟨hx, h⟩
+      exact ⟨hx, fun hxF hN => h hxF hN⟩
+    · refine wpg_mono (movW_ok (dt := dt) ok hT F (by omega) hrt.wide hdep d src s0) ?_
       intro _ s1 ⟨hx, h⟩
       exact ⟨hx, fun hxF hN => h hxF hN⟩
   | bin op n d a b =>
