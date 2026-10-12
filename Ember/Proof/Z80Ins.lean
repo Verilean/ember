@@ -4,6 +4,7 @@ import Ember.Proof.Z80Eff
 import Ember.Proof.Z80Shift
 import Ember.Proof.Z80Acc
 import Ember.Proof.Z80AccOps
+import Ember.Proof.Z80ExtW
 import Ember.Proof.Z80Bin16
 import Ember.Proof.Z80Una
 import Ember.Proof.Z80Ext
@@ -38,7 +39,8 @@ def isConst : Opd → Bool
 def Covered : IR.Instr → Bool
   | .mov n _ _ | .bin _ n _ _ _ | .cmp _ n _ _ _ | .br _ n _ _ _ => size12 n || n == 4
   | .not n _ _ | .neg n _ _ => size12 n
-  | .ext n _ m _ => (n == 1 && m == 2) || (n == 2 && m == 1)
+  | .ext n _ m _ => (n == 1 && m == 2) || (n == 2 && m == 1) || (n == 4 && m == 2) || (n == 4 && m == 1) ||
+      (n == 2 && m == 4)
   | .shift _ n _ _ _ amt => size12 n && isConst amt
   | .lea _ p => addrCov p
   | .load n _ p | .store n p _ => size12 n && addrCov p
@@ -58,7 +60,7 @@ def Need (Z : ZCtx) (E : GEnv) (dt : Nat → Prop) : IR.Instr → Prop
   | .bin _ n d a b => RdN Z E dt n a ∧ RdN Z E dt n b ∧ Wr Z E n d
   | .not n d a | .neg n d a => Rd Z E dt n a ∧ Wr Z E n d
   | .cmp _ n d a b => RdN Z E dt n a ∧ RdN Z E dt n b ∧ Wr Z E 1 d
-  | .ext n d m src => Rd Z E dt m src ∧ Wr Z E n d
+  | .ext n d m src => (if m = 4 then ∀ v, src ≠ .const v → Rd Z E dt 4 src else Rd Z E dt m src) ∧ Wr Z E n d
   | .shift _ n d a m amt => ∀ k, amt = .const k → (Rd Z E dt n a ∧ k < 2 ^ (8 * m)) ∧ Wr Z E n d
   | .lea d p => AddrNeed Z E dt p ∧ Wr Z E 2 d
   | .load n d p => AddrNeed Z E dt p ∧ AddrData Z p n ∧ Wr Z E n d
@@ -218,12 +220,22 @@ theorem ins0_ok (ok : Z.OK) (hT : FnLay Z E) (F : GFinal Z base sF) (hrt : RtOK 
         intro _ s1 ⟨hx, h⟩
         exact ⟨hx, fun hxF hN => h hxF (hN k rfl)⟩
   | ext n d m src =>
-    have hnm : (n = 1 ∧ m = 2) ∨ (n = 2 ∧ m = 1) := by simpa [Covered] using hc
-    rcases hnm with ⟨rfl, rfl⟩ | ⟨rfl, rfl⟩
+    have hnm : (n = 1 ∧ m = 2) ∨ (n = 2 ∧ m = 1) ∨ (n = 4 ∧ m = 2) ∨ (n = 4 ∧ m = 1) ∨ (n = 2 ∧ m = 4) := by
+      simpa [Covered, or_assoc] using hc
+    rcases hnm with ⟨rfl, rfl⟩ | ⟨rfl, rfl⟩ | ⟨rfl, rfl⟩ | ⟨rfl, rfl⟩ | ⟨rfl, rfl⟩
     · refine wpg_mono (ext12_ok (dt := dt) ok hT F d src s0) ?_
       intro _ s1 ⟨hx, h⟩
       exact ⟨hx, fun hxF hN => h hxF hN⟩
     · refine wpg_mono (ext21_ok (dt := dt) ok hT F d src s0) ?_
+      intro _ s1 ⟨hx, h⟩
+      exact ⟨hx, fun hxF hN => h hxF hN⟩
+    · refine wpg_mono (ext42_ok (dt := dt) ok hT F hrt hdep d src s0) ?_
+      intro _ s1 ⟨hx, h⟩
+      exact ⟨hx, fun hxF hN => h hxF hN⟩
+    · refine wpg_mono (ext41_ok (dt := dt) ok hT F hrt hdep d src s0) ?_
+      intro _ s1 ⟨hx, h⟩
+      exact ⟨hx, fun hxF hN => h hxF hN⟩
+    · refine wpg_mono (ext24_ok (dt := dt) ok hT F d src s0) ?_
       intro _ s1 ⟨hx, h⟩
       exact ⟨hx, fun hxF hN => h hxF hN⟩
   | load n d p =>
