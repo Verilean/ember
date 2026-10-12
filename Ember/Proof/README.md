@@ -742,6 +742,8 @@ footprint (`ZCtx.wr`) has changed.
 | `rt_bound_ok`, `harness_input`, `harness_out_byte`, `harness_out_end`, `harness_drop` (`Z80Rt.lean`) | routines of the runtime, from their items in an image: `rt_bound` returns when `HL < BC` with `A`, `DE`, `HL` kept and is at `rt_trap` when not; the effects of the test harness (`Runtime.harness`: ports of the model, no interrupts) do to the harness's machine (`Harness`) what `IR.Sem.effect` does to the world.  None uses the stack |
 | `ImgIn.ok` (`Z80Image.lean`) | the statement of `loop_image_ok` for any image: one check (`ImgIn.check`, run by the kernel on a term) gives `ZCtx.OK` and, with `RtOK`, the functions |
 | **`loopH_ok`** (`Z80LoopHItems.lean`, `Z80LoopH.lean`) | the loopback image for the test harness, without the passes on the assembly: every function does what the IR's does **with nothing taken of the runtime** — the four routines it calls are proved, it calls no other, and the plan has `rtK = 0` (a function needs two bytes of stack per call below it) |
+| `loop_iter`, `loop_run`, `boot_ok`, `rt_zero_ok`, `ldir_zero` (`Z80Boot.lean`) | the runtime's code around the functions, from its items: start-up from reset (`di`, `ld sp,0`, `rt_init` — the RAM in use cleared by `rt_zero`, an induction over `ldir`), and the harness's loop — from its head either the loop is left or the entry is called as `IR.Sem.callF` says and the CPU is back at the head; `loop_run`: any number of turns against `irIter` |
+| **`loopH_run`** (`Z80LoopH.lean`) | the loopback image for the harness **from reset**: for any input and any number `j` of calls of `main` that end in the IR's semantics from its initial state, the machine is at the head of the loop with the world those calls leave, or left the loop after `i ≤ j` of them with the world of those `i` — nothing taken of the program, the layout, the image or the runtime |
 
 **Checked, not proved** (translation validation, on every function
 generated): `jumpsOk` — what the generator assumes the registers hold
@@ -792,7 +794,11 @@ changed; the tests and the size gate pass):
 the passes on the assembly: for the test harness `loopH_ok` — nothing
 assumed of the program, the layout, the image or the runtime; for the
 board `loop_image_ok` — the same but for `RtOK`, and in a machine
-without interrupts, which is not the board's.  Of the SLIP build, the checks of the
+without interrupts, which is not the board's.  For the harness also from
+reset, through start-up and the loop that calls `main` (`loopH_run`).
+The machine there is the CPU model with the harness's ports written as
+a function of the world (`hbus`, `hdev`); that `Ember.Z80.Machine` — the
+machine the tests run — does the same is by reading, not proved.  Of the SLIP build, the checks of the
 layout pass (`#guard`, not the kernel), and nothing is connected to its
 image yet (it has wide constants: the literal pool; and 1073
 instructions to run the checks on in the kernel).  Of the images as
@@ -800,8 +806,10 @@ built by default nothing is proved: `build` runs `retThreading`,
 `sweep`, `peephole`, `packHigh` and `relax` over the items, 303 bytes
 of 7159 in the SLIP build; `ember-z80 own-build --plain` is the image
 without them, tested like the other (random programs, the loopback, the
-corpus).  Not proved of any image: start-up, the interrupt routine and
-the loop that calls `main`; interrupts.  The stack: `Z.rtK` is what a
+corpus).  Not proved: for the board, start-up, the interrupt routine and the
+loop that calls `main`; interrupts in any image; that the calls of
+`main` end, composed with the machine (the Spec-to-IR chain and
+`loopH_run` are two theorems).  The stack: `Z.rtK` is what a
 routine of the runtime needs below its return address — 0 for the
 harness loopback (proved), 32 in the plans of the board builds
 (a placeholder: `Ember.Z80.StackBound` computes at most 4 for any
@@ -812,8 +820,17 @@ all 79 of the loopback program's, 1559 of the 1562 of the Ethernet
 builds'.  **Not covered:** shifts by a variable, `zero`, `not`/`neg`
 and memory through an address on four bytes, values of eight bytes, the
 MMIO effects and `input.frame`, an address through a pointer
-(by-reference parameters); the runtime routines themselves; `genProg` and the whole image; the passes on the assembly
-(`peephole`, `sweep`, `packHigh`, `relax`).
+(by-reference parameters).  Of the runtime: the arithmetic and shift
+routines, the routines on the accumulator, `rt_note`, the MMIO routines,
+and everything of the board's runtime (its effects, start-up, the
+interrupt routine and the ring) — proved are `rt_bound`, the harness's
+four effect routines, `rt_zero`, and the harness's start-up and loop.
+Of the images: the SLIP build's (its plan passes the checks, by
+`#guard`; its image is not connected), the board's loopback image
+beyond its functions, and every image as built by default — the passes
+on the assembly (`retThreading`, `sweep`, `peephole`, `packHigh`,
+`relax`) are not proved.  Interrupts are not in the machine of the
+proofs.
 
 ### Not proven
 

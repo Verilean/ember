@@ -109,6 +109,7 @@ import Ember.Proof.Z80BoardPlan
 import Ember.Proof.Z80LoopItems
 import Ember.Proof.Z80LoopImage
 import Ember.Proof.Z80Rt
+import Ember.Proof.Z80Boot
 import Ember.Proof.Z80Image
 import Ember.Proof.Z80LoopHItems
 import Ember.Proof.Z80LoopH
@@ -235,10 +236,12 @@ The Z80 back end (M7, begun) — `Ember.Z80.IR.Sem` is the semantics of its IR:
 
 * `Z80Rt`, `Z80Image`, `Z80LoopHItems`, `Z80LoopH`: **routines of the runtime** (`rt_bound`, the effects of
   the test harness) proved from their items, and the loopback image for the harness with nothing taken of
-  the runtime (`loopH_ok`).
+  the runtime (`loopH_ok`);
+* `Z80Boot`: start-up from reset and the harness's loop that calls the entry, from their items — so the
+  loopback image for the harness from reset, any number of calls of `main` (`loopH_run`).
 
 By-reference parameters and `inlineCalls` are outside M7.1; of `IR → Z80` (M7.3) not proved: the other
-routines of the runtime (`RtOK`, taken where the image calls them); interrupts; the passes on the assembly (the images as built by
+routines of the runtime (`RtOK`, taken where the image calls them); interrupts and the board's start-up; the passes on the assembly (the images as built by
 default); start-up, the interrupt routine and the main loop; the SLIP build's image.
 
 Every statement is about the definitions of `Ember.Spec` as they are;
