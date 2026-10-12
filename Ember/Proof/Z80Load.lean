@@ -29,7 +29,7 @@ def Rd (Z : ZCtx) (E : GEnv) (dt : Nat → Prop) (n : Nat) : Opd → Prop
       (MemLive E (.slot sl) → ∀ j, j < n → Z.data (Z.c.layout.addr sl + j)) ∧ Own E (.slot sl) ∧
       Z.use E.fn.name (sl, n)
   | .tmp t => E.spilled[t]! = true →
-      dt t ∧ (∃ ad, Z.c.layout.areaAddr (.frame E.fn.name) = some ad) ∧
+      dt t ∧ (∃ ad, Z.c.layout.areaAddr (tmpArea E.fn.name) = some ad) ∧
         tmpAddr Z E t + E.fn.tmps[t]! ≤ 65536 ∧ n ≤ E.fn.tmps[t]!
 
 theorem Rd.own {Z : ZCtx} {E : GEnv} {dt : Nat → Prop} {n : Nat} {o : Opd} (h : Rd Z E dt n o) : Own E o := by
@@ -44,7 +44,7 @@ theorem Rd.use {Z : ZCtx} {E : GEnv} {dt : Nat → Prop} {n : Nat} {sl : Slot} (
 /-- Where an operand is, as the generator names it. -/
 def opdVal (E : GEnv) : Opd → Val
   | .slot s => slotVal s
-  | .tmp t => slotVal { area := .frame E.fn.name, off := E.tmpOff[t]! }
+  | .tmp t => slotVal { area := tmpArea E.fn.name, off := E.tmpOff[t]! }
   | .const _ => .num 0
 
 /-- Its address. -/
@@ -110,7 +110,7 @@ theorem opd_val (ok : Z.OK) {n : Nat} {o : Opd} (hrd : Rd Z E dt n o) (hsp : ∀
     exact ⟨slot_val ok sl ad pc had, hb⟩
   | tmp t =>
     obtain ⟨_, ⟨ad, had⟩, hb, hn⟩ := hrd (hsp t rfl)
-    exact ⟨slot_val ok { area := .frame E.fn.name, off := E.tmpOff[t]! } ad pc had, by
+    exact ⟨slot_val ok { area := tmpArea E.fn.name, off := E.tmpOff[t]! } ad pc had, by
       show tmpAddr Z E t + n ≤ 65536
       omega⟩
 

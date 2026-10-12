@@ -50,3 +50,9 @@ $z80 slip $out/sliploop-own.ihx
 $z80 own-build net --out $out
 $z80 replay $out/net-own.ihx Tests/Ember/corpus Tests/Ember/regress
 $z80 replay $out/net-own.ihx $gen
+# the same without the passes on the assembly: the image the proofs of M7.3 speak of
+$z80 own-fuzz ${PLAINFUZZ:-500} --plain
+$z80 own-build sliploop --plain --out $out
+$z80 slip $out/sliploop-own-plain.ihx
+$z80 own-build net --plain --out $out
+$z80 replay $out/net-own-plain.ihx Tests/Ember/corpus Tests/Ember/regress

@@ -10,7 +10,7 @@ esp32c3.ram 5028
 esp32c3.ping_instructions 16892
 z80.ping_tstates 188314
 z80.stack 181
-z80own.code 5920
-z80own.ram 1052
+z80own.code 6011
+z80own.ram 1061
 z80own.stack 16
-z80own.ping_tstates 186146
+z80own.ping_tstates 187426

@@ -34,7 +34,7 @@ structure WrSlot (Z : ZCtx) (E : GEnv) (n : Nat) (sl : Slot) : Prop where
 
 /-- Where the temporaries of the function have their slots. -/
 structure FnLay (Z : ZCtx) (E : GEnv) : Prop where
-  area : ∃ ad, Z.c.layout.areaAddr (.frame E.fn.name) = some ad
+  area : ∃ ad, Z.c.layout.areaAddr (tmpArea E.fn.name) = some ad
   bound : ∀ t, E.spilled[t]! = true → tmpAddr Z E t + E.fn.tmps[t]! ≤ 65536
   ram : ∀ t, E.spilled[t]! = true → Z.ramStart ≤ tmpAddr Z E t
   nodata : ∀ t, E.spilled[t]! = true → ∀ j, j < E.fn.tmps[t]! → ¬ Z.data (tmpAddr Z E t + j)
@@ -314,7 +314,7 @@ theorem wpg_storeNeeded (sl : Slot) (n : Nat) (s0 : GS) (Q : Bool → GS → Pro
       simpa using this
 
 theorem wpg_tmpSlot (t : Nat) (s0 : GS) (Q : Option Val → GS → Prop)
-    (h : Q (if E.spilled[t]! = true then some (slotVal { area := .frame E.fn.name, off := E.tmpOff[t]! }) else none) s0) :
+    (h : Q (if E.spilled[t]! = true then some (slotVal { area := tmpArea E.fn.name, off := E.tmpOff[t]! }) else none) s0) :
     wpg (tmpSlot t) E Q s0 := by
   unfold tmpSlot
   simp only [wpg_bind, wpg_read]
@@ -526,17 +526,17 @@ theorem storeA_ok {base : Nat} {sF : GS} (ok : Z.OK) (hT : FnLay Z E) (F : GFina
       obtain ⟨ad0, harea⟩ := hT.area
       have hb : tmpAddr Z E t + 1 ≤ 65536 := by have := hT.bound t hsp; rw [W.size] at this; exact this
       obtain ⟨hst, hat'⟩ := run_ins ok F (s0 := { s0 with regs := _ })
-        (i := ⟨.ld, [.mem (slotVal { area := .frame E.fn.name, off := E.tmpOff[t]! }), .a]⟩) hx rfl
+        (i := ⟨.ld, [.mem (slotVal { area := tmpArea E.fn.name, off := E.tmpOff[t]! }), .a]⟩) hx rfl
         R.img R.run ⟨ad, had, hpc⟩
         (s' := ((skip (op1 s) 2).wr (Instr.immW (Z.a.env ad)
-          ⟨.ld, [.mem (slotVal { area := .frame E.fn.name, off := E.tmpOff[t]! }), .a]⟩) (op1 s).a).tick 13)
+          ⟨.ld, [.mem (slotVal { area := tmpArea E.fn.name, off := E.tmpOff[t]! }), .a]⟩) (op1 s).a).tick 13)
         (fun ad' had' => by
           rw [had] at had'
           cases had'
           intro _
           rfl) rfl
-      have hmem := ld_mem_a ok (s := s) (pc := ad) (sl := { area := .frame E.fn.name, off := E.tmpOff[t]! })
-        (i := ⟨.ld, [.mem (slotVal { area := .frame E.fn.name, off := E.tmpOff[t]! }), .a]⟩) rfl harea hb
+      have hmem := ld_mem_a ok (s := s) (pc := ad) (sl := { area := tmpArea E.fn.name, off := E.tmpOff[t]! })
+        (i := ⟨.ld, [.mem (slotVal { area := tmpArea E.fn.name, off := E.tmpOff[t]! }), .a]⟩) rfl harea hb
         (by rw [R.rs]; exact hT.ram t hsp) hA
       obtain ⟨ka, khl⟩ := forget_keep R t (IR.modN 1 v)
       refine ⟨_, hst, hat', ?_, by simp only [KeepR, zsim, and_self]⟩
@@ -710,17 +710,17 @@ theorem storeHL_ok {base : Nat} {sF : GS} (ok : Z.OK) (hT : FnLay Z E) (F : GFin
       obtain ⟨ad0, harea⟩ := hT.area
       have hb : tmpAddr Z E t + 2 ≤ 65536 := by have := hT.bound t hsp; rw [W.size] at this; exact this
       obtain ⟨hst, hat'⟩ := run_ins ok F (s0 := { s0 with regs := _ })
-        (i := ⟨.ld, [.mem (slotVal { area := .frame E.fn.name, off := E.tmpOff[t]! }), .hl]⟩) hx rfl
+        (i := ⟨.ld, [.mem (slotVal { area := tmpArea E.fn.name, off := E.tmpOff[t]! }), .hl]⟩) hx rfl
         R.img R.run ⟨ad, had, hpc⟩
         (s' := ((skip (op1 s) 2).wr16 (Instr.immW (Z.a.env ad)
-          ⟨.ld, [.mem (slotVal { area := .frame E.fn.name, off := E.tmpOff[t]! }), .hl]⟩) (op1 s).hl).tick 16)
+          ⟨.ld, [.mem (slotVal { area := tmpArea E.fn.name, off := E.tmpOff[t]! }), .hl]⟩) (op1 s).hl).tick 16)
         (fun ad' had' => by
           rw [had] at had'
           cases had'
           intro _
           rfl) rfl
-      have hmem := ld_mem_hl ok (s := s) (pc := ad) (sl := { area := .frame E.fn.name, off := E.tmpOff[t]! })
-        (i := ⟨.ld, [.mem (slotVal { area := .frame E.fn.name, off := E.tmpOff[t]! }), .hl]⟩) rfl harea hb
+      have hmem := ld_mem_hl ok (s := s) (pc := ad) (sl := { area := tmpArea E.fn.name, off := E.tmpOff[t]! })
+        (i := ⟨.ld, [.mem (slotVal { area := tmpArea E.fn.name, off := E.tmpOff[t]! }), .hl]⟩) rfl harea hb
         (by rw [R.rs]; exact hT.ram t hsp) hHL
       obtain ⟨ka, khl⟩ := forget_keep R t (IR.modN 2 v)
       refine ⟨_, hst, hat', ?_, by simp only [KeepR, zsim, and_self]⟩

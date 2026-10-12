@@ -34,6 +34,10 @@ def sanitize (s : String) : String :=
 
 def fnLabel (f : String) : String := s!"f_{sanitize f}"
 
+/-- Where the slots of a function's temporaries are: an area of their
+own, apart from every variable (a frame under a name no function has). -/
+def tmpArea (f : String) : Area := .frame (f ++ ".t")
+
 def areaSym : Area → String
   | .global g => s!"g_{sanitize g}"
   | .frame f => s!"fr_{sanitize f}"
@@ -145,7 +149,7 @@ def addrOf (o : Opd) : GM Val := do
     let e ← read
     if e.spilled[t]! then do
       modify fun s => { s with missed := s.missed.set! t true }
-      pure (.sym (areaSym (.frame e.fn.name)) (Int.ofNat e.tmpOff[t]!))
+      pure (.sym (areaSym (tmpArea e.fn.name)) (Int.ofNat e.tmpOff[t]!))
     else throw s!"{e.fn.name}: temporary t{t} has no slot and is not at hand"
   | .const _ => throw "address of a constant"
 
@@ -234,7 +238,7 @@ def killAll : GM Unit := setRegs fun _ => {}
 
 def tmpSlot (t : Nat) : GM (Option Val) := do
   let e ← read
-  if e.spilled[t]! then pure (some (.sym (areaSym (.frame e.fn.name)) (Int.ofNat e.tmpOff[t]!)))
+  if e.spilled[t]! then pure (some (.sym (areaSym (tmpArea e.fn.name)) (Int.ofNat e.tmpOff[t]!)))
   else pure none
 
 /-- A temporary is assigned: what held its old value no longer does. -/
@@ -977,12 +981,12 @@ def genInstr (i : IR.Instr) : GM Unit := do
     ins .jp [.imm (.sym "rt_trap")]
     modify fun s => { s with dead := true }
 
-/-- The slots of the temporaries, above the locals: the offset of each
-(whether it has a slot or not), and the size of the frame with them. -/
+/-- The slots of the temporaries, in their area (`tmpArea`): the offset
+of each (whether it has a slot or not), and the bytes they take. -/
 def tmpLayout (f : IR.Fn) (spilled : Array Bool) : Array Nat × Nat :=
   (List.range f.tmps.size).foldl
     (fun (acc : Array Nat × Nat) t => (acc.1.push acc.2, if spilled[t]! then acc.2 + f.tmps[t]! else acc.2))
-    (#[], f.frame)
+    (#[], 0)
 
 /-- The instruction a branch leads to, after its label. -/
 def targetOf (f : IR.Fn) (i : IR.Instr) : Option IR.Instr :=
@@ -1023,41 +1027,48 @@ def genFn (f : IR.Fn) (spilled : Array Bool) (lits : Array (Nat × Nat)) (isEntr
 
 structure Compiled where
   items : List Item
-  /-- Frame of every function, temporaries included. -/
-  frames : List (String × Nat)
+  /-- Bytes of the slots of every function's temporaries. -/
+  tmps : List (String × Nat)
   lits : Array (Nat × Nat)
+
+/-- A store to a byte of the frame that another function's frame shares
+is made, read from memory or not: the byte is one the other function's
+variable has, and the IR writes it. -/
+def keepShared (shared : Nat → Bool) (live : Option (Array Bool)) : Option (Array Bool) :=
+  live.map fun lv => lv.mapIdx fun k b => b || shared k
 
 /-- One function, two passes: with a slot for every temporary to find
 the temporaries read from their slot, then with slots for those only. -/
-def genOne (p : IR.Prog) (annotate : Bool) (f : IR.Fn) (lits : Array (Nat × Nat)) :
+def genOne (p : IR.Prog) (annotate : Bool) (shared : String → Nat → Bool) (f : IR.Fn) (lits : Array (Nat × Nat)) :
     Except String (Array Item × Array (Nat × Nat) × Nat) :=
   match genFn f (Array.replicate f.tmps.size true) lits with
   | .error e => .error e
   | .ok (_, missed, _, _, live) =>
-    match genFn f missed lits (f.name == p.entry) live annotate with
+    match genFn f missed lits (f.name == p.entry) (keepShared (shared f.name) live) annotate with
     | .error e => .error e
     | .ok (code, missed2, lits2, size, _) =>
       match (List.range f.tmps.size).find? fun t => missed2[t]! && !missed[t]! with
       | some t => .error s!"{f.name}: the two passes disagree on t{t}"
       | none => .ok (code, lits2, size)
 
-/-- The functions one after the other: items, frames (temporaries included), literals. -/
-def genFns (p : IR.Prog) (annotate : Bool) :
+/-- The functions one after the other: items, bytes of temporaries, literals. -/
+def genFns (p : IR.Prog) (annotate : Bool) (shared : String → Nat → Bool) :
     List IR.Fn → Array Item × Array (String × Nat) × Array (Nat × Nat) →
       Except String (Array Item × Array (String × Nat) × Array (Nat × Nat))
   | [], acc => .ok acc
   | f :: r, (items, frames, lits) =>
-    if f.dead then genFns p annotate r (items, frames.push (f.name, f.frame), lits)
+    if f.dead then genFns p annotate shared r (items, frames.push (f.name, 0), lits)
     else
-      match genOne p annotate f lits with
+      match genOne p annotate shared f lits with
       | .error e => .error e
-      | .ok (code, lits2, size) => genFns p annotate r (items ++ code, frames.push (f.name, size), lits2)
+      | .ok (code, lits2, size) => genFns p annotate shared r (items ++ code, frames.push (f.name, size), lits2)
 
 /-- All functions: two passes each. -/
-def genProg (p : IR.Prog) (annotate := false) : Except String Compiled :=
-  match genFns p annotate p.fns (#[], #[], #[]) with
+def genProg (p : IR.Prog) (annotate := false) (shared : String → Nat → Bool := fun _ _ => false) :
+    Except String Compiled :=
+  match genFns p annotate shared p.fns (#[], #[], #[]) with
   | .error e => .error e
-  | .ok (items, frames, lits) => .ok { items := items.toList, frames := frames.toList, lits }
+  | .ok (items, frames, lits) => .ok { items := items.toList, tmps := frames.toList, lits }
 
 /-! ## A whole image -/
 
@@ -1134,6 +1145,17 @@ def retThreading (items : List Item) : List Item := Id.run do
       if atRet.contains l && (invert cc).isSome then .ins { op := .ret, args := [cc] } else it
     | it => it
 
+/-- The bytes of a function's frame (by their offsets) that the frame of
+another function shares: the frames are overlaid along the call graph,
+and which bytes two of them share does not depend on where the RAM starts. -/
+def sharedBytes (p : IR.Prog) : String → Nat → Bool :=
+  let frameSize (f : String) : Nat := ((p.fn? f).map (·.frame)).getD 0
+  let l := IR.layout p frameSize 0
+  fun f k =>
+    match l.frames.lookup f with
+    | none => true
+    | some a => l.frames.any fun (g, b) => g != f && decide (b ≤ a + k) && decide (a + k < b + frameSize g)
+
 structure Image where
   bytes : ByteArray
   origin : Nat := 0
@@ -1153,8 +1175,8 @@ the start-up code and the effects (`Runtime.harness`, or a board's);
 `head` comes first in the image (reset and interrupt vectors). -/
 def build (p : IR.Prog) (platform : List Runtime.Piece) (head : List Item := [.ins { op := .jp, args := [.imm (.sym "rt_start")] }])
     (ramStart : Nat := 0x8000) (ramEnd : Nat := 0xFF00) (shorten := true) (reserved : Nat := 0)
-    (annotate := false) : Except String Image := do
-  let c ← genProg p annotate
+    (annotate := false) (passes := true) : Except String Image := do
+  let c ← genProg p annotate (sharedBytes p)
   let entry : List Item := []
   -- constants stay in ROM
   let roData : List Item := p.globals.filter (·.const) |>.flatMap fun g =>
@@ -1183,16 +1205,25 @@ def build (p : IR.Prog) (platform : List Runtime.Piece) (head : List Item := [.i
   for (n, sz) in cells do
     equs := equs ++ [.equ n at_]
     at_ := at_ + sz
-  let frameSize (f : String) : Nat := (c.frames.lookup f).getD 0
-  let layout := IR.layout p frameSize at_ (fun g => !g.const)
-  validate p layout frameSize at_ ramEnd
+  let frameSize (f : String) : Nat := ((p.fn? f).map (·.frame)).getD 0
+  let vars := IR.layout p frameSize at_ (fun g => !g.const)
+  validate p vars frameSize at_ ramEnd
+  -- the slots of the temporaries: above every variable, overlaid along the call graph like the frames
+  let tmpSize (f : String) : Nat := (c.tmps.lookup f).getD 0
+  let noGlobals : IR.Prog := { p with globals := [] }
+  let tmps := IR.layout noGlobals tmpSize vars.top
+  validate noGlobals tmps tmpSize vars.top ramEnd
+  let layout : Layout :=
+    { globals := vars.globals, frames := vars.frames ++ tmps.frames.map fun (f, a) => (f ++ ".t", a),
+      top := tmps.top }
   for (g, a) in layout.globals do equs := equs ++ [.equ (areaSym (.global g)) a]
   for (f, a) in layout.frames do equs := equs ++ [.equ (areaSym (.frame f)) a]
   equs := equs ++ [.equ "rt_ram" ramStart, .equ "rt_ram_size" (Nat.max 1 (layout.top - ramStart))]
   let all := equs ++ user ++ initCode ++ rt ++ litItems c.lits ++ roData ++ initData
   -- only the generated code and the runtime: data follows and stays
-  let all := packHigh (peephole (sweep (retThreading all)))
-  let all ← if shorten then Asm.relax all else pure all
+  -- `passes := false`: the items as generated and as the runtime has them, for the proofs
+  let all := if passes then packHigh (peephole (sweep (retThreading all))) else all
+  let all ← if shorten && passes then Asm.relax all else pure all
   let a ← Asm.assemble all
   if a.bytes.size > ramStart then throw s!"the image is {a.bytes.size} bytes: it does not fit below {ramStart}"
   return { bytes := a.bytes, labels := a.labels, items := all, layout,

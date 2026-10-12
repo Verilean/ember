@@ -36,24 +36,25 @@ def GenRun (p : IR.Prog) (ann : Bool) (f : IR.Fn) (spilled : Array Bool) (live :
 /-- The environments the functions with code are generated in (their
 second pass): the temporaries the first pass saw read from their slot,
 and where it saw reads of the frame start.  It follows `Codegen.genFns`. -/
-def envFns (p : IR.Prog) (ann : Bool) :
+def envFns (p : IR.Prog) (ann : Bool) (shared : String → Nat → Bool) :
     List IR.Fn → Array (Nat × Nat) → Except String (List (IR.Fn × Array Bool × Option (Array Bool)))
   | [], _ => .ok []
   | f :: r, lits =>
-    if f.dead then envFns p ann r lits
+    if f.dead then envFns p ann shared r lits
     else
       match genFn f (Array.replicate f.tmps.size true) lits with
       | .error e => .error e
       | .ok (_, missed, _, _, live) =>
-        match genFn f missed lits (f.name == p.entry) live ann with
+        match genFn f missed lits (f.name == p.entry) (keepShared (shared f.name) live) ann with
         | .error e => .error e
         | .ok (_, _, lits2, _, _) =>
-          match envFns p ann r lits2 with
+          match envFns p ann shared r lits2 with
           | .error e => .error e
-          | .ok es => .ok ((f, missed, live) :: es)
+          | .ok es => .ok ((f, missed, keepShared (shared f.name) live) :: es)
 
-def progEnvs (p : IR.Prog) (ann : Bool := false) : Except String (List (IR.Fn × Array Bool × Option (Array Bool))) :=
-  envFns p ann p.fns #[]
+def progEnvs (p : IR.Prog) (ann : Bool := false) (shared : String → Nat → Bool := fun _ _ => false) :
+    Except String (List (IR.Fn × Array Bool × Option (Array Bool))) :=
+  envFns p ann shared p.fns #[]
 
 theorem genFn_run {f : IR.Fn} {spilled : Array Bool} {lits : Array (Nat × Nat)} {isEntry : Bool}
     {live : Option (Array Bool)} {ann : Bool} {r : Array Item × Array Bool × Array (Nat × Nat) × Nat × Option (Array Bool)}
@@ -78,11 +79,11 @@ theorem genFn_run {f : IR.Fn} {spilled : Array Bool} {lits : Array (Nat × Nat)}
       cases h
 
 /-- The two passes of `genOne`. -/
-theorem genOne_inv {p : IR.Prog} {ann : Bool} {f : IR.Fn} {lits : Array (Nat × Nat)}
-    {r : Array Item × Array (Nat × Nat) × Nat} (h : genOne p ann f lits = .ok r) :
+theorem genOne_inv {p : IR.Prog} {ann : Bool} {shared : String → Nat → Bool} {f : IR.Fn} {lits : Array (Nat × Nat)}
+    {r : Array Item × Array (Nat × Nat) × Nat} (h : genOne p ann shared f lits = .ok r) :
     ∃ c1 missed l1 s1 live missed2 lv2,
       genFn f (Array.replicate f.tmps.size true) lits = .ok (c1, missed, l1, s1, live) ∧
-      genFn f missed lits (f.name == p.entry) live ann = .ok (r.1, missed2, r.2.1, r.2.2, lv2) := by
+      genFn f missed lits (f.name == p.entry) (keepShared (shared f.name) live) ann = .ok (r.1, missed2, r.2.1, r.2.2, lv2) := by
   unfold genOne at h
   split at h
   · cases h
@@ -108,11 +109,11 @@ theorem getElem?_of_prefix {α : Type} {a b : Array α} (h : a.toList <+: b.toLi
   simpa using this
 
 /-- **The functions of the program**, in its items, each generated in its environment. -/
-theorem genFns_spec (p : IR.Prog) (ann : Bool) :
+theorem genFns_spec (p : IR.Prog) (ann : Bool) (shared : String → Nat → Bool) :
     ∀ (fs : List IR.Fn) (acc acc' : Array Item × Array (String × Nat) × Array (Nat × Nat)),
-      genFns p ann fs acc = .ok acc' →
+      genFns p ann shared fs acc = .ok acc' →
       acc.1.toList <+: acc'.1.toList ∧
-        ∃ envs, envFns p ann fs acc.2.2 = .ok envs ∧
+        ∃ envs, envFns p ann shared fs acc.2.2 = .ok envs ∧
         ∀ f, f ∈ fs → f.dead = false →
           ∃ (base : Nat) (code : Array Item) (sp : Array Bool) (lv : Option (Array Bool)),
             (f, sp, lv) ∈ envs ∧ GenRun p ann f sp lv code ∧
@@ -124,59 +125,60 @@ theorem genFns_spec (p : IR.Prog) (ann : Bool) :
     rw [genFns] at h
     by_cases hd : f.dead = true
     · rw [if_pos hd] at h
-      obtain ⟨hp, envs, he, hall⟩ := genFns_spec p ann r _ acc' h
+      obtain ⟨hp, envs, he, hall⟩ := genFns_spec p ann shared r _ acc' h
       refine ⟨hp, envs, by rw [envFns, if_pos hd]; exact he, fun g hg hgd => ?_⟩
       rcases List.mem_cons.mp hg with rfl | hg'
       · rw [hd] at hgd; cases hgd
       · exact hall g hg' hgd
     · rw [if_neg hd] at h
-      cases hone : genOne p ann f lits with
+      cases hone : genOne p ann shared f lits with
       | error e => rw [hone] at h; cases h
       | ok q =>
         obtain ⟨code, lits2, size⟩ := q
         rw [hone] at h
-        obtain ⟨hp, envs, he, hall⟩ := genFns_spec p ann r _ acc' h
+        obtain ⟨hp, envs, he, hall⟩ := genFns_spec p ann shared r _ acc' h
         obtain ⟨c1, missed, l1, s1, live, missed2, lv2, h1, h2⟩ := genOne_inv hone
         have hp1 : (items ++ code).toList <+: acc'.1.toList := hp
-        have he' : envFns p ann (f :: r) lits = .ok ((f, missed, live) :: envs) := by
+        have he' : envFns p ann shared (f :: r) lits = .ok ((f, missed, keepShared (shared f.name) live) :: envs) := by
           rw [envFns, if_neg hd]
           simp only [h1, h2]
-          have he2 : envFns p ann r lits2 = .ok envs := he
+          have he2 : envFns p ann shared r lits2 = .ok envs := he
           rw [he2]
         refine ⟨(by simp : items.toList <+: (items ++ code).toList).trans hp1, _, he', fun g hg hgd => ?_⟩
         rcases List.mem_cons.mp hg with rfl | hg'
         · obtain ⟨st, hst, hj, ho⟩ := genFn_run h2
-          refine ⟨items.size, code, missed, live, List.mem_cons_self, ⟨lits, st, hst, hj, ho⟩, fun j it hj => ?_⟩
+          refine ⟨items.size, code, missed, _, List.mem_cons_self, ⟨lits, st, hst, hj, ho⟩, fun j it hj => ?_⟩
           refine getElem?_of_prefix hp1 ?_
           rw [Array.getElem?_append_right (by omega)]
           simpa using hj
         · obtain ⟨base, code', sp, lv, hm, hrun, hat⟩ := hall g hg' hgd
           exact ⟨base, code', sp, lv, List.mem_cons_of_mem _ hm, hrun, hat⟩
 
-theorem genProg_spec {p : IR.Prog} {ann : Bool} {c : Compiled} (h : genProg p ann = .ok c) :
-    ∃ envs, progEnvs p ann = .ok envs ∧
+theorem genProg_spec {p : IR.Prog} {ann : Bool} {shared : String → Nat → Bool} {c : Compiled}
+    (h : genProg p ann shared = .ok c) :
+    ∃ envs, progEnvs p ann shared = .ok envs ∧
     ∀ f, f ∈ p.fns → f.dead = false →
       ∃ (base : Nat) (code : Array Item) (sp : Array Bool) (lv : Option (Array Bool)),
         (f, sp, lv) ∈ envs ∧ GenRun p ann f sp lv code ∧
           ∀ (j : Nat) it, code[j]? = some it → c.items[base + j]? = some it := by
   unfold genProg at h
-  cases hf : genFns p ann p.fns (#[], #[], #[]) with
+  cases hf : genFns p ann shared p.fns (#[], #[], #[]) with
   | error e => rw [hf] at h; cases h
   | ok q =>
     obtain ⟨items, frames, lits⟩ := q
     rw [hf] at h
     cases h
-    obtain ⟨_, envs, he, hall⟩ := genFns_spec p ann p.fns _ _ hf
+    obtain ⟨_, envs, he, hall⟩ := genFns_spec p ann shared p.fns _ _ hf
     refine ⟨envs, he, fun f hfm hd => ?_⟩
     obtain ⟨base, code, sp, lv, hm, hrun, hat⟩ := hall f hfm hd
     exact ⟨base, code, sp, lv, hm, hrun, fun j it hj => by simpa using hat j it hj⟩
 
 /-- **Every function of a generated program has its `FnGen`**, in an
 image that holds the program's items from `off` on. -/
-theorem prog_gen {Z : ZCtx} (ok : Z.OK) (hrt : RtOK Z) {ann : Bool} {c : Compiled}
-    (hgen : genProg Z.c.prog ann = .ok c) {off : Nat}
+theorem prog_gen {Z : ZCtx} (ok : Z.OK) (hrt : RtOK Z) {ann : Bool} {shared : String → Nat → Bool} {c : Compiled}
+    (hgen : genProg Z.c.prog ann shared = .ok c) {off : Nat}
     (hitems : ∀ j it, c.items[j]? = some it → Z.items[off + j]? = some it)
-    {envs : List (IR.Fn × Array Bool × Option (Array Bool))} (henvs : progEnvs Z.c.prog ann = .ok envs)
+    {envs : List (IR.Fn × Array Bool × Option (Array Bool))} (henvs : progEnvs Z.c.prog ann shared = .ok envs)
     (hstatic : ∀ e, e ∈ envs → FnStatic Z (genEnv e.1 e.2.1 e.2.2)) :
     ∀ g gf, Z.c.prog.fn? g = some gf → gf.dead = false → ∃ G : FnGen, G.OK Z gf := by
   intro g gf hgf hd
@@ -200,10 +202,10 @@ theorem prog_gen {Z : ZCtx} (ok : Z.OK) (hrt : RtOK Z) {ann : Bool} {c : Compile
 do**: in an image that holds the items `genProg` gives, a function
 entered as `Entry` says returns as `IR.Sem.callF` does — the machine
 standing for the world it leaves — or gets to `rt_trap`. -/
-theorem prog_ok {Z : ZCtx} (ok : Z.OK) (hrt : RtOK Z) {ann : Bool} {c : Compiled}
-    (hgen : genProg Z.c.prog ann = .ok c) {off : Nat}
+theorem prog_ok {Z : ZCtx} (ok : Z.OK) (hrt : RtOK Z) {ann : Bool} {shared : String → Nat → Bool} {c : Compiled}
+    (hgen : genProg Z.c.prog ann shared = .ok c) {off : Nat}
     (hitems : ∀ j it, c.items[j]? = some it → Z.items[off + j]? = some it)
-    {envs : List (IR.Fn × Array Bool × Option (Array Bool))} (henvs : progEnvs Z.c.prog ann = .ok envs)
+    {envs : List (IR.Fn × Array Bool × Option (Array Bool))} (henvs : progEnvs Z.c.prog ann shared = .ok envs)
     (hstatic : ∀ e, e ∈ envs → FnStatic Z (genEnv e.1 e.2.1 e.2.2)) :
     ∀ k g st1, Callee Z g st1 (IR.Sem.callF k Z.c g st1) :=
   fn_ok ok (prog_gen ok hrt hgen hitems henvs hstatic)

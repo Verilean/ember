@@ -34,7 +34,8 @@ open Ember.Proof.Z80Enc Ember.Proof.IRSim
 
 def layout : IR.Layout :=
   { globals := [("buf", 33033), ("len", 33329), ("esc", 33331), ("over", 33332)],
-    frames := [("slip_send", 33336), ("slip_store", 33336), ("loop_rx", 33335), ("main", 33333)],
+    frames := [("slip_send", 33336), ("slip_store", 33336), ("loop_rx", 33335), ("main", 33333),
+      ("slip_send.t", 33343), ("slip_store.t", 33343), ("loop_rx.t", 33343), ("main.t", 33343)],
     top := 33343 }
 
 /-- The layout is the one of the image for the board. -/
@@ -63,7 +64,7 @@ def isLab (l : String) : Item → Bool
 the plan passes, and the generated items have the plan's labels (but
 `rt_trap`, which is of the runtime). -/
 def check : Bool :=
-  match progEnvs ir, genProg ir with
+  match progEnvs ir false (sharedBytes ir), genProg ir false (sharedBytes ir) with
   | .ok envs, .ok c => planCheck (planIn envs) &&
       (mkPlan (planIn envs)).labels.all fun l => l == "rt_trap" || c.items.any (isLab l)
   | _, _ => false
@@ -72,15 +73,15 @@ theorem check_true : check = true := by decide +kernel
 
 /-- The environments of the four functions. -/
 def envs : List (IR.Fn × Array Bool × Option (Array Bool)) :=
-  match progEnvs ir with
+  match progEnvs ir false (sharedBytes ir) with
   | .ok es => es
   | .error _ => []
 
-theorem progEnvs_eq : progEnvs ir = .ok envs := by
+theorem progEnvs_eq : progEnvs ir false (sharedBytes ir) = .ok envs := by
   have h := check_true
   unfold check at h
   unfold envs
-  cases hp : progEnvs ir with
+  cases hp : progEnvs ir false (sharedBytes ir) with
   | error e => rw [hp] at h; cases h
   | ok es => rfl
 
@@ -96,14 +97,17 @@ theorem plan_checked : planCheck (planIn envs) = true := by
   have h := check_true
   unfold check at h
   rw [progEnvs_eq] at h
-  cases hg : genProg ir with
+  cases hg : genProg ir false (sharedBytes ir) with
   | error e => rw [hg] at h; cases h
   | ok c =>
     rw [hg] at h
     exact (Bool.and_eq_true _ _ |>.mp h).1
 
+/-- The program has no wide constant. -/
+theorem plan_lits : plan.lits = [] := by decide +kernel
+
 /-- The labels of the plan are in an image that holds the generated items and `rt_trap`. -/
-theorem plan_labels (M : Around) {c : Compiled} (hgen : genProg ir = .ok c) {off : Nat}
+theorem plan_labels (M : Around) {c : Compiled} (hgen : genProg ir false (sharedBytes ir) = .ok c) {off : Nat}
     (hitems : ∀ j it, c.items[j]? = some it → M.items[off + j]? = some it)
     (htrap : ∃ j : Nat, M.items[j]? = some (Item.label "rt_trap")) : Labels plan M := by
   have h := check_true
@@ -129,14 +133,14 @@ theorem plan_labels (M : Around) {c : Compiled} (hgen : genProg ir = .ok c) {off
 environment it is generated in. -/
 theorem loop_static (M : Around) (hlab : Labels plan M) :
     ∀ e, e ∈ envs → FnStatic (plan.toZ M) (genEnv e.1 e.2.1 e.2.2) :=
-  planCheck_static plan_checked M hlab
+  planCheck_static plan_checked M hlab (fun n v h => by rw [show (mkPlan (planIn envs)).lits = [] from plan_lits] at h; cases h)
 
 /-- **The functions of the loopback program do what the IR's do**, in
 an image that holds the items `genProg` gives for it. -/
 theorem loop_ok (M : Around) (placed : Placed M.items 0 M.a M.addrs) (quiet : ∀ w, M.dev w .none = w)
     (areas : ∀ ar ad, layout.areaAddr ar = some ad → (plan.toZ M).sym (areaSym ar) ad)
     (accSym : (plan.toZ M).sym "rt_acc" 33343) (hrt : RtOK (plan.toZ M))
-    {c : Compiled} (hgen : genProg ir = .ok c) {off : Nat}
+    {c : Compiled} (hgen : genProg ir false (sharedBytes ir) = .ok c) {off : Nat}
     (hitems : ∀ j it, c.items[j]? = some it → M.items[off + j]? = some it)
     (htrap : ∃ j : Nat, M.items[j]? = some (Item.label "rt_trap")) :
     ∀ k g st1, Callee (plan.toZ M) g st1 (IR.Sem.callF k ctx g st1) :=

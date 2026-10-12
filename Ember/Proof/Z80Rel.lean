@@ -140,7 +140,7 @@ theorem Steps.lift {Z : ZCtx} (ok : Z.OK) {s s' : Cpu} (h : Steps s s') (w : Z.W
 
 /-- The slot of the temporary `t`. -/
 def tmpAddr (Z : ZCtx) (E : GEnv) (t : Nat) : Nat :=
-  Z.c.layout.addr { area := .frame E.fn.name, off := E.tmpOff[t]! }
+  Z.c.layout.addr { area := tmpArea E.fn.name, off := E.tmpOff[t]! }
 
 /-- An operand of the function's own: a constant, a temporary, a slot of
 its frame or of a global (not of the frame of a function it calls). -/

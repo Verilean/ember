@@ -105,6 +105,7 @@ import Ember.Proof.Z80Check
 import Ember.Proof.Z80PlanOf
 import Ember.Proof.Z80LoopIR
 import Ember.Proof.Z80Loop
+import Ember.Proof.Z80BoardPlan
 
 /-!
 # Ember.Proof — proofs (plan M5): about the reference stack (P1), and that Ember code refines it (P2)

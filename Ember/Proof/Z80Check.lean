@@ -9,8 +9,9 @@ addresses it forms are of shared bytes, the functions it calls are
 there, …) as a check on a `Plan` and on the environment the function is
 generated in: `fnStaticB`, sound by `fnStaticB_sound`.
 
-Not decided here: a wide constant is in the literal pool (`LitOK` speaks
-of the image) — the check refuses a function that reads one.
+Two things the check takes of the image, as it cannot see it: the labels
+the plan lists are there (`Labels`), and the wide constants it lists are
+in the literal pool (`Lits`).
 -/
 
 namespace Ember.Proof.Z80Gen
@@ -43,7 +44,7 @@ theorem memLiveB_of {E : GEnv} {sl : Slot} (h : MemLive E (.slot sl)) : memLiveB
 
 /-- The address of the slot of a temporary, in the plan's layout. -/
 def tmpAddrP (P : Plan) (E : GEnv) (t : Nat) : Nat :=
-  P.c.layout.addr { area := .frame E.fn.name, off := E.tmpOff[t]! }
+  P.c.layout.addr { area := tmpArea E.fn.name, off := E.tmpOff[t]! }
 
 /-- The temporaries with a slot. -/
 def tmpsOf (E : GEnv) : List Nat := (List.range E.spilled.size).filter fun t => E.spilled[t]!
@@ -63,7 +64,7 @@ def rdB (P : Plan) (E : GEnv) (dts : List Nat) (n : Nat) : Opd → Bool
       (!memLiveB E sl || within P.data (P.c.layout.addr sl) n) && ownB E sl &&
       (P.useOf E.fn.name).contains (sl, n)
   | .tmp t => !E.spilled[t]! ||
-      (dts.contains t && (P.c.layout.areaAddr (.frame E.fn.name)).isSome &&
+      (dts.contains t && (P.c.layout.areaAddr (tmpArea E.fn.name)).isSome &&
         decide (tmpAddrP P E t + E.fn.tmps[t]! ≤ 65536) && decide (n ≤ E.fn.tmps[t]!))
 
 section
@@ -89,22 +90,25 @@ theorem rdB_sound (hdt : ∀ t, t ∈ dts → dt t) {n : Nat} {o : Opd} (h : rdB
     obtain ⟨⟨⟨h1, h2⟩, h3⟩, h4⟩ := h
     exact ⟨hdt t h1, h2, h3, h4⟩
 
-/-- A wide operand: a constant is refused (the literal pool is of the image). -/
+/-- The wide constants of the plan are in the image's literal pool. -/
+def Lits (P : Plan) (M : Around) : Prop := ∀ n v, (n, v) ∈ P.lits → LitOK (P.toZ M) n v
+
+/-- A wide operand: a constant is one of the plan's. -/
 def rdWB (P : Plan) (E : GEnv) (dts : List Nat) (n : Nat) : Opd → Bool
-  | .const _ => false
+  | .const v => P.lits.contains (n, v)
   | o => rdB P E dts n o
 
-theorem rdWB_sound (hdt : ∀ t, t ∈ dts → dt t) {n : Nat} {o : Opd} (h : rdWB P E dts n o = true) :
+theorem rdWB_sound (hlit : Lits P M) (hdt : ∀ t, t ∈ dts → dt t) {n : Nat} {o : Opd} (h : rdWB P E dts n o = true) :
     RdW (P.toZ M) E dt n o := by
   cases o with
-  | const v => cases h
+  | const v => exact hlit n v (by simpa [rdWB] using h)
   | slot sl => exact rdB_sound (M := M) hdt (o := .slot sl) h
   | tmp t => exact rdB_sound (M := M) hdt (o := .tmp t) h
 
 def rdNB (P : Plan) (E : GEnv) (dts : List Nat) (n : Nat) (o : Opd) : Bool :=
   if n ≤ 2 then rdB P E dts n o else rdWB P E dts n o
 
-theorem rdNB_sound (hdt : ∀ t, t ∈ dts → dt t) {n : Nat} {o : Opd} (h : rdNB P E dts n o = true) :
+theorem rdNB_sound (hlit : Lits P M) (hdt : ∀ t, t ∈ dts → dt t) {n : Nat} {o : Opd} (h : rdNB P E dts n o = true) :
     RdN (P.toZ M) E dt n o := by
   unfold rdNB at h
   unfold RdN
@@ -114,7 +118,7 @@ theorem rdNB_sound (hdt : ∀ t, t ∈ dts → dt t) {n : Nat} {o : Opd} (h : rd
     exact rdB_sound hdt h
   · rename_i hn
     rw [if_neg hn] at h
-    exact rdWB_sound hdt h
+    exact rdWB_sound hlit hdt h
 
 /-! ## Destinations -/
 
@@ -179,7 +183,7 @@ theorem wrDB_sound {n : Nat} {d : Dst} (h : wrDB P E n d = true) : Wr (P.toZ M) 
 /-! ## The slots of the temporaries -/
 
 def layB (P : Plan) (E : GEnv) : Bool :=
-  (P.c.layout.areaAddr (.frame E.fn.name)).isSome &&
+  (P.c.layout.areaAddr (tmpArea E.fn.name)).isSome &&
   (tmpsOf E).all fun t =>
     let a := tmpAddrP P E t
     let sz := E.fn.tmps[t]!
@@ -465,7 +469,7 @@ def effNeedB (P : Plan) (E : GEnv) (dts : List Nat) (args : List (Nat × Opd)) (
    | _ => true) &&
   (match ret with | some (n, d) => wrDB P E n d | none => true)
 
-theorem effNeedB_sound (hdt : ∀ t, t ∈ dts → dt t) {args : List (Nat × Opd)} {ret : Option (Nat × Dst)}
+theorem effNeedB_sound (hlit : Lits P M) (hdt : ∀ t, t ∈ dts → dt t) {args : List (Nat × Opd)} {ret : Option (Nat × Dst)}
     (h : effNeedB P E dts args ret = true) : EffNeed (P.toZ M) E dt args ret := by
   unfold effNeedB at h
   rw [Bool.and_eq_true] at h
@@ -477,7 +481,7 @@ theorem effNeedB_sound (hdt : ∀ t, t ∈ dts → dt t) {args : List (Nat × Op
   · subst e
     have := h.1
     simp only [beq_self_eq_true, Bool.and_self, Bool.not_true, Bool.false_or, Bool.and_eq_true] at this
-    exact ⟨rdB_sound hdt this.1, rdWB_sound hdt this.2⟩
+    exact ⟨rdB_sound hdt this.1, rdWB_sound hlit hdt this.2⟩
   · subst e
     exact wrDB_sound h.2
 
@@ -504,15 +508,15 @@ def needB (P : Plan) (E : GEnv) (dts : List Nat) : IR.Instr → Bool
   | .eff _ args ret => effNeedB P E dts args ret
   | _ => false
 
-theorem needB_sound (hlab : Labels P M) (hdt : ∀ t, t ∈ dts → dt t) {i : IR.Instr} (h : needB P E dts i = true) :
+theorem needB_sound (hlab : Labels P M) (hlit : Lits P M) (hdt : ∀ t, t ∈ dts → dt t) {i : IR.Instr} (h : needB P E dts i = true) :
     Need (P.toZ M) E dt i := by
   cases i with
   | mov n d src =>
     simp only [needB, Bool.and_eq_true] at h
-    exact ⟨rdNB_sound hdt h.1, wrDB_sound h.2⟩
+    exact ⟨rdNB_sound hlit hdt h.1, wrDB_sound h.2⟩
   | bin op n d a b =>
     simp only [needB, Bool.and_eq_true] at h
-    exact ⟨rdNB_sound hdt h.1.1, rdNB_sound hdt h.1.2, wrDB_sound h.2⟩
+    exact ⟨rdNB_sound hlit hdt h.1.1, rdNB_sound hlit hdt h.1.2, wrDB_sound h.2⟩
   | not n d a =>
     simp only [needB, Bool.and_eq_true] at h
     exact ⟨rdB_sound hdt h.1, wrDB_sound h.2⟩
@@ -521,7 +525,7 @@ theorem needB_sound (hlab : Labels P M) (hdt : ∀ t, t ∈ dts → dt t) {i : I
     exact ⟨rdB_sound hdt h.1, wrDB_sound h.2⟩
   | cmp op n d a b =>
     simp only [needB, Bool.and_eq_true] at h
-    exact ⟨rdNB_sound hdt h.1.1, rdNB_sound hdt h.1.2, wrDB_sound h.2⟩
+    exact ⟨rdNB_sound hlit hdt h.1.1, rdNB_sound hlit hdt h.1.2, wrDB_sound h.2⟩
   | ext n d m src =>
     simp only [needB, Bool.and_eq_true] at h
     refine ⟨?_, wrDB_sound h.2⟩
@@ -543,7 +547,7 @@ theorem needB_sound (hlab : Labels P M) (hdt : ∀ t, t ∈ dts → dt t) {i : I
     intro k hk
     subst hk
     simp only [needB, Bool.and_eq_true, decide_eq_true_eq] at h
-    exact ⟨⟨rdNB_sound hdt h.1.1, h.1.2⟩, wrDB_sound h.2⟩
+    exact ⟨⟨rdNB_sound hlit hdt h.1.1, h.1.2⟩, wrDB_sound h.2⟩
   | lea d p =>
     simp only [needB, Bool.and_eq_true] at h
     exact ⟨addrNeedB_sound hlab hdt h.1, wrDB_sound h.2⟩
@@ -555,18 +559,18 @@ theorem needB_sound (hlab : Labels P M) (hdt : ∀ t, t ∈ dts → dt t) {i : I
     exact ⟨addrNeedB_sound hlab hdt h.1.1, addrStoreB_sound h.1.2, rdB_sound hdt h.2⟩
   | br op n a b l =>
     simp only [needB, Bool.and_eq_true, List.contains_iff_mem] at h
-    exact ⟨rdNB_sound hdt h.1.1, rdNB_sound hdt h.1.2, hlab _ h.2⟩
+    exact ⟨rdNB_sound hlit hdt h.1.1, rdNB_sound hlit hdt h.1.2, hlab _ h.2⟩
   | jmp l => trivial
   | label l => trivial
   | ret v =>
     intro n o e
     subst e
-    exact rdNB_sound hdt h
+    exact rdNB_sound hlit hdt h
   | trap =>
     simp only [needB, List.contains_iff_mem] at h
     exact hlab _ h
   | call g ret reg => exact callNeedB_sound hlab hdt h
-  | eff e args ret => exact effNeedB_sound hdt h
+  | eff e args ret => exact effNeedB_sound hlit hdt h
   | _ => cases h
 
 /-! ## The temporaries assigned, as a list -/
@@ -644,7 +648,7 @@ def fnStaticB (P : Plan) (E : GEnv) : Bool :=
 
 /-- **The check is sound**: a function it accepts has `FnStatic`, in an
 image that has the plan's labels. -/
-theorem fnStaticB_sound (hlab : Labels P M) (h : fnStaticB P E = true) : FnStatic (P.toZ M) E := by
+theorem fnStaticB_sound (hlab : Labels P M) (hlit : Lits P M) (h : fnStaticB P E = true) : FnStatic (P.toZ M) E := by
   simp only [fnStaticB, Bool.and_eq_true, List.all_eq_true, List.mem_range, decide_eq_true_eq] at h
   obtain ⟨⟨⟨⟨hsh, hneed⟩, hlay⟩, hdep⟩, hreg⟩ := h
   obtain ⟨hcov, hfalls, hne, hlabels⟩ := shapeB_sound hsh
@@ -655,7 +659,7 @@ theorem fnStaticB_sound (hlab : Labels P M) (h : fnStaticB P E = true) : FnStati
       · rw [Array.getElem?_eq_none h'] at hb; cases hb
     have := hneed pc hlt
     rw [hb] at this
-    exact needB_sound hlab (dtL_sound E.fn.body pc) this
+    exact needB_sound hlab hlit (dtL_sound E.fn.body pc) this
   · rw [e] at hreg
     simp only [Bool.and_eq_true] at hreg
     exact ⟨size12_spec hreg.1, wrSlotB_sound hreg.2⟩

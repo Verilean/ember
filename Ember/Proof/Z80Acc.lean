@@ -319,9 +319,9 @@ theorem storeAcc_ok (ok : Z.OK) (hT : FnLay Z E) (F : GFinal Z base sF) {n : Nat
       obtain ⟨ad0, harea⟩ := hT.area
       have hb' : tmpAddr Z E t + n ≤ 65536 := by have := hT.bound t hsp; rw [W.size] at this; exact this
       obtain ⟨s', st, at', hsp', hh', hrs', hsz', hfree⟩ := st_run ok F hn hrt hdep
-        (s1 := s0) (p := slotVal { area := .frame E.fn.name, off := E.tmpOff[t]! })
+        (s1 := s0) (p := slotVal { area := tmpArea E.fn.name, off := E.tmpOff[t]! })
         ⟨hx.out, hx.jumps, hx.labels⟩ R hat
-        (fun pc => slot_val ok { area := .frame E.fn.name, off := E.tmpOff[t]! } ad0 pc harea) (hT.ram t hsp) hb'
+        (fun pc => slot_val ok { area := tmpArea E.fn.name, off := E.tmpOff[t]! } ad0 pc harea) (hT.ram t hsp) hb'
       rw [hv] at hfree
       have hna := hT.noacc t hsp
       rw [W.size] at hna

@@ -520,23 +520,24 @@ def irDump (count seed : Nat) : IO UInt32 := do
 /-! ## The own back end (plan M6) -/
 
 /-- Compile with the own back end for the test harness. -/
-def ownImage (p : Lang.Prog) (annotate := false) : Except String Codegen.Image := do
+def ownImage (p : Lang.Prog) (annotate := false) (passes := true) : Except String Codegen.Image := do
   let p ← match p.check with
     | .ok p => pure p
     | .error e => throw e.toString
-  Codegen.build (← IR.lower p) Runtime.harness (annotate := annotate)
+  Codegen.build (← IR.lower p) Runtime.harness (annotate := annotate) (passes := passes)
 
 def machineOf (img : Codegen.Image) : Machine :=
   { cpu := { (({} : Cpu).load img.origin img.bytes) with ramStart := 0x8000 } }
 
 /-- A program through the own back end, on the model, with the harness. -/
-def ownRun (p : Lang.Prog) (ins : Array Input) (budget : Nat := 20000000) : Except String Trace := do
-  let img ← ownImage p
+def ownRun (p : Lang.Prog) (ins : Array Input) (budget : Nat := 20000000) (passes := true) :
+    Except String Trace := do
+  let img ← ownImage p (passes := passes)
   Target.runHarness (machineOf img) 0 { impl := "z80-own", profile := "z80" } ins
     p.dropReasons.toArray p.notes.toArray budget
 
-def ownDiverges (p : Lang.Prog) (ins : Array Input) : Bool :=
-  match Fuzz.interp p ins, ownRun p ins with
+def ownDiverges (p : Lang.Prog) (ins : Array Input) (passes := true) : Bool :=
+  match Fuzz.interp p ins, ownRun p ins (passes := passes) with
   | .ok a, .ok b => !Fuzz.agree a b
   | .ok _, .error _ => true
   | .error _, _ => false
@@ -557,28 +558,28 @@ def listing (img : Codegen.Image) : String := Id.run do
   return out
 
 /-- M6.5: random programs, Ember interpreter = own back end's code on the model. -/
-def ownFuzz (count seed : Nat) (verbose : Bool) : IO UInt32 := do
+def ownFuzz (count seed : Nat) (verbose : Bool) (passes := true) : IO UInt32 := do
   let mut bad := 0
   let mut bytes := 0
   for i in [0:count] do
     let (p, ins) := Lang.Gen.sample (seed + i)
-    if let .ok img := ownImage p then bytes := bytes + img.codeSize
-    if ownDiverges p ins then
+    if let .ok img := ownImage p (passes := passes) then bytes := bytes + img.codeSize
+    if ownDiverges p ins passes then
       bad := bad + 1
       if bad ≤ 2 then
-        let small ← Lang.Gen.shrinkProg (fun q => pure (ownDiverges q ins)) p
+        let small ← Lang.Gen.shrinkProg (fun q => pure (ownDiverges q ins passes)) p
         IO.println s!"FAIL p{seed + i}, shrunk to {Lang.Gen.progSize small} statements:\n{small.pretty}"
         IO.println s!"inputs:\n{(Trace.ofSteps {} (ins.map (·, []))).print}"
         if let .ok q := small.check then
           if let .ok ir := IR.lower q then IO.println ir.text
         if verbose then
-          if let .ok img := ownImage small true then IO.println (listing img)
+          if let .ok img := ownImage small true passes then IO.println (listing img)
         if let .ok it := Fuzz.interp small ins then IO.println s!"interpreter:\n{it.print}"
-        match ownRun small ins with
+        match ownRun small ins (passes := passes) with
         | .ok t => IO.println s!"z80:\n{t.print}"
         | .error e => IO.println s!"z80: {e}"
       else IO.println s!"FAIL p{seed + i}"
-  IO.println s!"z80 own back end: {count} random programs: Ember interpreter = generated code on the model; {bad} failures ({bytes / (max count 1)} bytes per image on average)"
+  IO.println s!"z80 own back end{if passes then "" else " (no passes on the assembly)"}: {count} random programs: Ember interpreter = generated code on the model; {bad} failures ({bytes / (max count 1)} bytes per image on average)"
   return if bad == 0 then 0 else 1
 
 def hex2 (n : Nat) : String :=
@@ -603,7 +604,8 @@ def toIhx (bytes : ByteArray) (origin : Nat) : String := Id.run do
 
 /-- The stack or the SLIP loop for a board (`Runtime.board`), by the own
 back end. -/
-def ownBoardImage (name : String) (trace : Nat) (annotate := false) : Except String Codegen.Image := do
+def ownBoardImage (name : String) (trace : Nat) (annotate := false) (passes := true) :
+    Except String Codegen.Image := do
   let prog ← match name with
     | "net" => pure Net.prog
     | "sliploop" => pure Net.Loop.prog
@@ -613,7 +615,7 @@ def ownBoardImage (name : String) (trace : Nat) (annotate := false) : Except Str
     | .error e => throw e.toString
   let (_, reserved) := Runtime.boardCells 0x8000
   Codegen.build (← IR.lower p) (Runtime.board trace p.dropReasons p.notes) (Runtime.boardHead 0x8000)
-    (reserved := reserved) (annotate := annotate)
+    (reserved := reserved) (annotate := annotate) (passes := passes)
 
 /-- Bytes of code per function and runtime routine, largest first. -/
 def ownSizes (img : Codegen.Image) : List (String × Nat) :=
@@ -628,15 +630,15 @@ def ownSizes (img : Codegen.Image) : List (String × Nat) :=
     (syms[k]!.1, (if k + 1 < syms.size then syms[k + 1]!.2 else img.codeSize) - syms[k]!.2)
   (sized.toArray.qsort (fun a b => a.2 > b.2)).toList
 
-def ownBuild (name outDir : String) (trace : Nat) : IO UInt32 := do
-  match ownBoardImage name trace with
+def ownBuild (name outDir : String) (trace : Nat) (passes := true) : IO UInt32 := do
+  match ownBoardImage name trace (passes := passes) with
   | .error e => IO.println s!"FAIL own-build {name}: {e}"; return 1
   | .ok img =>
     IO.FS.createDirAll outDir
-    let base := System.FilePath.mk outDir / s!"{name}-own"
+    let base := System.FilePath.mk outDir / s!"{name}-own{if passes then "" else "-plain"}"
     IO.FS.writeFile (base.withExtension "ihx") (toIhx img.bytes img.origin)
     -- the listing with the IR between the instructions
-    if let .ok ann := ownBoardImage name trace true then IO.FS.writeFile (base.withExtension "lst") (listing ann)
+    if let .ok ann := ownBoardImage name trace true passes then IO.FS.writeFile (base.withExtension "lst") (listing ann)
     IO.FS.writeFile (base.withExtension "noi")
       (String.join (img.labels.map fun (n, a) => s!"DEF {n} 0x{hex2 (a / 256)}{hex2 a}\n"))
     IO.println s!"own back end: {name}: {img.codeSize} bytes of code and constants, {img.ramSize} bytes of RAM -> {base.withExtension "ihx"}"
@@ -720,6 +722,8 @@ structure Opts where
   u64 : Bool := false
   /-- `EMBER_TRACE` of an image built by the own back end. -/
   traceLevel : Nat := 2
+  /-- The own back end without the passes on the assembly: the image the proofs speak of. -/
+  plain : Bool := false
 
 def parse : List String → Opts → Opts
   | [], o => o
@@ -732,6 +736,7 @@ def parse : List String → Opts → Opts
   | "--trace-from" :: n :: r, o => parse r { o with traceFrom := n.toNat?.getD 0 }
   | "--verbose" :: r, o => parse r { o with verbose := true }
   | "--u64" :: r, o => parse r { o with u64 := true }
+  | "--plain" :: r, o => parse r { o with plain := true }
   | "--trace" :: n :: r, o => parse r { o with traceLevel := n.toNat?.getD 2 }
   | a :: r, o => parse r { o with pos := o.pos ++ [a] }
 
@@ -754,7 +759,8 @@ def usage : String :=
   "  ember-z80 ir-replay PATH...                          the stack on the IR interpreter\n" ++
   "  ember-z80 own-fuzz [COUNT] [--seed S] [--verbose]    random programs: interpreter vs generated code\n" ++
   "  ember-z80 own-build net|sliploop [--trace 0|1|2] [--out DIR]    image, listing, symbols\n" ++
-  "  ember-z80 own-size net|sliploop [--trace 0|1|2]      bytes per function"
+  "  ember-z80 own-size net|sliploop [--trace 0|1|2]      bytes per function\n" ++
+  "  --plain with own-fuzz, own-build, own-size: without the passes on the assembly (the image the proofs speak of)"
 
 def main (args : List String) : IO UInt32 := do
   let o := parse args {}
@@ -786,9 +792,9 @@ def main (args : List String) : IO UInt32 := do
       return if t.bad == 0 then 0 else 1
   | ["profile", image] => profile image
   | "stack" :: image :: paths => stackDepth image paths
-  | ["own-build", name] => ownBuild name (o.out.getD ".lake/build/z80") o.traceLevel
+  | ["own-build", name] => ownBuild name (o.out.getD ".lake/build/z80") o.traceLevel !o.plain
   | ["own-size", name] =>
-    match ownBoardImage name o.traceLevel with
+    match ownBoardImage name o.traceLevel (passes := !o.plain) with
     | .error e => IO.println s!"FAIL {e}"; return 1
     | .ok img =>
       for (n, sz) in (ownSizes img).take 45 do IO.println s!"  {sz}\t{n}"
@@ -798,7 +804,7 @@ def main (args : List String) : IO UInt32 := do
       IO.println s!"RAM: runtime and ring {lo gl - 0x8000}, globals {lo fr - lo gl}, frames {img.layout.top - lo fr}"
       IO.println s!"own back end: {name}: {img.codeSize} bytes of code and constants, {img.ramSize} bytes of RAM"
       return 0
-  | "own-fuzz" :: rest => ownFuzz ((rest.head?.bind (·.toNat?)).getD 500) o.seed o.verbose
+  | "own-fuzz" :: rest => ownFuzz ((rest.head?.bind (·.toNat?)).getD 500) o.seed o.verbose !o.plain
   | "ir-replay" :: paths => irReplay paths
   | "ir-dump" :: rest => irDump ((rest.head?.bind (·.toNat?)).getD 400) o.seed
   | "ir-fuzz" :: rest => irFuzz ((rest.head?.bind (·.toNat?)).getD 1000) o.seed

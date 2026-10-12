@@ -78,6 +78,8 @@ structure Plan where
   dst : List (String × List (Slot × Nat))
   /-- Labels that are in the image. -/
   labels : List String
+  /-- Wide constants that are in the image's literal pool: bytes and value. -/
+  lits : List (Nat × Nat) := []
 
 def Plan.depthOf (P : Plan) (f : String) : Nat := (P.depth.lookup f).getD 0
 def Plan.wrOf (P : Plan) (f : String) : Ivs := (P.wr.lookup f).getD []

@@ -6,8 +6,8 @@ import Ember.Proof.Z80Check
 `mkPlan` makes a `Plan` of a program, its layout and the environments
 its functions are generated in: the shared bytes are the globals in RAM
 and the bytes of the frames but those whose stores the generator leaves
-out; a function may write the globals, its frame and the frames of the
-functions it can reach; it uses the slots it reads and writes.
+out; a function may write the globals, its frame and the slots of its
+temporaries, and those of the functions it can reach; it uses the slots it reads and writes.
 
 Nothing is proved of `mkPlan`: what a plan must be is what `okB` and
 `fnStaticB` decide of it.  `planCheck` runs them on every function.
@@ -52,6 +52,19 @@ def writesOf : IR.Instr → List (Slot × Nat)
   | .call _ ret _ | .eff _ _ ret => (ret.map fun a => dstS a.1 a.2).getD []
   | _ => []
 
+def opdC (n : Nat) : Opd → List (Nat × Nat)
+  | .const v => if n ≤ 2 then [] else [(n, v)]
+  | _ => []
+
+/-- The wide constants an instruction reads. -/
+def constsOf : IR.Instr → List (Nat × Nat)
+  | .mov n _ s => opdC n s
+  | .bin _ n _ a b | .cmp _ n _ a b | .br _ n a b _ => opdC n a ++ opdC n b
+  | .shift _ n _ a _ _ => opdC n a
+  | .eff _ args _ => args.flatMap fun a => opdC a.1 a.2
+  | .ret v => (v.map fun a => opdC a.1 a.2).getD []
+  | _ => []
+
 def fnWrites (f : IR.Fn) : List (Slot × Nat) :=
   (f.regParam.map fun p => [(p.2, p.1)]).getD [] ++ f.body.toList.flatMap writesOf
 
@@ -93,11 +106,14 @@ def depths (p : IR.Prog) (rtK : Nat) : Nat → List (String × Nat)
 def mkPlan (I : PlanIn) : Plan :=
   let L := I.c.layout
   let globals : Ivs := I.c.prog.globals.filterMap fun g => (L.globals.lookup g.name).map fun a => (a, a + g.size)
+  -- the frame of a function, and the slots of its temporaries
   let frameOf (f : String) : Ivs :=
-    match L.frames.lookup f, I.envs.find? (·.1.name == f) with
-    | some a, some e => [(a, a + (tmpLayout e.1 e.2.1).2)]
-    | some a, none => [(a, a + ((I.c.prog.fn? f).map (·.frame)).getD 0)]
-    | none, _ => []
+    (match L.frames.lookup f with
+     | some a => [(a, a + ((I.c.prog.fn? f).map (·.frame)).getD 0)]
+     | none => []) ++
+    (match L.areaAddr (tmpArea f), I.envs.find? (·.1.name == f) with
+     | some a, some e => [(a, a + (tmpLayout e.1 e.2.1).2)]
+     | _, _ => [])
   { c := I.c, ramStart := I.ramStart, stackLo := I.stackLo, stackHi := I.stackHi, acc := I.acc, rtK := I.rtK,
     depth := depths I.c.prog I.rtK I.c.prog.fns.length,
     data := globals ++ I.envs.flatMap fun e =>
@@ -114,16 +130,18 @@ def mkPlan (I : PlanIn) : Plan :=
       fnLabel e.1.name :: e.1.body.toList.filterMap fun i =>
         match i with
         | .label l => some (lname E l)
-        | _ => none }
+        | _ => none,
+    lits := (I.envs.flatMap fun e => e.1.body.toList.flatMap constsOf).eraseDups }
 
 /-- The plan passes: `okB`, and `fnStaticB` of every function in its environment. -/
 def planCheck (I : PlanIn) : Bool :=
   okB (mkPlan I) && I.envs.all fun e => fnStaticB (mkPlan I) (genEnv e.1 e.2.1 e.2.2)
 
-theorem planCheck_static {I : PlanIn} (h : planCheck I = true) (M : Around) (hlab : Labels (mkPlan I) M) :
+theorem planCheck_static {I : PlanIn} (h : planCheck I = true) (M : Around) (hlab : Labels (mkPlan I) M)
+    (hlit : Lits (mkPlan I) M) :
     ∀ e, e ∈ I.envs → FnStatic ((mkPlan I).toZ M) (genEnv e.1 e.2.1 e.2.2) := by
   simp only [planCheck, Bool.and_eq_true, List.all_eq_true] at h
-  exact fun e he => fnStaticB_sound hlab (h.2 e he)
+  exact fun e he => fnStaticB_sound hlab hlit (h.2 e he)
 
 theorem planCheck_ok {I : PlanIn} (h : planCheck I = true) : okB (mkPlan I) = true := by
   simp only [planCheck, Bool.and_eq_true] at h
