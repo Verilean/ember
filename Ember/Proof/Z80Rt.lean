@@ -2,6 +2,8 @@ import Ember.Proof.Z80Prog
 import Ember.Proof.Z80Cmp
 import Ember.Proof.Z80Ext
 import Ember.Proof.Z80Addr
+import Ember.Proof.Z80Una
+import Ember.Proof.Z80Shift
 
 /-!
 # Ember.Proof.Z80Rt — routines of the runtime, proved (plan M7.3)
@@ -516,6 +518,95 @@ theorem rt_bound_ok (ok : Z.OK) (hsz : Z.a.bytes.size < 65536) {k j : Nat} (hhas
       simpa only [Cpu.de] using this
     · rw [if_neg hlt]
       exact ⟨j, htrap, at6⟩
+
+/-! ## Routines on registers -/
+
+/-- **Instructions that leave memory alone, one after the other**, from the image. -/
+theorem does_list (ok : Z.OK) : ∀ (l : List (Instr × (Cpu → Cpu))), (∀ p, p ∈ l → Does p.1 p.2) →
+    ∀ (k : Nat) (s : Cpu), Has Z k (l.map fun p => Item.ins p.1) → Mach Z s → At Z.addrs k s →
+      Steps s (runL (l.map (·.2)) s) ∧ At Z.addrs (k + l.length) (runL (l.map (·.2)) s) ∧
+        Mach Z (runL (l.map (·.2)) s) ∧ Sys s (runL (l.map (·.2)) s)
+  | [], _, _, s, _, M, hat => ⟨Steps.refl s, hat, M, Sys.refl s⟩
+  | p :: r, hd, k, s, hh, M, hat => by
+    obtain ⟨st1, at1, M1, hS1⟩ := does_raw ok (hd p List.mem_cons_self) (hh.get 0 rfl) M hat
+    have hr : Has Z (k + 1) (r.map fun p => Item.ins p.1) := fun j it hj => by
+      have := hh (j + 1) it (by simpa using hj)
+      rw [show k + 1 + j = k + (j + 1) by omega]
+      exact this
+    obtain ⟨st2, at2, M2, hS2⟩ := does_list ok r (fun q hq => hd q (List.mem_cons_of_mem _ hq)) (k + 1) (p.2 s) hr M1 at1
+    refine ⟨st1.trans st2, ?_, M2, hS1.trans hS2⟩
+    rw [show k + (p :: r).length = k + 1 + r.length by simp; omega]
+    exact at2
+
+theorem Has.tail {k : Nat} {x : Item} {l : List Item} (h : Has Z k (x :: l)) : Has Z (k + 1) l := fun j it hj => by
+  have := h (j + 1) it (by simpa using hj)
+  rw [show k + 1 + j = k + (j + 1) by omega]
+  exact this
+
+theorem Has.pre {k : Nat} {l1 l2 : List Item} (h : Has Z k (l1 ++ l2)) : Has Z k l1 := fun j it hj => by
+  have hlt : j < l1.length := by
+    rcases Nat.lt_or_ge j l1.length with h' | h'
+    · exact h'
+    · rw [List.getElem?_eq_none h'] at hj; cases hj
+  exact h j it (by rw [List.getElem?_append_left hlt]; exact hj)
+
+theorem cplA_h (s : Cpu) : (cplA s).h = s.h := by simp only [cplA, zsim]
+theorem cplA_l (s : Cpu) : (cplA s).l = s.l := by simp only [cplA, zsim]
+theorem ldRR74_a (s : Cpu) : (ldRR 7 4 s).a = s.h := by simp only [ldRR, zsim]
+theorem ldRR74_l (s : Cpu) : (ldRR 7 4 s).l = s.l := by simp only [ldRR, zsim]
+theorem ldRR75_a (s : Cpu) : (ldRR 7 5 s).a = s.l := by simp only [ldRR, zsim]
+theorem ldRR75_h (s : Cpu) : (ldRR 7 5 s).h = s.h := by simp only [ldRR, zsim]
+theorem ldRA4_h (s : Cpu) : (ldRA 4 s).h = s.a := by simp only [ldRA, zsim]
+theorem ldRA4_l (s : Cpu) : (ldRA 4 s).l = s.l := by simp only [ldRA, zsim]
+theorem ldRA5_l (s : Cpu) : (ldRA 5 s).l = s.a := by simp only [ldRA, zsim]
+theorem ldRA5_h (s : Cpu) : (ldRA 5 s).h = s.h := by simp only [ldRA, zsim]
+
+def not16Items : List Item :=
+  [.label "rt_not16", .ins ⟨.ld, [.a, .h]⟩, .ins ⟨.cpl, []⟩, .ins ⟨.ld, [.h, .a]⟩, .ins ⟨.ld, [.a, .l]⟩, .ins ⟨.cpl, []⟩,
+   .ins ⟨.ld, [.l, .a]⟩, .ins ⟨.ret, []⟩]
+
+/-- **`rt_not16`**: `HL := ~HL`.  It uses no stack and writes no memory. -/
+theorem rt_not16_ok (ok : Z.OK) (hsz : Z.a.bytes.size < 65536) {k : Nat} (hhas : Has Z k not16Items) :
+    RtPure Z "rt_not16" (fun s s' => s'.hl.toNat = 65535 - s.hl.toNat) := by
+  intro _
+  obtain ⟨T, hT, hsym, hTle⟩ := label_sym ok (hhas.get 0 rfl)
+  refine ⟨T, hsym, by omega, fun s hpc I hh hrs hmsz _ _ _ => ?_⟩
+  have M : Mach Z s := ⟨I, hh⟩
+  have at1 : At Z.addrs (k + 1) s := at_label ok (hhas.get 0 rfl) ⟨T, hT, hpc⟩
+  obtain ⟨st1, at2, M2, hS⟩ := does_list ok
+    [(⟨.ld, [.a, .h]⟩, ldRR 7 4), (⟨.cpl, []⟩, cplA), (⟨.ld, [.h, .a]⟩, ldRA 4), (⟨.ld, [.a, .l]⟩, ldRR 7 5),
+     (⟨.cpl, []⟩, cplA), (⟨.ld, [.l, .a]⟩, ldRA 5)]
+    (by
+      intro p hp
+      simp only [List.mem_cons, List.mem_nil_iff, or_false] at hp
+      rcases hp with rfl | rfl | rfl | rfl | rfl | rfl
+      · exact does_ld_a_h
+      · exact does_cpl
+      · exact does_ld_h_a
+      · exact does_ld_a_l
+      · exact does_cpl
+      · exact does_ld_l_a)
+    (k + 1) s (Has.pre (l2 := [.ins ⟨.ret, []⟩]) hhas.tail) M at1
+  obtain ⟨c, hc⟩ : ∃ c : Cpu, c = ldRA 5 (cplA (ldRR 7 5 (ldRA 4 (cplA (ldRR 7 4 s))))) := ⟨_, rfl⟩
+  have hrun : runL ([(⟨.ld, [.a, .h]⟩, ldRR 7 4), (⟨.cpl, []⟩, cplA), (⟨.ld, [.h, .a]⟩, ldRA 4),
+      (⟨.ld, [.a, .l]⟩, ldRR 7 5), (⟨.cpl, []⟩, cplA), ((⟨.ld, [.l, .a]⟩ : Instr), ldRA 5)].map (·.2)) s = c := by
+    rw [hc]
+    rfl
+  rw [hrun] at st1 at2 M2 hS
+  obtain ⟨s', st2, hpc', hsp', hmem', hh', hrs', hh2, hl2, _⟩ := ret_raw ok (hhas.get 7 rfl) M2 at2
+  refine ⟨s', st1.trans st2, ?_, by rw [hsp', hS.2.2.2], by rw [hh', hS.2.2.1]; exact hh, by rw [hrs', hS.2.1],
+    by rw [hmem', hS.1]; exact hmsz, ?_, fun x _ _ => by rw [hmem', hS.1]⟩
+  · rw [hpc', hS.2.2.2]
+    simp only [Cpu.rd16, Cpu.rd, hS.1]
+  · show s'.hl.toNat = 65535 - s.hl.toNat
+    have hH : s'.h.toNat = 255 - s.h.toNat := by
+      rw [hh2, hc, ldRA5_h, cplA_h, ldRR75_h, ldRA4_h, cplA_a, ldRR74_a]
+    have hL : s'.l.toNat = 255 - s.l.toNat := by
+      rw [hl2, hc, ldRA5_l, cplA_a, ldRR75_a, ldRA4_l, cplA_l, ldRR74_l]
+    rw [hl_toNat, hl_toNat, hH, hL]
+    have := s.h.toNat_lt
+    have := s.l.toNat_lt
+    omega
 
 end
 
