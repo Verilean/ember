@@ -29,7 +29,7 @@ theorem Rel.keep {regs : Regs} {ist : IR.Sem.St} {tmps : Array Nat} {s s' : Cpu}
     (R : Rel Z E fr dt regs ist tmps s) (hS : Sys s s') (ha : s'.a = s.a) (hhl : s'.hl = s.hl) :
     Rel Z E fr dt regs ist tmps s' :=
   R.regs_only hS.1 hS.2.1 hS.2.2.1 hS.2.2.2 (fun o ho hown => by rw [ha]; exact R.ra o ho hown)
-    (fun o ho hown => by rw [hhl]; exact R.rhl o ho hown) R.ina R.inhl
+    (fun o ho hown => by rw [hhl]; exact R.rhl o ho hown) R.ina R.inhl (fun n o h => h)
 
 /-- What `loadE a b` promises, `A` holding `a`: `b` in `E`. -/
 def LoadE (Z : ZCtx) (E : GEnv) (base : Nat) (sF : GS) (dt : Nat → Prop) (a b : Opd) (s0 : GS)
@@ -99,7 +99,7 @@ theorem loadE_ok (ok : Z.OK) (F : GFinal Z base sF) (a b : Opd) (s0 : GS) :
       refine ⟨_, st1.trans st2, at2, ?_, by simp only [zsim], ?_⟩
       · refine R.regs_only (by simp only [zsim]) (by simp only [zsim]) (by simp only [zsim]) (by simp only [zsim])
           (fun o ho hown => ?_) (fun o ho => by cases ho) (fun sl hsl => R.ina sl (by rw [← hr1]; exact hsl))
-          (fun sl hsl => by cases hsl)
+          (fun sl hsl => by cases hsl) (fun n o h => by rw [← hr1]; exact h)
         simp only [zsim]
         exact R.ra o (by rw [← hr1]; exact ho) hown
       · simp only [zsim]
@@ -192,7 +192,7 @@ theorem bin8Rt_ok (ok : Z.OK) (hT : FnLay Z E) (F : GFinal Z base sF) {op : Bin}
       (s1 := { s1 with out := s1.out.push (.ins ⟨.call, [.imm (.sym (rt8name op))]⟩) })
       ((GExt.regs _ _).trans hx) rfl (rt8 hrt hop) hdep R2 at2
     refine ⟨s', st2.trans st3, at3, hRel _ (fun o ho => by cases ho) (fun o ho hown => ?_)
-      (fun sl hsl => by cases hsl) (fun sl hsl => R2.inhl sl hsl), ?_⟩
+      (fun sl hsl => by cases hsl) (fun sl hsl => R2.inhl sl hsl) (fun n o h => h), ?_⟩
     · rw [hhl, hl_congr cs.h cs.l]
       exact R2.rhl o ho hown
     · rw [hval, cs.a, cs.e, hA, hE]

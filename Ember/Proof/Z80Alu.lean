@@ -114,10 +114,11 @@ theorem run_reg (ok : Z.OK) (F : GFinal Z base sF) {s0 s1 : GS} {i : Instr} (hx 
 theorem Rel.of_sys {regs regs' : Regs} {ist : IR.Sem.St} {tmps : Array Nat} {s s' : Cpu}
     (R : Rel Z E fr dt regs ist tmps s) (hS : Sys s s') (ha : regs'.a = [])
     (hsub : ∀ o, o ∈ regs'.hl → o ∈ regs.hl)
-    (hhl : ∀ o, o ∈ regs'.hl → Own E o → s'.hl.toNat = IR.Sem.opd Z.c ist tmps 2 o) :
+    (hhl : ∀ o, o ∈ regs'.hl → Own E o → s'.hl.toNat = IR.Sem.opd Z.c ist tmps 2 o)
+    (hacc : ∀ n o, regs'.acc = some (n, o) → regs.acc = some (n, o)) :
     Rel Z E fr dt regs' ist tmps s' :=
   R.regs_only hS.1 hS.2.1 hS.2.2.1 hS.2.2.2 (fun o ho => by rw [ha] at ho; cases ho) hhl
-    (fun sl hsl => by rw [ha] at hsl; cases hsl) (fun sl hsl => R.inhl sl (hsub _ hsl))
+    (fun sl hsl => by rw [ha] at hsl; cases hsl) (fun sl hsl => R.inhl sl (hsub _ hsl)) hacc
 
 /-- What `alu8Opd op a b` promises, `A` holding the first operand. -/
 def AluOpd (Z : ZCtx) (E : GEnv) (base : Nat) (sF : GS) (dt : Nat → Prop) (op : Bin) (a b : Opd) (s0 : GS)
@@ -125,8 +126,8 @@ def AluOpd (Z : ZCtx) (E : GEnv) (base : Nat) (sF : GS) (dt : Nat → Prop) (op 
   GExt s0 s1 ∧ s1.regs.a = s0.regs.a ∧ (∀ o, o ∈ s1.regs.hl → o ∈ s0.regs.hl) ∧
     (GExt s1 sF → ∀ fr ist tmps s, Rd Z E dt 1 b → Rel Z E fr dt s0.regs ist tmps s →
       At Z.addrs (base + s0.out.size) s → s.a.toNat = IR.Sem.opd Z.c ist tmps 1 a →
-      ∃ s', Steps Z.inp s s' ∧ At Z.addrs (base + s1.out.size) s' ∧ Sys s s' ∧
-        (∀ o, o ∈ s1.regs.hl → Own E o → s'.hl.toNat = IR.Sem.opd Z.c ist tmps 2 o) ∧
+      ∃ s', Steps Z.inp s s' ∧ At Z.addrs (base + s1.out.size) s' ∧
+        Rel Z E fr dt { s1.regs with a := [] } ist tmps s' ∧
         s'.a.toNat = IR.binOp op 1 (IR.Sem.opd Z.c ist tmps 1 a) (IR.Sem.opd Z.c ist tmps 1 b))
 
 theorem opd_const (c : IR.Ctx) (ist : IR.Sem.St) (tmps : Array Nat) (n v : Nat) :
@@ -151,7 +152,8 @@ theorem alu8Opd_ok (ok : Z.OK) (F : GFinal Z base sF) {op : Bin} {k : UInt8} (hk
     intro i f hexec hfalls hsys hhl hval
     refine ⟨GExt.push _ _, rfl, fun o ho => ho, fun hx fr ist tmps s hrd R hat hA => ?_⟩
     obtain ⟨hst, hat', _⟩ := run_reg ok F (s0 := s0) hx rfl R.mach hat (f s) (fun ad _ => hexec _ _ _) hfalls (hsys s)
-    exact ⟨_, hst, hat', hsys s, fun o ho hown => by rw [hhl]; exact R.rhl o ho hown, hval s ist tmps hA⟩
+    exact ⟨_, hst, hat', R.of_sys (hsys s) rfl (fun o ho => ho) (fun o ho hown => by rw [hhl]; exact R.rhl o ho hown)
+      (fun n o h => h), hval s ist tmps hA⟩
   have incA : ∀ s : Cpu, (((op1 s).inc8 ((op1 s).reg .hl 7)).2.setReg .hl 7 ((op1 s).inc8 ((op1 s).reg .hl 7)).1 |>.tick 4).a.toNat
       = (s.a.toNat + 1) % 256 := by
     intro s
@@ -182,8 +184,8 @@ theorem alu8Opd_ok (ok : Z.OK) (F : GFinal Z base sF) {op : Bin} {k : UInt8} (hk
       obtain ⟨hst, hat', _⟩ := run_reg ok F (s0 := s0) hx rfl R.mach hat
         (((op1 s).alu k ((op1 s).reg .hl 7)).tick 4) (fun ad _ => exec_alu_reg _ _ _ hk rfl) (aluIns_falls _ _)
         (by simp only [Sys, zsim, and_self])
-      refine ⟨_, hst, hat', by simp only [Sys, zsim, and_self],
-        fun o ho hown => by simp only [zsim]; exact R.rhl o ho hown, ?_⟩
+      refine ⟨_, hst, hat', R.of_sys (by simp only [Sys, zsim, and_self]) rfl (fun o ho => ho)
+        (fun o ho hown => by simp only [zsim]; exact R.rhl o ho hown) (fun n o h => h), ?_⟩
       simp only [zsim]
       rw [alu_val hk]
       simp only [zsim]
@@ -215,7 +217,8 @@ theorem alu8Opd_ok (ok : Z.OK) (F : GFinal Z base sF) {op : Bin} {k : UInt8} (hk
         (s1 := { s1 with out := (s1.out.push (.ins ⟨.ld, [.hl, .imm (opdVal E b)]⟩)).push (.ins (aluIns op .mhl)) })
         ((GExt.regs _ _).trans hx) rfl M1 at1 _ (fun ad' _ => exec_alu_mhl _ _ _ hk) (aluIns_falls _ _)
         (by simp only [Sys, zsim, and_self])
-      refine ⟨_, st1.trans st2, at2, by simp only [Sys, zsim, and_self], (fun o ho => by cases ho), ?_⟩
+      refine ⟨_, st1.trans st2, at2, R.of_sys (by simp only [Sys, zsim, and_self]) rfl (fun o ho => by cases ho)
+        (fun o ho => by cases ho) (fun n o h => by rw [← hr1]; exact h), ?_⟩
       simp only [zsim]
       rw [alu_val hk]
       simp only [zsim]
@@ -305,8 +308,8 @@ def Bin8A (Z : ZCtx) (E : GEnv) (base : Nat) (sF : GS) (dt : Nat → Prop) (op :
   GExt s0 s1 ∧ (∀ o, o ∈ s1.regs.hl → o ∈ s0.regs.hl) ∧
     (GExt s1 sF → ∀ fr ist tmps s, Rd Z E dt 1 a → Rd Z E dt 1 b → Rel Z E fr dt s0.regs ist tmps s →
       At Z.addrs (base + s0.out.size) s →
-      ∃ s', Steps Z.inp s s' ∧ At Z.addrs (base + s1.out.size) s' ∧ Sys s s' ∧
-        (∀ o, o ∈ s1.regs.hl → Own E o → s'.hl.toNat = IR.Sem.opd Z.c ist tmps 2 o) ∧
+      ∃ s', Steps Z.inp s s' ∧ At Z.addrs (base + s1.out.size) s' ∧
+        Rel Z E fr dt { s1.regs with a := [] } ist tmps s' ∧
         s'.a.toNat = IR.binOp op 1 (IR.Sem.opd Z.c ist tmps 1 a) (IR.Sem.opd Z.c ist tmps 1 b))
 
 theorem bin8Alu_ok (ok : Z.OK) (F : GFinal Z base sF) {op : Bin} {k : UInt8} (hk : aluK op = some k)
@@ -333,7 +336,7 @@ theorem bin8Alu_ok (ok : Z.OK) (F : GFinal Z base sF) {op : Bin} {k : UInt8} (hk
       simp only [zsim]
       exact R.ra b hbmem hrb.own
     have R1 : Rel Z E fr dt { s0.regs with a := [] } ist tmps (((op1 s).setReg .hl 1 ((op1 s).reg .hl 7)).tick 4) :=
-      R.of_sys hS1 rfl (fun o ho => ho) (fun o ho hown => by simp only [zsim]; exact R.rhl o ho hown)
+      R.of_sys hS1 rfl (fun o ho => ho) (fun o ho hown => by simp only [zsim]; exact R.rhl o ho hown) (fun n o h => h)
     -- the first operand into `A`
     obtain ⟨s2, st2, at2, R2, hk2, hA2⟩ := hl ((GExt.push _ _).trans hx) fr ist tmps _ hra R1 at1
     have hS2 := R1.sys_of R2 hk2.2.2.2.2.2.2.2
@@ -341,8 +344,8 @@ theorem bin8Alu_ok (ok : Z.OK) (F : GFinal Z base sF) {op : Bin} {k : UInt8} (hk
     obtain ⟨st3, at3, _⟩ := run_reg ok F (s0 := s1) hx rfl R2.mach at2
       (((op1 s2).alu k ((op1 s2).reg .hl 1)).tick 4) (fun ad _ => exec_alu_reg _ _ _ hk rfl) (aluIns_falls _ _)
       (by simp only [Sys, zsim, and_self])
-    refine ⟨_, (st1.trans st2).trans st3, at3, (hS1.trans hS2).trans (by simp only [Sys, zsim, and_self]),
-      fun o ho hown => by simp only [zsim]; exact R2.rhl o ho hown, ?_⟩
+    refine ⟨_, (st1.trans st2).trans st3, at3, R2.of_sys (by simp only [Sys, zsim, and_self]) rfl (fun o ho => ho)
+      (fun o ho hown => by simp only [zsim]; exact R2.rhl o ho hown) (fun n o h => h), ?_⟩
     simp only [zsim]
     rw [alu_val hk]
     simp only [zsim]
@@ -354,8 +357,8 @@ theorem bin8Alu_ok (ok : Z.OK) (F : GFinal Z base sF) {op : Bin} {k : UInt8} (hk
     intro _ s2 ⟨hx2, _, hhl2, hop⟩
     refine ⟨hx1.trans hx2, fun o ho => by rw [← hhl1]; exact hhl2 o ho, fun hx fr ist tmps s hra hrb R hat0 => ?_⟩
     obtain ⟨s1', st1, at1, R1, hk1, hA1⟩ := hl (hx2.trans hx) fr ist tmps s hra R hat0
-    obtain ⟨s2', st2, at2, hS2, hhl, hA2⟩ := hop hx fr ist tmps s1' hrb R1 at1 hA1
-    exact ⟨s2', st1.trans st2, at2, (R.sys_of R1 hk1.2.2.2.2.2.2.2).trans hS2, hhl, hA2⟩
+    obtain ⟨s2', st2, at2, R2, hA2⟩ := hop hx fr ist tmps s1' hrb R1 at1 hA1
+    exact ⟨s2', st1.trans st2, at2, R2, hA2⟩
 
 /-- What a one-byte operation promises: the result in `A`. -/
 def Bin8 (Z : ZCtx) (E : GEnv) (base : Nat) (sF : GS) (dt : Nat → Prop) (op : Bin) (a b : Opd) (H : Prop)
@@ -377,8 +380,8 @@ theorem bin8_alu_ok (ok : Z.OK) (F : GFinal Z base sF) {op : Bin} {k : UInt8} (h
   intro _ s1 ⟨hx1, hsub, h⟩
   rw [wpg_setRegs]
   refine ⟨hx1.trans (GExt.regs _ _), fun hx _ fr ist tmps s hra hrb R hat0 => ?_⟩
-  obtain ⟨s', st, at', hS, hhl, hA⟩ := h ((GExt.regs _ _).trans hx) fr ist tmps s hra hrb R hat0
-  exact ⟨s', st, at', R.of_sys hS rfl hsub hhl, hA⟩
+  obtain ⟨s', st, at', R', hA⟩ := h ((GExt.regs _ _).trans hx) fr ist tmps s hra hrb R hat0
+  exact ⟨s', st, at', R', hA⟩
 
 /-- The code of a one-byte `add`, `sub`, `and`, `or` or `xor` does what the IR's instruction does. -/
 theorem bin1_alu_ok (ok : Z.OK) (hT : FnLay Z E) (F : GFinal Z base sF) {op : Bin} {k : UInt8}

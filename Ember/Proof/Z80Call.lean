@@ -172,14 +172,24 @@ theorem Rel.free_stack (ok : Z.OK) (hT : FnLay Z E) {regs regs' : Regs} {ist : I
     (ha : ∀ o, o ∈ regs'.a → Own E o → s'.a.toNat = IR.Sem.opd Z.c ist tmps 1 o)
     (hhl : ∀ o, o ∈ regs'.hl → Own E o → s'.hl.toNat = IR.Sem.opd Z.c ist tmps 2 o)
     (hina : ∀ sl, Opd.slot sl ∈ regs'.a → Own E (.slot sl) → Z.use (sl, 1))
-    (hinhl : ∀ sl, Opd.slot sl ∈ regs'.hl → Own E (.slot sl) → Z.use (sl, 2)) :
+    (hinhl : ∀ sl, Opd.slot sl ∈ regs'.hl → Own E (.slot sl) → Z.use (sl, 2))
+    (hacc : ∀ n o, regs'.acc = some (n, o) → regs.acc = some (n, o)) :
     Rel Z E fr dt regs' ist tmps s' := by
   have hstk := ok.stack
   have hroom := R.room
   have hspv : s.sp.toNat = fr.sp.toNat := by rw [R.sp]
   refine ⟨⟨by rw [hr]; exact R.img.rom, fun x b hx => ?_⟩, by rw [hh]; exact R.run, fun x hx => ?_,
     fun t h1 h2 => ?_, by rw [hr]; exact R.rs, hsz, R.isz, R.tsz, by rw [hsp]; exact R.sp, R.room,
-    fun x h1 h2 => ?_, ha, hhl, hina, hinhl⟩
+    fun x h1 h2 => ?_, ha, hhl, fun n o h hown => ?_, hina, hinhl,
+    fun n sl h hown => R.inacc n sl (hacc _ _ h) hown, fun n o h => R.nacc n o (hacc n o h)⟩
+  rotate_left 4
+  · -- the accumulator is not in the stack
+    have h8 := R.nacc n o (hacc n o h)
+    have hacr := ok.accRam
+    rw [← R.racc n o (hacc n o h) hown]
+    refine rd_congr _ _ _ _ (by omega) (fun x hx1 hx2 => hm x ?_)
+    have := ok.accStack
+    omega
   · have hlt : x < Z.a.bytes.size := by
       rcases Nat.lt_or_ge x Z.a.bytes.data.size with h' | h'
       · exact h'
@@ -215,6 +225,7 @@ theorem rt_call {base : Nat} {sF : GS} (ok : Z.OK) (hT : FnLay Z E) (F : GFinal 
         (∀ o, o ∈ regs'.hl → Own E o → s'.hl.toNat = IR.Sem.opd Z.c ist tmps 2 o) →
         (∀ sl, Opd.slot sl ∈ regs'.a → Own E (.slot sl) → Z.use (sl, 1)) →
         (∀ sl, Opd.slot sl ∈ regs'.hl → Own E (.slot sl) → Z.use (sl, 2)) →
+        (∀ n o, regs'.acc = some (n, o) → regs.acc = some (n, o)) →
         Rel Z E fr dt regs' ist tmps s' := by
   obtain ⟨entry, hsym, hent, hR⟩ := hrt
   have hroom := R.room
@@ -223,8 +234,8 @@ theorem rt_call {base : Nat} {sF : GS} (ok : Z.OK) (hT : FnLay Z E) (F : GFinal 
   obtain ⟨c1, s', cs, hst, hat', hsp', hh', hrs', hsz', hrel, hfree⟩ :=
     call_rule ok (F.emitted hx ho) hsym hent hR hat R.img R.run R.rs R.msz (by omega) (by omega)
       (fun _ _ => trivial)
-  refine ⟨c1, s', cs, hst, by rw [ho, Array.size_push, ← Nat.add_assoc]; exact hat', hrel, fun regs' ha hhl hina hinhl => ?_⟩
-  refine R.free_stack ok hT (fun x hx => ?_) hsz' hrs' (by rw [hh', R.run]) hsp' ha hhl hina hinhl
+  refine ⟨c1, s', cs, hst, by rw [ho, Array.size_push, ← Nat.add_assoc]; exact hat', hrel, fun regs' ha hhl hina hinhl hacc => ?_⟩
+  refine R.free_stack ok hT (fun x hx => ?_) hsz' hrs' (by rw [hh', R.run]) hsp' ha hhl hina hinhl hacc
   have hc1sp : c1.sp.toNat = s.sp.toNat - 2 := by rw [cs.sp]; exact sub2_toNat _ (by omega)
   rw [hfree x (by omega), cs.mem x (by omega)]
 

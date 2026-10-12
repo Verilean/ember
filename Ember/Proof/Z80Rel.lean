@@ -45,6 +45,8 @@ structure ZCtx where
   depth : String → Nat
   /-- The stack a routine of the runtime needs below its return address. -/
   rtK : Nat
+  /-- The address of the runtime's accumulator `rt_acc` (8 bytes). -/
+  acc : Nat
 
 /-- The name `n` is the number `v` in the image. -/
 def ZCtx.sym (Z : ZCtx) (n : String) (v : Nat) : Prop := Z.a.labels.reverse.lookup n = some v
@@ -56,6 +58,9 @@ structure ZCtx.OK (Z : ZCtx) : Prop where
   /-- The shared bytes are in RAM, and not in the stack. -/
   ram : ∀ x, Z.data x → Z.ramStart ≤ x ∧ x < 65536
   stack : Z.ramStart ≤ Z.stackLo ∧ Z.stackHi ≤ 65536
+  accSym : Z.sym "rt_acc" Z.acc
+  accRam : Z.ramStart ≤ Z.acc ∧ Z.acc + 8 ≤ 65536
+  accStack : Z.acc + 8 ≤ Z.stackLo ∨ Z.stackHi ≤ Z.acc
   nostack : ∀ x, Z.data x → x < Z.stackLo ∨ Z.stackHi ≤ x
   ubound : ∀ a an, Z.use (a, an) → Z.c.layout.addr a + an ≤ 65536
   dbound : ∀ b bn, Z.dst (b, bn) → Z.c.layout.addr b + bn ≤ 65536
@@ -100,8 +105,11 @@ structure Rel (Z : ZCtx) (E : GEnv) (fr : Fr) (dt : Nat → Prop) (regs : Regs) 
   /-- What the tracker says, for the operands of the function's own. -/
   ra : ∀ o, o ∈ regs.a → Own E o → s.a.toNat = IR.Sem.opd Z.c ist tmps 1 o
   rhl : ∀ o, o ∈ regs.hl → Own E o → s.hl.toNat = IR.Sem.opd Z.c ist tmps 2 o
+  racc : ∀ n o, regs.acc = some (n, o) → Own E o → IR.Sem.rd s.mem Z.acc n = IR.Sem.opd Z.c ist tmps n o
   ina : ∀ sl, Opd.slot sl ∈ regs.a → Own E (.slot sl) → Z.use (sl, 1)
   inhl : ∀ sl, Opd.slot sl ∈ regs.hl → Own E (.slot sl) → Z.use (sl, 2)
+  inacc : ∀ n sl, regs.acc = some (n, .slot sl) → Own E (.slot sl) → Z.use (sl, n)
+  nacc : ∀ n o, regs.acc = some (n, o) → n ≤ 8
 
 /-- A step that changes registers only. -/
 theorem Rel.regs_only {Z : ZCtx} {E : GEnv} {fr : Fr} {dt : Nat → Prop} {regs regs' : Regs} {ist : IR.Sem.St}
@@ -110,12 +118,14 @@ theorem Rel.regs_only {Z : ZCtx} {E : GEnv} {fr : Fr} {dt : Nat → Prop} {regs 
     (ha : ∀ o, o ∈ regs'.a → Own E o → s'.a.toNat = IR.Sem.opd Z.c ist tmps 1 o)
     (hhl : ∀ o, o ∈ regs'.hl → Own E o → s'.hl.toNat = IR.Sem.opd Z.c ist tmps 2 o)
     (hina : ∀ sl, Opd.slot sl ∈ regs'.a → Own E (.slot sl) → Z.use (sl, 1))
-    (hinhl : ∀ sl, Opd.slot sl ∈ regs'.hl → Own E (.slot sl) → Z.use (sl, 2)) :
+    (hinhl : ∀ sl, Opd.slot sl ∈ regs'.hl → Own E (.slot sl) → Z.use (sl, 2))
+    (hacc : ∀ n o, regs'.acc = some (n, o) → regs.acc = some (n, o)) :
     Rel Z E fr dt regs' ist tmps s' :=
   ⟨R.img.congr hr hm, by rw [hh]; exact R.run, fun x hx => by rw [hm]; exact R.mem x hx,
     fun t h1 h2 => by rw [hm]; exact R.tmp t h1 h2, by rw [hr]; exact R.rs, by rw [hm]; exact R.msz, R.isz, R.tsz,
     by rw [hsp]; exact R.sp, R.room, fun x h1 h2 => by rw [hm]; exact R.stk x h1 h2,
-    ha, hhl, hina, hinhl⟩
+    ha, hhl, fun n o h hown => by rw [hm]; exact R.racc n o (hacc n o h) hown, hina, hinhl,
+    fun n sl h hown => R.inacc n sl (hacc _ _ h) hown, fun n o h => R.nacc n o (hacc n o h)⟩
 
 /-! ## The code being generated is in the image -/
 

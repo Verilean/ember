@@ -183,7 +183,8 @@ theorem loadA_ok (ok : Z.OK) (F : GFinal Z base sF) (o : Opd) (s0 : GS) :
         simp only [zsim]
         exact hval
       refine ⟨_, hst, hat', R.regs_only (by simp only [zsim]) (by simp only [zsim]) (by simp only [zsim]) (by simp only [zsim]) (fun o' ho' _ => ?_) (fun o' ho' => R.rhl o' ho')
-          (fun sl hsl _ => by simp only [List.mem_singleton] at hsl; first | (subst hsl; exact hrd.use) | cases hsl) R.inhl,
+          (fun sl hsl _ => by simp only [List.mem_singleton] at hsl; first | (subst hsl; exact hrd.use) | cases hsl) R.inhl
+          (fun n o h => h),
         (by unfold_keep), hval'⟩
       simp only [List.mem_singleton] at ho'
       subst ho'
@@ -226,7 +227,8 @@ theorem loadA_ok (ok : Z.OK) (F : GFinal Z base sF) (o : Opd) (s0 : GS) :
         refine ⟨_, hst, hat', R.regs_only (by simp only [zsim]) (by simp only [zsim]) (by simp only [zsim]) (by simp only [zsim]) (fun o' ho' _ => ?_)
           (fun o' ho' => R.rhl o' (by rw [← hr1]; exact ho'))
           (fun sl hsl _ => by simp only [List.mem_singleton] at hsl; first | (subst hsl; exact hrd.use) | cases hsl)
-          (fun sl hsl => R.inhl sl (by rw [← hr1]; exact hsl)), (by unfold_keep), hval⟩
+          (fun sl hsl => R.inhl sl (by rw [← hr1]; exact hsl))
+          (fun n o h => by rw [← hr1]; exact h), (by unfold_keep), hval⟩
         simp only [List.mem_singleton] at ho'
         subst ho'
         exact hval
@@ -246,7 +248,8 @@ theorem loadA_ok (ok : Z.OK) (F : GFinal Z base sF) (o : Opd) (s0 : GS) :
             have hz' : v % 256 = 0 := by simpa using hz
             simp [IR.modN, hz']
           refine ⟨_, hst, hat', R.regs_only (by simp only [zsim]) (by simp only [zsim]) (by simp only [zsim]) (by simp only [zsim]) (fun o' ho' _ => ?_) (fun o' ho' => R.rhl o' ho')
-          (fun sl hsl _ => by simp only [List.mem_singleton] at hsl; first | (subst hsl; exact hrd.use) | cases hsl) R.inhl,
+          (fun sl hsl _ => by simp only [List.mem_singleton] at hsl; first | (subst hsl; exact hrd.use) | cases hsl) R.inhl
+          (fun n o h => h),
             (by unfold_keep), hval⟩
           simp only [List.mem_singleton] at ho'
           subst ho'
@@ -264,7 +267,8 @@ theorem loadA_ok (ok : Z.OK) (F : GFinal Z base sF) (o : Opd) (s0 : GS) :
             rw [this]
             omega
           refine ⟨_, hst, hat', R.regs_only (by simp only [zsim]) (by simp only [zsim]) (by simp only [zsim]) (by simp only [zsim]) (fun o' ho' _ => ?_) (fun o' ho' => R.rhl o' ho')
-          (fun sl hsl _ => by simp only [List.mem_singleton] at hsl; first | (subst hsl; exact hrd.use) | cases hsl) R.inhl,
+          (fun sl hsl _ => by simp only [List.mem_singleton] at hsl; first | (subst hsl; exact hrd.use) | cases hsl) R.inhl
+          (fun n o h => h),
             (by unfold_keep), hval⟩
           simp only [List.mem_singleton] at ho'
           subst ho'
@@ -322,7 +326,8 @@ theorem loadHL_ok (ok : Z.OK) (F : GFinal Z base sF) (o : Opd) (s0 : GS) :
         exact opd_mem hrd hsp hc R
       refine ⟨_, hst, hat', R.regs_only (by simp only [zsim]) (by simp only [zsim]) (by simp only [zsim]) (by simp only [zsim]) (fun o' ho' => R.ra o' (by rw [← hr1]; exact ho'))
         (fun o' ho' _ => ?_) (fun sl hsl => R.ina sl (by rw [← hr1]; exact hsl))
-        (fun sl hsl _ => by simp only [List.mem_singleton] at hsl; first | (subst hsl; exact hrd.use) | cases hsl), (by unfold_keep), hval⟩
+        (fun sl hsl _ => by simp only [List.mem_singleton] at hsl; first | (subst hsl; exact hrd.use) | cases hsl)
+          (fun n o h => by rw [← hr1]; exact h), (by unfold_keep), hval⟩
       simp only [List.mem_singleton] at ho'
       subst ho'
       exact hval
@@ -342,7 +347,8 @@ theorem loadHL_ok (ok : Z.OK) (F : GFinal Z base sF) (o : Opd) (s0 : GS) :
         rw [w16_val _ (Nat.mod_lt _ (by decide))]
         rfl
       refine ⟨_, hst, hat', R.regs_only (by simp only [zsim]) (by simp only [zsim]) (by simp only [zsim]) (by simp only [zsim]) (fun o' ho' => R.ra o' ho') (fun o' ho' _ => ?_)
-        R.ina (fun sl hsl _ => by simp only [List.mem_singleton] at hsl; cases hsl),
+        R.ina (fun sl hsl _ => by simp only [List.mem_singleton] at hsl; cases hsl)
+          (fun n o h => h),
         (by unfold_keep), hval⟩
       simp only [List.mem_singleton] at ho'
       subst ho'
