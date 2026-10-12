@@ -17,10 +17,10 @@ open Ember.Z80.IR (Opd Dst Slot Area)
 def InsPost (Z : ZCtx) (E : GEnv) (base : Nat) (sF : GS) (dt dt' : Nat → Prop) (i : IR.Instr) (H : Prop)
     (s0 : GS) (_ : Unit) (s1 : GS) : Prop :=
   GExt s0 s1 ∧
-    (GExt s1 sF → H → ∀ ist tmps s, Rel Z E dt s0.regs ist tmps s → At Z.addrs (base + s0.out.size) s →
+    (GExt s1 sF → H → ∀ fr ist tmps s, Rel Z E fr dt s0.regs ist tmps s → At Z.addrs (base + s0.out.size) s →
       match IR.Sem.step Z.c ist tmps i with
       | .next ist' tmps' =>
-        ∃ s', Steps Z.inp s s' ∧ At Z.addrs (base + s1.out.size) s' ∧ Rel Z E dt' s1.regs ist' tmps' s'
+        ∃ s', Steps Z.inp s s' ∧ At Z.addrs (base + s1.out.size) s' ∧ Rel Z E fr dt' s1.regs ist' tmps' s'
       | _ => True)
 
 theorem opd_lt (c : IR.Ctx) (ist : IR.Sem.St) (tmps : Array Nat) (n : Nat) (o : Opd) :
@@ -31,7 +31,7 @@ theorem opd_lt (c : IR.Ctx) (ist : IR.Sem.St) (tmps : Array Nat) (n : Nat) (o : 
   | tmp t => exact Nat.mod_lt _ (Nat.two_pow_pos _)
 
 section
-variable {Z : ZCtx} {E : GEnv} {base : Nat} {sF : GS} {dt : Nat → Prop}
+variable {Z : ZCtx} {E : GEnv} {base : Nat} {sF : GS} {dt : Nat → Prop} {fr : Fr}
 
 theorem mov1_ok (ok : Z.OK) (hT : FnLay Z E) (F : GFinal Z base sF) (d : Dst) (src : Opd) (s0 : GS) :
     wpg (genInstr (.mov 1 d src)) E
@@ -41,9 +41,9 @@ theorem mov1_ok (ok : Z.OK) (hT : FnLay Z E) (F : GFinal Z base sF) (d : Dst) (s
   intro _ s1 ⟨hx1, _, _, hl⟩
   refine wpg_mono (storeA_ok (dt := dt) ok hT F d s1) ?_
   intro _ s2 ⟨hx2, _, _, hs⟩
-  refine ⟨hx1.trans hx2, fun hxF ⟨hrd, hwr⟩ ist tmps s R hat => ?_⟩
-  obtain ⟨s', st1, at1, R1, _, hA⟩ := hl (hx2.trans hxF) ist tmps s hrd R hat
-  obtain ⟨s'', st2, at2, R2, _⟩ := hs hxF ist tmps s' (IR.Sem.opd Z.c ist tmps 1 src) hwr R1 at1 (by
+  refine ⟨hx1.trans hx2, fun hxF ⟨hrd, hwr⟩ fr ist tmps s R hat => ?_⟩
+  obtain ⟨s', st1, at1, R1, _, hA⟩ := hl (hx2.trans hxF) fr ist tmps s hrd R hat
+  obtain ⟨s'', st2, at2, R2, _⟩ := hs hxF fr ist tmps s' (IR.Sem.opd Z.c ist tmps 1 src) hwr R1 at1 (by
     rw [hA, Nat.mod_eq_of_lt (opd_lt _ _ _ 1 _)])
   exact ⟨s'', st1.trans st2, at2, R2⟩
 
@@ -56,9 +56,9 @@ theorem mov2_ok (ok : Z.OK) (hT : FnLay Z E) (F : GFinal Z base sF) (d : Dst) (s
   intro _ s1 ⟨hx1, _, _, hl⟩
   refine wpg_mono (storeHL_ok (dt := dt) ok hT F d s1) ?_
   intro _ s2 ⟨hx2, _, _, hs⟩
-  refine ⟨hx1.trans hx2, fun hxF ⟨hrd, hwr⟩ ist tmps s R hat => ?_⟩
-  obtain ⟨s', st1, at1, R1, _, hHL⟩ := hl (hx2.trans hxF) ist tmps s hrd R hat
-  obtain ⟨s'', st2, at2, R2, _⟩ := hs hxF ist tmps s' (IR.Sem.opd Z.c ist tmps 2 src) hwr R1 at1 (by
+  refine ⟨hx1.trans hx2, fun hxF ⟨hrd, hwr⟩ fr ist tmps s R hat => ?_⟩
+  obtain ⟨s', st1, at1, R1, _, hHL⟩ := hl (hx2.trans hxF) fr ist tmps s hrd R hat
+  obtain ⟨s'', st2, at2, R2, _⟩ := hs hxF fr ist tmps s' (IR.Sem.opd Z.c ist tmps 2 src) hwr R1 at1 (by
     rw [hHL, Nat.mod_eq_of_lt (opd_lt _ _ _ 2 _)])
   exact ⟨s'', st1.trans st2, at2, R2⟩
 

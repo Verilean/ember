@@ -133,6 +133,26 @@ theorem step_item {items : List Item} {origin : Nat} {a : Assembled} {addrs : Li
     have hr : s.ramStart.toNat < 65536 := s.ramStart.toNat_lt
     omega
 
+/-- The item after an instruction is at the address after its bytes, which is in the image. -/
+theorem Placed.next {items : List Item} {origin : Nat} {a : Assembled} {addrs : List Nat}
+    (P : Placed items origin a addrs) {s : Cpu} (I : Img a origin s) {k ad : Nat} {it : Item}
+    (hk : items[k]? = some it) (had : addrs[k]? = some ad) :
+    ∃ bs, it.encode (a.env ad) = .ok bs ∧ addrs[k + 1]? = some (ad + bs.length) ∧
+      (bs ≠ [] → ad + bs.length < 65536) := by
+  obtain ⟨ad', bs, h1, h2, h3, h4, h5, _⟩ := P.2 k _ hk
+  rw [had] at h1
+  cases h1
+  refine ⟨bs, h2, h3, fun hne => ?_⟩
+  have hpos : 0 < bs.length := List.length_pos_iff.mpr hne
+  have hb := h5 (bs.length - 1) (bs[bs.length - 1]'(by omega)) (List.getElem?_eq_getElem (by omega))
+  have hlt : ad - origin + (bs.length - 1) < a.bytes.size := by
+    rcases Nat.lt_or_ge (ad - origin + (bs.length - 1)) a.bytes.data.size with h' | h'
+    · exact h'
+    · rw [Array.getElem?_eq_none h'] at hb; cases hb
+  have hrom := I.rom
+  have hr : s.ramStart.toNat < 65536 := s.ramStart.toNat_lt
+  omega
+
 /-- An item that is not code is where the next item is. -/
 theorem at_skip {items : List Item} {origin : Nat} {a : Assembled} {addrs : List Nat}
     (P : Placed items origin a addrs) {s : Cpu} {k : Nat} {it : Item} (hk : items[k]? = some it)

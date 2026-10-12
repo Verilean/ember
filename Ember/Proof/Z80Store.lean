@@ -25,6 +25,7 @@ structure WrSlot (Z : ZCtx) (E : GEnv) (n : Nat) (sl : Slot) : Prop where
   use : Own E (.slot sl) → Z.use (sl, n)
   ram : Z.ramStart ≤ Z.c.layout.addr sl
   notmp : ∀ j, j < n → ¬ TmpByte Z E (Z.c.layout.addr sl + j)
+  nostack : Z.c.layout.addr sl + n ≤ Z.stackLo ∨ Z.stackHi ≤ Z.c.layout.addr sl
   /-- A store the generator leaves out is to bytes that are not shared. -/
   dead : sl.area = .frame E.fn.name → ∀ lv, E.live = some lv →
     (∀ k, k < n → lv.getD (sl.off + k) true = false) → ∀ j, j < n → ¬ Z.data (Z.c.layout.addr sl + j)
@@ -35,6 +36,8 @@ structure FnLay (Z : ZCtx) (E : GEnv) : Prop where
   bound : ∀ t, E.spilled[t]! = true → tmpAddr Z E t + E.fn.tmps[t]! ≤ 65536
   ram : ∀ t, E.spilled[t]! = true → Z.ramStart ≤ tmpAddr Z E t
   nodata : ∀ t, E.spilled[t]! = true → ∀ j, j < E.fn.tmps[t]! → ¬ Z.data (tmpAddr Z E t + j)
+  nostack : ∀ t, E.spilled[t]! = true →
+    tmpAddr Z E t + E.fn.tmps[t]! ≤ Z.stackLo ∨ Z.stackHi ≤ tmpAddr Z E t
   apart : ∀ t t', t ≠ t' → E.spilled[t]! = true → E.spilled[t']! = true →
     tmpAddr Z E t' + E.fn.tmps[t']! ≤ tmpAddr Z E t ∨ tmpAddr Z E t + E.fn.tmps[t]! ≤ tmpAddr Z E t'
 
@@ -51,7 +54,7 @@ def Wr (Z : ZCtx) (E : GEnv) (n : Nat) : Dst → Prop
 def dtAfter (dt : Nat → Prop) (d : Dst) (x : Nat) : Prop := dt x ∨ d = .tmp x
 
 section
-variable {Z : ZCtx} {E : GEnv} {dt : Nat → Prop}
+variable {Z : ZCtx} {E : GEnv} {dt : Nat → Prop} {fr : Fr}
 
 /-! ## Operands a write leaves alone -/
 
@@ -83,21 +86,26 @@ theorem opd_tmp_keep (c : IR.Ctx) (ist : IR.Sem.St) (tmps : Array Nat) (t x m : 
 
 /-- The code wrote the bytes the IR writes. -/
 theorem Rel.wr_slot (ok : Z.OK) (hT : FnLay Z E) {regs regs' : Regs} {ist : IR.Sem.St} {tmps : Array Nat} {s s' : Cpu}
-    (R : Rel Z E dt regs ist tmps s) {n : Nat} {sl : Slot} (W : WrSlot Z E n sl) (v : Nat)
+    (R : Rel Z E fr dt regs ist tmps s) {n : Nat} {sl : Slot} (W : WrSlot Z E n sl) (v : Nat)
     (hm : s'.mem = IR.Sem.wr s.mem (Z.c.layout.addr sl) n v) (hr : s'.ramStart = s.ramStart)
-    (hh : s'.halted = s.halted)
+    (hh : s'.halted = s.halted) (hsp : s'.sp = s.sp)
     (ha : ∀ o, o ∈ regs'.a → Own E o → s'.a.toNat =
       IR.Sem.opd Z.c { ist with mem := IR.Sem.wr ist.mem (Z.c.layout.addr sl) n v } tmps 1 o)
     (hhl : ∀ o, o ∈ regs'.hl → Own E o → s'.hl.toNat =
       IR.Sem.opd Z.c { ist with mem := IR.Sem.wr ist.mem (Z.c.layout.addr sl) n v } tmps 2 o)
     (hina : ∀ a, Opd.slot a ∈ regs'.a → Own E (.slot a) → Z.use (a, 1))
     (hinhl : ∀ a, Opd.slot a ∈ regs'.hl → Own E (.slot a) → Z.use (a, 2)) :
-    Rel Z E dt regs' { ist with mem := IR.Sem.wr ist.mem (Z.c.layout.addr sl) n v } tmps s' := by
+    Rel Z E fr dt regs' { ist with mem := IR.Sem.wr ist.mem (Z.c.layout.addr sl) n v } tmps s' := by
   have hb := ok.dbound sl n W.dst
   refine ⟨⟨by rw [hr]; exact R.img.rom, fun x b hx => ?_⟩, by rw [hh]; exact R.run, fun x hx => ?_,
     fun t h1 h2 => ?_, by rw [hr]; exact R.rs, by rw [hm, wr_size]; exact R.msz, by
       show (IR.Sem.wr ist.mem _ n v).size = 65536
-      rw [wr_size]; exact R.isz, R.tsz, ha, hhl, hina, hinhl⟩
+      rw [wr_size]; exact R.isz, R.tsz, by rw [hsp]; exact R.sp, R.room, fun x h1 h2 => ?_, ha, hhl, hina, hinhl⟩
+  rotate_left 3
+  · -- the stack is not written
+    have hroom := R.room
+    rw [hm, wr_get_far _ _ _ _ _ hb (by have := W.nostack; omega)]
+    exact R.stk x h1 h2
   · -- the image is below the RAM
     have hlt : x < Z.a.bytes.size := by
       rcases Nat.lt_or_ge x Z.a.bytes.data.size with h' | h'
@@ -129,7 +137,7 @@ theorem Rel.wr_slot (ok : Z.OK) (hT : FnLay Z E) {regs regs' : Regs} {ist : IR.S
 
 /-- The IR wrote bytes that are not shared: the code left the store out. -/
 theorem Rel.wr_dead (ok : Z.OK) {regs regs' : Regs} {ist : IR.Sem.St} {tmps : Array Nat} {s : Cpu}
-    (R : Rel Z E dt regs ist tmps s) {n : Nat} {sl : Slot} (W : WrSlot Z E n sl) (v : Nat)
+    (R : Rel Z E fr dt regs ist tmps s) {n : Nat} {sl : Slot} (W : WrSlot Z E n sl) (v : Nat)
     (hdead : ∀ j, j < n → ¬ Z.data (Z.c.layout.addr sl + j))
     (ha : ∀ o, o ∈ regs'.a → Own E o → s.a.toNat =
       IR.Sem.opd Z.c { ist with mem := IR.Sem.wr ist.mem (Z.c.layout.addr sl) n v } tmps 1 o)
@@ -137,11 +145,11 @@ theorem Rel.wr_dead (ok : Z.OK) {regs regs' : Regs} {ist : IR.Sem.St} {tmps : Ar
       IR.Sem.opd Z.c { ist with mem := IR.Sem.wr ist.mem (Z.c.layout.addr sl) n v } tmps 2 o)
     (hina : ∀ a, Opd.slot a ∈ regs'.a → Own E (.slot a) → Z.use (a, 1))
     (hinhl : ∀ a, Opd.slot a ∈ regs'.hl → Own E (.slot a) → Z.use (a, 2)) :
-    Rel Z E dt regs' { ist with mem := IR.Sem.wr ist.mem (Z.c.layout.addr sl) n v } tmps s := by
+    Rel Z E fr dt regs' { ist with mem := IR.Sem.wr ist.mem (Z.c.layout.addr sl) n v } tmps s := by
   have hb := ok.dbound sl n W.dst
   refine ⟨R.img, R.run, fun x hx => ?_, R.tmp, R.rs, R.msz, by
     show (IR.Sem.wr ist.mem _ n v).size = 65536
-    rw [wr_size]; exact R.isz, R.tsz, ha, hhl, hina, hinhl⟩
+    rw [wr_size]; exact R.isz, R.tsz, R.sp, R.room, R.stk, ha, hhl, hina, hinhl⟩
   show s.mem.get! x = (IR.Sem.wr ist.mem _ n v).get! x
   rw [wr_get_far _ _ _ _ _ hb ?_]
   · exact R.mem x hx
@@ -155,23 +163,28 @@ theorem Rel.wr_dead (ok : Z.OK) {regs regs' : Regs} {ist : IR.Sem.St} {tmps : Ar
 
 /-- A temporary is assigned: its slot, if it has one, was written. -/
 theorem Rel.wr_tmp (ok : Z.OK) (hT : FnLay Z E) {regs regs' : Regs} {ist : IR.Sem.St} {tmps : Array Nat}
-    {s s' : Cpu} (R : Rel Z E dt regs ist tmps s) {n t : Nat} (W : WrTmp E n t) (v : Nat)
+    {s s' : Cpu} (R : Rel Z E fr dt regs ist tmps s) {n t : Nat} (W : WrTmp E n t) (v : Nat)
     (hm : if E.spilled[t]! = true then s'.mem = IR.Sem.wr s.mem (tmpAddr Z E t) n v else s'.mem = s.mem)
-    (hr : s'.ramStart = s.ramStart) (hh : s'.halted = s.halted)
+    (hr : s'.ramStart = s.ramStart) (hh : s'.halted = s.halted) (hsp' : s'.sp = s.sp)
     (ha : ∀ o, o ∈ regs'.a → Own E o → s'.a.toNat =
       IR.Sem.opd Z.c ist (tmps.setIfInBounds t (IR.modN n v)) 1 o)
     (hhl : ∀ o, o ∈ regs'.hl → Own E o → s'.hl.toNat =
       IR.Sem.opd Z.c ist (tmps.setIfInBounds t (IR.modN n v)) 2 o)
     (hina : ∀ a, Opd.slot a ∈ regs'.a → Own E (.slot a) → Z.use (a, 1))
     (hinhl : ∀ a, Opd.slot a ∈ regs'.hl → Own E (.slot a) → Z.use (a, 2)) :
-    Rel Z E (dtAfter dt (.tmp t)) regs' ist (tmps.setIfInBounds t (IR.modN n v)) s' := by
+    Rel Z E fr (dtAfter dt (.tmp t)) regs' ist (tmps.setIfInBounds t (IR.modN n v)) s' := by
   by_cases hsp : E.spilled[t]! = true
   · rw [if_pos hsp] at hm
     have hb : tmpAddr Z E t + n ≤ 65536 := by have := hT.bound t hsp; rw [W.size] at this; exact this
     have hram := hT.ram t hsp
     refine ⟨⟨by rw [hr]; exact R.img.rom, fun x b hx => ?_⟩, by rw [hh]; exact R.run, fun x hx => ?_,
       fun t' h1 h2 => ?_, by rw [hr]; exact R.rs, by rw [hm, wr_size]; exact R.msz, R.isz,
-      by rw [Array.size_setIfInBounds]; exact R.tsz, ha, hhl, hina, hinhl⟩
+      by rw [Array.size_setIfInBounds]; exact R.tsz, by rw [hsp']; exact R.sp, R.room, fun x h1 h2 => ?_,
+      ha, hhl, hina, hinhl⟩
+    rotate_left 3
+    · have hroom := R.room
+      rw [hm, wr_get_far _ _ _ _ _ hb (by have := hT.nostack t hsp; rw [W.size] at this; omega)]
+      exact R.stk x h1 h2
     · have hlt : x < Z.a.bytes.size := by
         rcases Nat.lt_or_ge x Z.a.bytes.data.size with h' | h'
         · exact h'
@@ -207,7 +220,8 @@ theorem Rel.wr_tmp (ok : Z.OK) (hT : FnLay Z E) {regs regs' : Regs} {ist : IR.Se
   · rw [if_neg hsp] at hm
     refine ⟨R.img.congr hr hm, by rw [hh]; exact R.run, fun x hx => by rw [hm]; exact R.mem x hx,
       fun t' h1 h2 => ?_, by rw [hr]; exact R.rs, by rw [hm]; exact R.msz, R.isz,
-      by rw [Array.size_setIfInBounds]; exact R.tsz, ha, hhl, hina, hinhl⟩
+      by rw [Array.size_setIfInBounds]; exact R.tsz, by rw [hsp']; exact R.sp, R.room,
+      fun x h1 h2 => by rw [hm]; exact R.stk x h1 h2, ha, hhl, hina, hinhl⟩
     have htt : t' ≠ t := fun e => hsp (e ▸ h2)
     have hd : dt t' := by
       rcases h1 with h | h
@@ -236,8 +250,9 @@ theorem wr_one (m : ByteArray) (a v : Nat) (ha : a < 65536) (b : UInt8) (hb : b.
   simp [IR.Sem.wr, Nat.mod_eq_of_lt ha, this]
 
 theorem Rel.dt_mono {dt' : Nat → Prop} {regs : Regs} {ist : IR.Sem.St} {tmps : Array Nat} {s : Cpu}
-    (R : Rel Z E dt regs ist tmps s) (h : ∀ t, dt' t → dt t) : Rel Z E dt' regs ist tmps s :=
-  ⟨R.img, R.run, R.mem, fun t h1 h2 => R.tmp t (h t h1) h2, R.rs, R.msz, R.isz, R.tsz, R.ra, R.rhl, R.ina, R.inhl⟩
+    (R : Rel Z E fr dt regs ist tmps s) (h : ∀ t, dt' t → dt t) : Rel Z E fr dt' regs ist tmps s :=
+  ⟨R.img, R.run, R.mem, fun t h1 h2 => R.tmp t (h t h1) h2, R.rs, R.msz, R.isz, R.tsz, R.sp, R.room, R.stk,
+    R.ra, R.rhl, R.ina, R.inhl⟩
 
 theorem wpg_storeNeeded (sl : Slot) (n : Nat) (s0 : GS) (Q : Bool → GS → Prop)
     (h : ∀ b, (b = false → sl.area = .frame E.fn.name ∧
@@ -285,15 +300,15 @@ theorem KeepR.refl (s : Cpu) : KeepR s s := ⟨rfl, rfl, rfl, rfl, rfl, rfl, rfl
 def StoreA (Z : ZCtx) (E : GEnv) (base : Nat) (sF : GS) (dt : Nat → Prop) (d : Dst) (s0 : GS) (_ : Unit)
     (s1 : GS) : Prop :=
   GExt s0 s1 ∧ d.opd ∈ s1.regs.a ∧ (∀ o, o ∈ s1.regs.hl → o ∈ s0.regs.hl) ∧
-    (GExt s1 sF → ∀ ist tmps s v, Wr Z E 1 d → Rel Z E dt s0.regs ist tmps s →
+    (GExt s1 sF → ∀ fr ist tmps s v, Wr Z E 1 d → Rel Z E fr dt s0.regs ist tmps s →
       At Z.addrs (base + s0.out.size) s → s.a.toNat = v % 256 →
       ∃ s', Steps Z.inp s s' ∧ At Z.addrs (base + s1.out.size) s' ∧
-        Rel Z E (dtAfter dt d) s1.regs (IR.Sem.setDst Z.c ist tmps 1 d v).1 (IR.Sem.setDst Z.c ist tmps 1 d v).2 s' ∧
+        Rel Z E fr (dtAfter dt d) s1.regs (IR.Sem.setDst Z.c ist tmps 1 d v).1 (IR.Sem.setDst Z.c ist tmps 1 d v).2 s' ∧
         KeepR s s')
 
 /-- What the tracker keeps across a write of `n` bytes at `sl` still holds. -/
 theorem kill_keep (ok : Z.OK) {regs : Regs} {ist : IR.Sem.St} {tmps : Array Nat} {s : Cpu}
-    (R : Rel Z E dt regs ist tmps s) {n : Nat} {sl : Slot} (hdst : Z.dst (sl, n)) (v : Nat) :
+    (R : Rel Z E fr dt regs ist tmps s) {n : Nat} {sl : Slot} (hdst : Z.dst (sl, n)) (v : Nat) :
     (∀ o, o ∈ regs.a.filter (fun o => !overlaps o 1 sl n) → Own E o → s.a.toNat =
       IR.Sem.opd Z.c { ist with mem := IR.Sem.wr ist.mem (Z.c.layout.addr sl) n v } tmps 1 o) ∧
     (∀ o, o ∈ regs.hl.filter (fun o => !overlaps o 2 sl n) → Own E o → s.hl.toNat =
@@ -308,7 +323,7 @@ theorem kill_keep (ok : Z.OK) {regs : Regs} {ist : IR.Sem.St} {tmps : Array Nat}
 
 /-- What the tracker keeps when the temporary `t` is assigned still holds. -/
 theorem forget_keep {regs : Regs} {ist : IR.Sem.St} {tmps : Array Nat} {s : Cpu}
-    (R : Rel Z E dt regs ist tmps s) (t x : Nat) :
+    (R : Rel Z E fr dt regs ist tmps s) (t x : Nat) :
     (∀ o, o ∈ regs.a.filter (· != .tmp t) → Own E o → s.a.toNat =
       IR.Sem.opd Z.c ist (tmps.setIfInBounds t x) 1 o) ∧
     (∀ o, o ∈ regs.hl.filter (· != .tmp t) → Own E o → s.hl.toNat =
@@ -347,7 +362,7 @@ theorem storeA_ok {base : Nat} {sF : GS} (ok : Z.OK) (hT : FnLay Z E) (F : GFina
     | true =>
       simp only [if_true, wpg_ins, wpg_setRegs]
       refine ⟨GExt.push _ _, by simp [Dst.opd], fun o ho => (List.mem_filter.mp ho).1,
-        fun hx ist tmps s v W R hat hA => ?_⟩
+        fun hx fr ist tmps s v W R hat hA => ?_⟩
       obtain ⟨ad, had, hpc⟩ := hat
       obtain ⟨ad0, harea⟩ := W.area
       have hb := ok.dbound sl 1 W.dst
@@ -362,7 +377,7 @@ theorem storeA_ok {base : Nat} {sF : GS} (ok : Z.OK) (hT : FnLay Z E) (F : GFina
         (by rw [R.rs]; exact W.ram) hA
       obtain ⟨ka, khl⟩ := kill_keep ok R W.dst v
       refine ⟨_, hst, hat', ?_, by simp only [KeepR, zsim, and_self]⟩
-      refine Rel.dt_mono (Rel.wr_slot ok hT R W v hmem (by simp only [zsim]) (by simp only [zsim])
+      refine Rel.dt_mono (Rel.wr_slot ok hT R W v hmem (by simp only [zsim]) (by simp only [zsim]) (by simp only [zsim])
         (fun o ho hown => ?_) (fun o ho hown => ?_) (fun a ha hown => ?_) (fun a ha hown => ?_))
         (fun t ht => by rcases ht with h | h; exact h; cases h)
       · simp only [zsim]
@@ -381,7 +396,7 @@ theorem storeA_ok {base : Nat} {sF : GS} (ok : Z.OK) (hT : FnLay Z E) (F : GFina
       simp only [Bool.false_eq_true, if_false, wpg_pure, wpg_setRegs]
       obtain ⟨harea', lv, hlv, hdeadk⟩ := hb rfl
       refine ⟨GExt.refl _, by simp [Dst.opd], fun o ho => (List.mem_filter.mp ho).1,
-        fun hx ist tmps s v W R hat hA => ?_⟩
+        fun hx fr ist tmps s v W R hat hA => ?_⟩
       have hb := ok.dbound sl 1 W.dst
       obtain ⟨ka, khl⟩ := kill_keep ok R W.dst v
       refine ⟨s, Steps.refl _ _, hat, ?_, KeepR.refl s⟩
@@ -400,17 +415,17 @@ theorem storeA_ok {base : Nat} {sF : GS} (ok : Z.OK) (hT : FnLay Z E) (F : GFina
   | tmp t =>
     simp only [wpg_bind, forget, wpg_setRegs]
     refine wpg_tmpSlot t _ _ ?_
-    have head : ∀ (ist : IR.Sem.St) (tmps : Array Nat) (s : Cpu) (v : Nat) (regs : Regs),
-        Rel Z E dt regs ist tmps s → WrTmp E 1 t → s.a.toNat = v % 256 →
+    have head : ∀ (fr : Fr) (ist : IR.Sem.St) (tmps : Array Nat) (s : Cpu) (v : Nat) (regs : Regs),
+        Rel Z E fr dt regs ist tmps s → WrTmp E 1 t → s.a.toNat = v % 256 →
         s.a.toNat = IR.Sem.opd Z.c ist (tmps.setIfInBounds t (IR.modN 1 v)) 1 (.tmp t) := by
-      intro ist tmps s v regs R W hA
+      intro fr ist tmps s v regs R W hA
       have hlt : t < tmps.size := by rw [R.tsz]; exact W.lt
       show _ = IR.modN 1 ((tmps.setIfInBounds t (IR.modN 1 v)).getD t 0)
       simp [Array.getD_eq_getD_getElem?, Array.getElem?_setIfInBounds_self_of_lt hlt, IR.modN, hA]
     by_cases hsp : E.spilled[t]! = true
     · simp only [hsp, if_true, wpg_ins, wpg_setRegs]
       refine ⟨GExt.push _ _, by simp [Dst.opd], fun o ho => (List.mem_filter.mp ho).1,
-        fun hx ist tmps s v W R hat hA => ?_⟩
+        fun hx fr ist tmps s v W R hat hA => ?_⟩
       obtain ⟨ad, had, hpc⟩ := hat
       obtain ⟨ad0, harea⟩ := hT.area
       have hb : tmpAddr Z E t + 1 ≤ 65536 := by have := hT.bound t hsp; rw [W.size] at this; exact this
@@ -428,11 +443,11 @@ theorem storeA_ok {base : Nat} {sF : GS} (ok : Z.OK) (hT : FnLay Z E) (F : GFina
         (by rw [R.rs]; exact hT.ram t hsp) hA
       obtain ⟨ka, khl⟩ := forget_keep R t (IR.modN 1 v)
       refine ⟨_, hst, hat', ?_, by simp only [KeepR, zsim, and_self]⟩
-      refine Rel.wr_tmp ok hT R W v (by rw [if_pos hsp]; exact hmem) (by simp only [zsim]) (by simp only [zsim])
+      refine Rel.wr_tmp ok hT R W v (by rw [if_pos hsp]; exact hmem) (by simp only [zsim]) (by simp only [zsim]) (by simp only [zsim])
         (fun o ho hown => ?_) (fun o ho hown => ?_) (fun a ha hown => ?_) (fun a ha hown => ?_)
       · simp only [zsim]
         rcases List.mem_cons.mp ho with rfl | ho'
-        · exact head ist tmps s v _ R W hA
+        · exact head fr ist tmps s v _ R W hA
         · exact ka o ho' hown
       · simp only [zsim]
         exact khl o ho hown
@@ -442,13 +457,13 @@ theorem storeA_ok {base : Nat} {sF : GS} (ok : Z.OK) (hT : FnLay Z E) (F : GFina
       · exact R.inhl a (List.mem_filter.mp ha).1 hown
     · simp only [hsp, Bool.false_eq_true, if_false, wpg_pure, wpg_setRegs]
       refine ⟨GExt.refl _, by simp [Dst.opd], fun o ho => (List.mem_filter.mp ho).1,
-        fun hx ist tmps s v W R hat hA => ?_⟩
+        fun hx fr ist tmps s v W R hat hA => ?_⟩
       obtain ⟨ka, khl⟩ := forget_keep R t (IR.modN 1 v)
       refine ⟨s, Steps.refl _ _, hat, ?_, KeepR.refl s⟩
-      refine Rel.wr_tmp ok hT R W v (by rw [if_neg hsp]) rfl rfl
+      refine Rel.wr_tmp ok hT R W v (by rw [if_neg hsp]) rfl rfl rfl
         (fun o ho hown => ?_) (fun o ho hown => khl o ho hown) (fun a ha hown => ?_) (fun a ha hown => ?_)
       · rcases List.mem_cons.mp ho with rfl | ho'
-        · exact head ist tmps s v _ R W hA
+        · exact head fr ist tmps s v _ R W hA
         · exact ka o ho' hown
       · rcases List.mem_cons.mp ha with h | ha'
         · cases h
@@ -499,10 +514,10 @@ theorem ld_mem_hl (ok : Z.OK) {s : Cpu} {sl : Slot} {ad pc v : Nat} {i : Instr}
 def StoreHL (Z : ZCtx) (E : GEnv) (base : Nat) (sF : GS) (dt : Nat → Prop) (d : Dst) (s0 : GS) (_ : Unit)
     (s1 : GS) : Prop :=
   GExt s0 s1 ∧ d.opd ∈ s1.regs.hl ∧ (∀ o, o ∈ s1.regs.a → o ∈ s0.regs.a) ∧
-    (GExt s1 sF → ∀ ist tmps s v, Wr Z E 2 d → Rel Z E dt s0.regs ist tmps s →
+    (GExt s1 sF → ∀ fr ist tmps s v, Wr Z E 2 d → Rel Z E fr dt s0.regs ist tmps s →
       At Z.addrs (base + s0.out.size) s → s.hl.toNat = v % 65536 →
       ∃ s', Steps Z.inp s s' ∧ At Z.addrs (base + s1.out.size) s' ∧
-        Rel Z E (dtAfter dt d) s1.regs (IR.Sem.setDst Z.c ist tmps 2 d v).1 (IR.Sem.setDst Z.c ist tmps 2 d v).2 s' ∧
+        Rel Z E fr (dtAfter dt d) s1.regs (IR.Sem.setDst Z.c ist tmps 2 d v).1 (IR.Sem.setDst Z.c ist tmps 2 d v).2 s' ∧
         KeepR s s')
 
 theorem storeHL_ok {base : Nat} {sF : GS} (ok : Z.OK) (hT : FnLay Z E) (F : GFinal Z base sF) (d : Dst)
@@ -512,17 +527,17 @@ theorem storeHL_ok {base : Nat} {sF : GS} (ok : Z.OK) (hT : FnLay Z E) (F : GFin
   | slot sl =>
     simp only [wpg_bind, killWrite, wpg_setRegs]
     refine wpg_storeNeeded sl 2 _ _ (fun b hb => ?_)
-    have head : ∀ (ist : IR.Sem.St) (tmps : Array Nat) (s : Cpu) (v : Nat) (regs : Regs),
-        Rel Z E dt regs ist tmps s → Z.c.layout.addr sl + 2 ≤ 65536 → s.hl.toNat = v % 65536 →
+    have head : ∀ (fr : Fr) (ist : IR.Sem.St) (tmps : Array Nat) (s : Cpu) (v : Nat) (regs : Regs),
+        Rel Z E fr dt regs ist tmps s → Z.c.layout.addr sl + 2 ≤ 65536 → s.hl.toNat = v % 65536 →
         s.hl.toNat = IR.Sem.opd Z.c { ist with mem := IR.Sem.wr ist.mem (Z.c.layout.addr sl) 2 v } tmps 2 (.slot sl) := by
-      intro ist tmps s v regs R hb hHL
+      intro fr ist tmps s v regs R hb hHL
       show _ = IR.Sem.rd (IR.Sem.wr ist.mem _ 2 v) _ 2
       rw [rd_wr _ _ _ _ (by rw [R.isz]; exact hb) (by rw [R.isz]; exact Nat.le_refl _), hHL]
     cases b with
     | true =>
       simp only [if_true, wpg_ins, wpg_setRegs]
       refine ⟨GExt.push _ _, by simp [Dst.opd], fun o ho => (List.mem_filter.mp ho).1,
-        fun hx ist tmps s v W R hat hHL => ?_⟩
+        fun hx fr ist tmps s v W R hat hHL => ?_⟩
       obtain ⟨ad, had, hpc⟩ := hat
       obtain ⟨ad0, harea⟩ := W.area
       have hb := ok.dbound sl 2 W.dst
@@ -537,14 +552,14 @@ theorem storeHL_ok {base : Nat} {sF : GS} (ok : Z.OK) (hT : FnLay Z E) (F : GFin
         (by rw [R.rs]; exact W.ram) hHL
       obtain ⟨ka, khl⟩ := kill_keep ok R W.dst v
       refine ⟨_, hst, hat', ?_, by simp only [KeepR, zsim, and_self]⟩
-      refine Rel.dt_mono (Rel.wr_slot ok hT R W v hmem (by simp only [zsim]) (by simp only [zsim])
+      refine Rel.dt_mono (Rel.wr_slot ok hT R W v hmem (by simp only [zsim]) (by simp only [zsim]) (by simp only [zsim])
         (fun o ho hown => ?_) (fun o ho hown => ?_) (fun a ha hown => ?_) (fun a ha hown => ?_))
         (fun t ht => by rcases ht with h | h; exact h; cases h)
       · simp only [zsim]
         exact ka o ho hown
       · simp only [zsim]
         rcases List.mem_cons.mp ho with rfl | ho'
-        · exact head ist tmps s v _ R hb hHL
+        · exact head fr ist tmps s v _ R hb hHL
         · exact khl o ho' hown
       · exact R.ina a (List.mem_filter.mp ha).1 hown
       · rcases List.mem_cons.mp ha with h | ha'
@@ -555,7 +570,7 @@ theorem storeHL_ok {base : Nat} {sF : GS} (ok : Z.OK) (hT : FnLay Z E) (F : GFin
       simp only [Bool.false_eq_true, if_false, wpg_pure, wpg_setRegs]
       obtain ⟨harea', lv, hlv, hdeadk⟩ := hb rfl
       refine ⟨GExt.refl _, by simp [Dst.opd], fun o ho => (List.mem_filter.mp ho).1,
-        fun hx ist tmps s v W R hat hHL => ?_⟩
+        fun hx fr ist tmps s v W R hat hHL => ?_⟩
       have hb := ok.dbound sl 2 W.dst
       obtain ⟨ka, khl⟩ := kill_keep ok R W.dst v
       refine ⟨s, Steps.refl _ _, hat, ?_, KeepR.refl s⟩
@@ -563,7 +578,7 @@ theorem storeHL_ok {base : Nat} {sF : GS} (ok : Z.OK) (hT : FnLay Z E) (F : GFin
         (fun o ho hown => ka o ho hown) (fun o ho hown => ?_) (fun a ha hown => ?_) (fun a ha hown => ?_))
         (fun t ht => by rcases ht with h | h; exact h; cases h)
       · rcases List.mem_cons.mp ho with rfl | ho'
-        · exact head ist tmps s v _ R hb hHL
+        · exact head fr ist tmps s v _ R hb hHL
         · exact khl o ho' hown
       · exact R.ina a (List.mem_filter.mp ha).1 hown
       · rcases List.mem_cons.mp ha with h | ha'
@@ -573,17 +588,17 @@ theorem storeHL_ok {base : Nat} {sF : GS} (ok : Z.OK) (hT : FnLay Z E) (F : GFin
   | tmp t =>
     simp only [wpg_bind, forget, wpg_setRegs]
     refine wpg_tmpSlot t _ _ ?_
-    have head : ∀ (ist : IR.Sem.St) (tmps : Array Nat) (s : Cpu) (v : Nat) (regs : Regs),
-        Rel Z E dt regs ist tmps s → WrTmp E 2 t → s.hl.toNat = v % 65536 →
+    have head : ∀ (fr : Fr) (ist : IR.Sem.St) (tmps : Array Nat) (s : Cpu) (v : Nat) (regs : Regs),
+        Rel Z E fr dt regs ist tmps s → WrTmp E 2 t → s.hl.toNat = v % 65536 →
         s.hl.toNat = IR.Sem.opd Z.c ist (tmps.setIfInBounds t (IR.modN 2 v)) 2 (.tmp t) := by
-      intro ist tmps s v regs R W hHL
+      intro fr ist tmps s v regs R W hHL
       have hlt : t < tmps.size := by rw [R.tsz]; exact W.lt
       show _ = IR.modN 2 ((tmps.setIfInBounds t (IR.modN 2 v)).getD t 0)
       simp [Array.getD_eq_getD_getElem?, Array.getElem?_setIfInBounds_self_of_lt hlt, IR.modN, hHL]
     by_cases hsp : E.spilled[t]! = true
     · simp only [hsp, if_true, wpg_ins, wpg_setRegs]
       refine ⟨GExt.push _ _, by simp [Dst.opd], fun o ho => (List.mem_filter.mp ho).1,
-        fun hx ist tmps s v W R hat hHL => ?_⟩
+        fun hx fr ist tmps s v W R hat hHL => ?_⟩
       obtain ⟨ad, had, hpc⟩ := hat
       obtain ⟨ad0, harea⟩ := hT.area
       have hb : tmpAddr Z E t + 2 ≤ 65536 := by have := hT.bound t hsp; rw [W.size] at this; exact this
@@ -601,13 +616,13 @@ theorem storeHL_ok {base : Nat} {sF : GS} (ok : Z.OK) (hT : FnLay Z E) (F : GFin
         (by rw [R.rs]; exact hT.ram t hsp) hHL
       obtain ⟨ka, khl⟩ := forget_keep R t (IR.modN 2 v)
       refine ⟨_, hst, hat', ?_, by simp only [KeepR, zsim, and_self]⟩
-      refine Rel.wr_tmp ok hT R W v (by rw [if_pos hsp]; exact hmem) (by simp only [zsim]) (by simp only [zsim])
+      refine Rel.wr_tmp ok hT R W v (by rw [if_pos hsp]; exact hmem) (by simp only [zsim]) (by simp only [zsim]) (by simp only [zsim])
         (fun o ho hown => ?_) (fun o ho hown => ?_) (fun a ha hown => ?_) (fun a ha hown => ?_)
       · simp only [zsim]
         exact ka o ho hown
       · simp only [zsim]
         rcases List.mem_cons.mp ho with rfl | ho'
-        · exact head ist tmps s v _ R W hHL
+        · exact head fr ist tmps s v _ R W hHL
         · exact khl o ho' hown
       · exact R.ina a (List.mem_filter.mp ha).1 hown
       · rcases List.mem_cons.mp ha with h | ha'
@@ -615,13 +630,13 @@ theorem storeHL_ok {base : Nat} {sF : GS} (ok : Z.OK) (hT : FnLay Z E) (F : GFin
         · exact R.inhl a (List.mem_filter.mp ha').1 hown
     · simp only [hsp, Bool.false_eq_true, if_false, wpg_pure, wpg_setRegs]
       refine ⟨GExt.refl _, by simp [Dst.opd], fun o ho => (List.mem_filter.mp ho).1,
-        fun hx ist tmps s v W R hat hHL => ?_⟩
+        fun hx fr ist tmps s v W R hat hHL => ?_⟩
       obtain ⟨ka, khl⟩ := forget_keep R t (IR.modN 2 v)
       refine ⟨s, Steps.refl _ _, hat, ?_, KeepR.refl s⟩
-      refine Rel.wr_tmp ok hT R W v (by rw [if_neg hsp]) rfl rfl
+      refine Rel.wr_tmp ok hT R W v (by rw [if_neg hsp]) rfl rfl rfl
         (fun o ho hown => ka o ho hown) (fun o ho hown => ?_) (fun a ha hown => ?_) (fun a ha hown => ?_)
       · rcases List.mem_cons.mp ho with rfl | ho'
-        · exact head ist tmps s v _ R W hHL
+        · exact head fr ist tmps s v _ R W hHL
         · exact khl o ho' hown
       · exact R.ina a (List.mem_filter.mp ha).1 hown
       · rcases List.mem_cons.mp ha with h | ha'

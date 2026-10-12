@@ -441,4 +441,23 @@ variable (s : Cpu) (x w : UInt16)
 @[zsim] theorem wr16_bc : (s.wr16 x w).bc = s.bc := by simp only [Cpu.wr16, zsim]
 end
 
+section
+variable (s : Cpu) (w : UInt16)
+@[zsim] theorem push_a : (s.push w).a = s.a := by simp only [Cpu.push, zsim]
+@[zsim] theorem push_f : (s.push w).f = s.f := by simp only [Cpu.push, zsim]
+@[zsim] theorem push_b : (s.push w).b = s.b := by simp only [Cpu.push, zsim]
+@[zsim] theorem push_c : (s.push w).c = s.c := by simp only [Cpu.push, zsim]
+@[zsim] theorem push_d : (s.push w).d = s.d := by simp only [Cpu.push, zsim]
+@[zsim] theorem push_e : (s.push w).e = s.e := by simp only [Cpu.push, zsim]
+@[zsim] theorem push_h : (s.push w).h = s.h := by simp only [Cpu.push, zsim]
+@[zsim] theorem push_l : (s.push w).l = s.l := by simp only [Cpu.push, zsim]
+@[zsim] theorem push_pc : (s.push w).pc = s.pc := by simp only [Cpu.push, zsim]
+@[zsim] theorem push_halted : (s.push w).halted = s.halted := by simp only [Cpu.push, zsim]
+@[zsim] theorem push_ramStart : (s.push w).ramStart = s.ramStart := by simp only [Cpu.push, zsim]
+@[zsim] theorem push_hl : (s.push w).hl = s.hl := by simp only [Cpu.push, zsim]; rfl
+@[zsim] theorem push_de : (s.push w).de = s.de := by simp only [Cpu.push, zsim]; rfl
+@[zsim] theorem push_bc : (s.push w).bc = s.bc := by simp only [Cpu.push, zsim]; rfl
+@[zsim] theorem push_sp : (s.push w).sp = s.sp - 2 := by simp only [Cpu.push, zsim]
+end
+
 end Ember.Proof.Z80Gen

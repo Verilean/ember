@@ -38,6 +38,13 @@ structure ZCtx where
   use : Slot × Nat → Prop
   /-- The slots written, wherever they are. -/
   dst : Slot × Nat → Prop
+  /-- The stack is between these two addresses. -/
+  stackLo : Nat
+  stackHi : Nat
+  /-- The stack a function needs below its return address, calls included. -/
+  depth : String → Nat
+  /-- The stack a routine of the runtime needs below its return address. -/
+  rtK : Nat
 
 /-- The name `n` is the number `v` in the image. -/
 def ZCtx.sym (Z : ZCtx) (n : String) (v : Nat) : Prop := Z.a.labels.reverse.lookup n = some v
@@ -46,8 +53,10 @@ structure ZCtx.OK (Z : ZCtx) : Prop where
   placed : Placed Z.items 0 Z.a Z.addrs
   /-- The image was built for the layout. -/
   areas : ∀ ar ad, Z.c.layout.areaAddr ar = some ad → Z.sym (areaSym ar) ad
-  /-- The shared bytes are in RAM. -/
+  /-- The shared bytes are in RAM, and not in the stack. -/
   ram : ∀ x, Z.data x → Z.ramStart ≤ x ∧ x < 65536
+  stack : Z.ramStart ≤ Z.stackLo ∧ Z.stackHi ≤ 65536
+  nostack : ∀ x, Z.data x → x < Z.stackLo ∨ Z.stackHi ≤ x
   ubound : ∀ a an, Z.use (a, an) → Z.c.layout.addr a + an ≤ 65536
   dbound : ∀ b bn, Z.dst (b, bn) → Z.c.layout.addr b + bn ≤ 65536
   /-- A slot that is used and one that is written are apart in memory unless their offsets overlap. -/
@@ -65,9 +74,16 @@ def Own (E : GEnv) : Opd → Prop
   | .slot sl => sl.area = .frame E.fn.name ∨ ∃ g, sl.area = .global g
   | _ => True
 
-/-- **The relation.**  `dt`: the temporaries assigned so far. -/
-structure Rel (Z : ZCtx) (E : GEnv) (dt : Nat → Prop) (regs : Regs) (ist : IR.Sem.St) (tmps : Array Nat)
-    (s : Cpu) : Prop where
+/-- The stack as the function found it: the stack pointer (at the
+return address) and the memory then. -/
+structure Fr where
+  sp : UInt16
+  mem : ByteArray
+
+/-- **The relation.**  `fr`: the stack at the function's entry; `dt`:
+the temporaries assigned so far. -/
+structure Rel (Z : ZCtx) (E : GEnv) (fr : Fr) (dt : Nat → Prop) (regs : Regs) (ist : IR.Sem.St)
+    (tmps : Array Nat) (s : Cpu) : Prop where
   img : Img Z.a 0 s
   run : s.halted = false
   mem : ∀ x, Z.data x → s.mem.get! x = ist.mem.get! x
@@ -77,6 +93,10 @@ structure Rel (Z : ZCtx) (E : GEnv) (dt : Nat → Prop) (regs : Regs) (ist : IR.
   msz : s.mem.size = 65536
   isz : ist.mem.size = 65536
   tsz : tmps.size = E.fn.tmps.size
+  /-- The stack pointer is where it was, with room below; what is above is as it was. -/
+  sp : s.sp = fr.sp
+  room : Z.stackLo + Z.depth E.fn.name ≤ fr.sp.toNat ∧ fr.sp.toNat + 2 ≤ Z.stackHi
+  stk : ∀ x, fr.sp.toNat ≤ x → x < Z.stackHi → s.mem.get! x = fr.mem.get! x
   /-- What the tracker says, for the operands of the function's own. -/
   ra : ∀ o, o ∈ regs.a → Own E o → s.a.toNat = IR.Sem.opd Z.c ist tmps 1 o
   rhl : ∀ o, o ∈ regs.hl → Own E o → s.hl.toNat = IR.Sem.opd Z.c ist tmps 2 o
@@ -84,16 +104,17 @@ structure Rel (Z : ZCtx) (E : GEnv) (dt : Nat → Prop) (regs : Regs) (ist : IR.
   inhl : ∀ sl, Opd.slot sl ∈ regs.hl → Own E (.slot sl) → Z.use (sl, 2)
 
 /-- A step that changes registers only. -/
-theorem Rel.regs_only {Z : ZCtx} {E : GEnv} {dt : Nat → Prop} {regs regs' : Regs} {ist : IR.Sem.St}
-    {tmps : Array Nat} {s s' : Cpu} (R : Rel Z E dt regs ist tmps s) (hm : s'.mem = s.mem)
-    (hr : s'.ramStart = s.ramStart) (hh : s'.halted = s.halted)
+theorem Rel.regs_only {Z : ZCtx} {E : GEnv} {fr : Fr} {dt : Nat → Prop} {regs regs' : Regs} {ist : IR.Sem.St}
+    {tmps : Array Nat} {s s' : Cpu} (R : Rel Z E fr dt regs ist tmps s) (hm : s'.mem = s.mem)
+    (hr : s'.ramStart = s.ramStart) (hh : s'.halted = s.halted) (hsp : s'.sp = s.sp)
     (ha : ∀ o, o ∈ regs'.a → Own E o → s'.a.toNat = IR.Sem.opd Z.c ist tmps 1 o)
     (hhl : ∀ o, o ∈ regs'.hl → Own E o → s'.hl.toNat = IR.Sem.opd Z.c ist tmps 2 o)
     (hina : ∀ sl, Opd.slot sl ∈ regs'.a → Own E (.slot sl) → Z.use (sl, 1))
     (hinhl : ∀ sl, Opd.slot sl ∈ regs'.hl → Own E (.slot sl) → Z.use (sl, 2)) :
-    Rel Z E dt regs' ist tmps s' :=
+    Rel Z E fr dt regs' ist tmps s' :=
   ⟨R.img.congr hr hm, by rw [hh]; exact R.run, fun x hx => by rw [hm]; exact R.mem x hx,
     fun t h1 h2 => by rw [hm]; exact R.tmp t h1 h2, by rw [hr]; exact R.rs, by rw [hm]; exact R.msz, R.isz, R.tsz,
+    by rw [hsp]; exact R.sp, R.room, fun x h1 h2 => by rw [hm]; exact R.stk x h1 h2,
     ha, hhl, hina, hinhl⟩
 
 /-! ## The code being generated is in the image -/
