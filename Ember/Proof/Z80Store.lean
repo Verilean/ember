@@ -27,6 +27,7 @@ structure WrSlot (Z : ZCtx) (E : GEnv) (n : Nat) (sl : Slot) : Prop where
   notmp : ∀ j, j < n → ¬ TmpByte Z E (Z.c.layout.addr sl + j)
   nostack : Z.c.layout.addr sl + n ≤ Z.stackLo ∨ Z.stackHi ≤ Z.c.layout.addr sl
   noacc : Z.c.layout.addr sl + n ≤ Z.acc ∨ Z.acc + 8 ≤ Z.c.layout.addr sl
+  inwr : ∀ j, j < n → Z.wr E.fn.name (Z.c.layout.addr sl + j)
   /-- A store the generator leaves out is to bytes that are not shared. -/
   dead : sl.area = .frame E.fn.name → ∀ lv, E.live = some lv →
     (∀ k, k < n → lv.getD (sl.off + k) true = false) → ∀ j, j < n → ¬ Z.data (Z.c.layout.addr sl + j)
@@ -41,6 +42,7 @@ structure FnLay (Z : ZCtx) (E : GEnv) : Prop where
     tmpAddr Z E t + E.fn.tmps[t]! ≤ Z.stackLo ∨ Z.stackHi ≤ tmpAddr Z E t
   noacc : ∀ t, E.spilled[t]! = true →
     tmpAddr Z E t + E.fn.tmps[t]! ≤ Z.acc ∨ Z.acc + 8 ≤ tmpAddr Z E t
+  inwr : ∀ t, E.spilled[t]! = true → ∀ j, j < E.fn.tmps[t]! → Z.wr E.fn.name (tmpAddr Z E t + j)
   apart : ∀ t t', t ≠ t' → E.spilled[t]! = true → E.spilled[t']! = true →
     tmpAddr Z E t' + E.fn.tmps[t']! ≤ tmpAddr Z E t ∨ tmpAddr Z E t + E.fn.tmps[t]! ≤ tmpAddr Z E t'
 
@@ -107,12 +109,23 @@ theorem Rel.wr_slot (ok : Z.OK) (hT : FnLay Z E) {regs regs' : Regs} {ist : IR.S
   refine ⟨⟨by rw [hr]; exact R.img.rom, fun x b hx => ?_⟩, by rw [hh]; exact R.run, fun x hx => ?_,
     fun t h1 h2 => ?_, by rw [hr]; exact R.rs, by rw [hm, wr_size]; exact R.msz, by
       show (IR.Sem.wr ist.mem _ n v).size = 65536
-      rw [wr_size]; exact R.isz, R.tsz, by rw [hsp]; exact R.sp, R.room, fun x h1 h2 => ?_, ha, hhl, hacc, hina, hinhl, hinacc, hnacc⟩
+      rw [wr_size]; exact R.isz, R.tsz, by rw [hsp]; exact R.sp, R.room, fun x h1 h2 => ?_, fun x hx => ?_,
+      ha, hhl, hacc, hina, hinhl, hinacc, hnacc⟩
   rotate_left 3
   · -- the stack is not written
     have hroom := R.room
     rw [hm, wr_get_far _ _ _ _ _ hb (by have := W.nostack; omega)]
     exact R.stk x h1 h2
+  · -- nor what the function may not write
+    rw [hm, wr_get_far _ _ _ _ _ hb ?_]
+    · exact R.out x hx
+    · rcases Nat.lt_or_ge x (Z.c.layout.addr sl) with h | h
+      · exact Or.inl h
+      · rcases Nat.lt_or_ge x (Z.c.layout.addr sl + n) with h' | h'
+        · have := W.inwr (x - Z.c.layout.addr sl) (by omega)
+          rw [show Z.c.layout.addr sl + (x - Z.c.layout.addr sl) = x by omega] at this
+          exact absurd this hx
+        · exact Or.inr h'
   · -- the image is below the RAM
     have hlt : x < Z.a.bytes.size := by
       rcases Nat.lt_or_ge x Z.a.bytes.data.size with h' | h'
@@ -160,7 +173,7 @@ theorem Rel.wr_dead (ok : Z.OK) {regs regs' : Regs} {ist : IR.Sem.St} {tmps : Ar
   have hb := ok.dbound sl n W.dst
   refine ⟨R.img, R.run, fun x hx => ?_, R.tmp, R.rs, R.msz, by
     show (IR.Sem.wr ist.mem _ n v).size = 65536
-    rw [wr_size]; exact R.isz, R.tsz, R.sp, R.room, R.stk, ha, hhl, hacc, hina, hinhl, hinacc, hnacc⟩
+    rw [wr_size]; exact R.isz, R.tsz, R.sp, R.room, R.stk, R.out, ha, hhl, hacc, hina, hinhl, hinacc, hnacc⟩
   show s.mem.get! x = (IR.Sem.wr ist.mem _ n v).get! x
   rw [wr_get_far _ _ _ _ _ hb ?_]
   · exact R.mem x hx
@@ -195,11 +208,20 @@ theorem Rel.wr_tmp (ok : Z.OK) (hT : FnLay Z E) {regs regs' : Regs} {ist : IR.Se
     refine ⟨⟨by rw [hr]; exact R.img.rom, fun x b hx => ?_⟩, by rw [hh]; exact R.run, fun x hx => ?_,
       fun t' h1 h2 => ?_, by rw [hr]; exact R.rs, by rw [hm, wr_size]; exact R.msz, R.isz,
       by rw [Array.size_setIfInBounds]; exact R.tsz, by rw [hsp']; exact R.sp, R.room, fun x h1 h2 => ?_,
-      ha, hhl, hacc, hina, hinhl, hinacc, hnacc⟩
+      fun x hx => ?_, ha, hhl, hacc, hina, hinhl, hinacc, hnacc⟩
     rotate_left 3
     · have hroom := R.room
       rw [hm, wr_get_far _ _ _ _ _ hb (by have := hT.nostack t hsp; rw [W.size] at this; omega)]
       exact R.stk x h1 h2
+    · rw [hm, wr_get_far _ _ _ _ _ hb ?_]
+      · exact R.out x hx
+      · rcases Nat.lt_or_ge x (tmpAddr Z E t) with h | h
+        · exact Or.inl h
+        · rcases Nat.lt_or_ge x (tmpAddr Z E t + n) with h' | h'
+          · have := hT.inwr t hsp (x - tmpAddr Z E t) (by rw [W.size]; omega)
+            rw [show tmpAddr Z E t + (x - tmpAddr Z E t) = x by omega] at this
+            exact absurd this hx
+          · exact Or.inr h'
     · have hlt : x < Z.a.bytes.size := by
         rcases Nat.lt_or_ge x Z.a.bytes.data.size with h' | h'
         · exact h'
@@ -236,7 +258,8 @@ theorem Rel.wr_tmp (ok : Z.OK) (hT : FnLay Z E) {regs regs' : Regs} {ist : IR.Se
     refine ⟨R.img.congr hr hm, by rw [hh]; exact R.run, fun x hx => by rw [hm]; exact R.mem x hx,
       fun t' h1 h2 => ?_, by rw [hr]; exact R.rs, by rw [hm]; exact R.msz, R.isz,
       by rw [Array.size_setIfInBounds]; exact R.tsz, by rw [hsp']; exact R.sp, R.room,
-      fun x h1 h2 => by rw [hm]; exact R.stk x h1 h2, ha, hhl, hacc, hina, hinhl, hinacc, hnacc⟩
+      fun x h1 h2 => by rw [hm]; exact R.stk x h1 h2, fun x hx => by rw [hm]; exact R.out x hx,
+      ha, hhl, hacc, hina, hinhl, hinacc, hnacc⟩
     have htt : t' ≠ t := fun e => hsp (e ▸ h2)
     have hd : dt t' := by
       rcases h1 with h | h
@@ -266,7 +289,7 @@ theorem wr_one (m : ByteArray) (a v : Nat) (ha : a < 65536) (b : UInt8) (hb : b.
 
 theorem Rel.dt_mono {dt' : Nat → Prop} {regs : Regs} {ist : IR.Sem.St} {tmps : Array Nat} {s : Cpu}
     (R : Rel Z E fr dt regs ist tmps s) (h : ∀ t, dt' t → dt t) : Rel Z E fr dt' regs ist tmps s :=
-  ⟨R.img, R.run, R.mem, fun t h1 h2 => R.tmp t (h t h1) h2, R.rs, R.msz, R.isz, R.tsz, R.sp, R.room, R.stk,
+  ⟨R.img, R.run, R.mem, fun t h1 h2 => R.tmp t (h t h1) h2, R.rs, R.msz, R.isz, R.tsz, R.sp, R.room, R.stk, R.out,
     R.ra, R.rhl, R.racc, R.ina, R.inhl, R.inacc, R.nacc⟩
 
 theorem wpg_storeNeeded (sl : Slot) (n : Nat) (s0 : GS) (Q : Bool → GS → Prop)

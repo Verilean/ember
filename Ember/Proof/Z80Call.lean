@@ -178,19 +178,9 @@ theorem Rel.free_stack (ok : Z.OK) (hT : FnLay Z E) {regs regs' : Regs} {ist : I
   have hstk := ok.stack
   have hroom := R.room
   have hspv : s.sp.toNat = fr.sp.toNat := by rw [R.sp]
-  refine ⟨⟨by rw [hr]; exact R.img.rom, fun x b hx => ?_⟩, by rw [hh]; exact R.run, fun x hx => ?_,
-    fun t h1 h2 => ?_, by rw [hr]; exact R.rs, hsz, R.isz, R.tsz, by rw [hsp]; exact R.sp, R.room,
-    fun x h1 h2 => ?_, ha, hhl, fun n o h hown => ?_, hina, hinhl,
-    fun n sl h hown => R.inacc n sl (hacc _ _ h) hown, fun n o h => R.nacc n o (hacc n o h)⟩
-  rotate_left 4
-  · -- the accumulator is not in the stack
-    have h8 := R.nacc n o (hacc n o h)
-    have hacr := ok.accRam
-    rw [← R.racc n o (hacc n o h) hown]
-    refine rd_congr _ _ _ _ (by omega) (fun x hx1 hx2 => hm x ?_)
-    have := ok.accStack
-    omega
-  · have hlt : x < Z.a.bytes.size := by
+  have himg : ∀ x b, Z.a.bytes.data[x]? = some b → s'.mem.get! (0 + x) = b := by
+    intro x b hx
+    have hlt : x < Z.a.bytes.size := by
       rcases Nat.lt_or_ge x Z.a.bytes.data.size with h' | h'
       · exact h'
       · rw [Array.getElem?_eq_none h'] at hx; cases hx
@@ -198,14 +188,42 @@ theorem Rel.free_stack (ok : Z.OK) (hT : FnLay Z E) {regs regs' : Regs} {ist : I
     have hrs := R.rs
     rw [Nat.zero_add, hm x (by omega)]
     simpa using R.img.bytes x b hx
-  · rw [hm x (by have := ok.nostack x hx; omega)]
+  have hmem : ∀ x, Z.data x → s'.mem.get! x = ist.mem.get! x := by
+    intro x hx
+    rw [hm x (by have := ok.nostack x hx; omega)]
     exact R.mem x hx
-  · rw [← R.tmp t h1 h2]
+  have htmp : ∀ t, dt t → E.spilled[t]! = true →
+      IR.Sem.rd s'.mem (tmpAddr Z E t) (E.fn.tmps[t]!) = tmps.getD t 0 := by
+    intro t h1 h2
+    rw [← R.tmp t h1 h2]
     refine rd_congr _ _ _ _ (hT.bound t h2) (fun x hx1 hx2 => hm x ?_)
     have := hT.nostack t h2
     omega
-  · rw [hm x (by omega)]
+  have hstk' : ∀ x, fr.sp.toNat ≤ x → x < Z.stackHi → s'.mem.get! x = fr.mem.get! x := by
+    intro x h1 h2
+    rw [hm x (by omega)]
     exact R.stk x h1 h2
+  have hout : ∀ x, ¬ Z.wr E.fn.name x → s'.mem.get! x = fr.mem.get! x := by
+    intro x hx
+    rw [hm x ?_]
+    · exact R.out x hx
+    · rcases Nat.lt_or_ge x Z.stackLo with h | h
+      · exact Or.inl h
+      · rcases Nat.lt_or_ge x Z.stackHi with h' | h'
+        · exact absurd (ok.wrStack _ x h h') hx
+        · exact Or.inr (by omega)
+  have hacc' : ∀ n o, regs'.acc = some (n, o) → Own E o →
+      IR.Sem.rd s'.mem Z.acc n = IR.Sem.opd Z.c ist tmps n o := by
+    intro n o h hown
+    have h8 := R.nacc n o (hacc n o h)
+    have hacr := ok.accRam
+    rw [← R.racc n o (hacc n o h) hown]
+    refine rd_congr _ _ _ _ (by omega) (fun x hx1 hx2 => hm x ?_)
+    have := ok.accStack
+    omega
+  exact ⟨⟨by rw [hr]; exact R.img.rom, himg⟩, by rw [hh]; exact R.run, hmem, htmp, by rw [hr]; exact R.rs, hsz,
+    R.isz, R.tsz, by rw [hsp]; exact R.sp, R.room, hstk', hout, ha, hhl, hacc', hina, hinhl,
+    fun n sl h hown => R.inacc n sl (hacc _ _ h) hown, fun n o h => R.nacc n o (hacc n o h)⟩
 
 /-- A routine of the runtime that works on registers: `rel` between the
 state it is entered in and the state it returns in. -/

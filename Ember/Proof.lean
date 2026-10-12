@@ -83,6 +83,7 @@ import Ember.Proof.Z80Flags
 import Ember.Proof.Z80Cmp
 import Ember.Proof.Z80Jump
 import Ember.Proof.Z80CmpI
+import Ember.Proof.Z80Ctl
 
 /-!
 # Ember.Proof — proofs (plan M5): about the reference stack (P1), and that Ember code refines it (P2)

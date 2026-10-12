@@ -47,6 +47,10 @@ structure ZCtx where
   rtK : Nat
   /-- The address of the runtime's accumulator `rt_acc` (8 bytes). -/
   acc : Nat
+  /-- The bytes a function may write, the functions it calls included:
+  globals, their frames with the slots of the temporaries, the
+  accumulator, the stack. -/
+  wr : String → Nat → Prop
 
 /-- The name `n` is the number `v` in the image. -/
 def ZCtx.sym (Z : ZCtx) (n : String) (v : Nat) : Prop := Z.a.labels.reverse.lookup n = some v
@@ -61,6 +65,7 @@ structure ZCtx.OK (Z : ZCtx) : Prop where
   accSym : Z.sym "rt_acc" Z.acc
   accRam : Z.ramStart ≤ Z.acc ∧ Z.acc + 8 ≤ 65536
   accStack : Z.acc + 8 ≤ Z.stackLo ∨ Z.stackHi ≤ Z.acc
+  wrStack : ∀ f x, Z.stackLo ≤ x → x < Z.stackHi → Z.wr f x
   nostack : ∀ x, Z.data x → x < Z.stackLo ∨ Z.stackHi ≤ x
   ubound : ∀ a an, Z.use (a, an) → Z.c.layout.addr a + an ≤ 65536
   dbound : ∀ b bn, Z.dst (b, bn) → Z.c.layout.addr b + bn ≤ 65536
@@ -102,6 +107,8 @@ structure Rel (Z : ZCtx) (E : GEnv) (fr : Fr) (dt : Nat → Prop) (regs : Regs) 
   sp : s.sp = fr.sp
   room : Z.stackLo + Z.depth E.fn.name ≤ fr.sp.toNat ∧ fr.sp.toNat + 2 ≤ Z.stackHi
   stk : ∀ x, fr.sp.toNat ≤ x → x < Z.stackHi → s.mem.get! x = fr.mem.get! x
+  /-- What the function may not write is as it was. -/
+  out : ∀ x, ¬ Z.wr E.fn.name x → s.mem.get! x = fr.mem.get! x
   /-- What the tracker says, for the operands of the function's own. -/
   ra : ∀ o, o ∈ regs.a → Own E o → s.a.toNat = IR.Sem.opd Z.c ist tmps 1 o
   rhl : ∀ o, o ∈ regs.hl → Own E o → s.hl.toNat = IR.Sem.opd Z.c ist tmps 2 o
@@ -124,7 +131,7 @@ theorem Rel.regs_only {Z : ZCtx} {E : GEnv} {fr : Fr} {dt : Nat → Prop} {regs 
   ⟨R.img.congr hr hm, by rw [hh]; exact R.run, fun x hx => by rw [hm]; exact R.mem x hx,
     fun t h1 h2 => by rw [hm]; exact R.tmp t h1 h2, by rw [hr]; exact R.rs, by rw [hm]; exact R.msz, R.isz, R.tsz,
     by rw [hsp]; exact R.sp, R.room, fun x h1 h2 => by rw [hm]; exact R.stk x h1 h2,
-    ha, hhl, fun n o h hown => by rw [hm]; exact R.racc n o (hacc n o h) hown, hina, hinhl,
+    fun x hx => by rw [hm]; exact R.out x hx, ha, hhl, fun n o h hown => by rw [hm]; exact R.racc n o (hacc n o h) hown, hina, hinhl,
     fun n sl h hown => R.inacc n sl (hacc _ _ h) hown, fun n o h => R.nacc n o (hacc n o h)⟩
 
 /-! ## The code being generated is in the image -/

@@ -715,12 +715,14 @@ def jumpTo (l : Nat) : GM Unit :=
       | none => s.regs
     { s with atLabel := (l, r) :: s.atLabel.filter (·.1 != l), jumps := (l, s.regs) :: s.jumps }
 
-/-- At every jump the registers held what was assumed of them after its label. -/
+/-- At every jump the registers held what was assumed of them after its
+label, and no label was generated twice. -/
 def jumpsOk (s : GS) : Bool :=
-  s.jumps.all fun (l, r) =>
+  (s.jumps.all fun (l, r) =>
     match s.labelRegs.lookup l with
     | some rl => rl.le r
-    | none => false
+    | none => false) &&
+  decide (s.labelRegs.map (·.1)).Nodup
 
 def effectRoutine : Effect → String
   | .inputNext | .ringPop => "rt_input"
