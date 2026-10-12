@@ -191,10 +191,10 @@ theorem loopH_spec (p : Lang.Prog) (S : LoopSrc p) :
       ∀ (inputs : Array Ember.Trace.Input) (s : Cpu), s.pc.toNat = 0 → Img a 0 s → s.halted = false →
         s.ramStart.toNat = 0x8000 → s.mem.size = 65536 →
         ∀ j : Nat, ∃ st' : Lang.Sem.St, callN 366 p "main" j (Lang.Sem.initial p inputs) = some st' ∧
-          ((∃ s' w', WSteps (Zof a addrs (0, 0)) (s, ((st0 inputs).world, 0, (0, 0))) (s', w') ∧ At addrs 174 s' ∧
+          ((∃ s' w', WSteps (Zof a addrs (0, 0)) (s, ((st0 inputs).world, 0, (0, 0), (0, 0))) (s', w') ∧ At addrs 174 s' ∧
               s'.sp = 0 ∧ w'.1 = st'.world) ∨
            (∃ i sti s' w', i ≤ j ∧ callN 366 p "main" i (Lang.Sem.initial p inputs) = some sti ∧
-              WSteps (Zof a addrs (0, 0)) (s, ((st0 inputs).world, 0, (0, 0))) (s', w') ∧ s'.halted = true ∧
+              WSteps (Zof a addrs (0, 0)) (s, ((st0 inputs).world, 0, (0, 0), (0, 0))) (s', w') ∧ s'.halted = true ∧
               s'.iff1 = false ∧ w'.1 = sti.world ∧ sti.world.next.1 = 0xFFFF)) := by
   obtain ⟨a, addrs, ha, hrun⟩ := loopH_run
   refine ⟨a, addrs, ha, fun inputs s hpc I hh hrs hsz j => ?_⟩
@@ -233,7 +233,7 @@ theorem loopH_spec_halt (p : Lang.Prog) (S : LoopSrc p) :
       ∀ (inputs : Array Ember.Trace.Input) (s : Cpu), s.pc.toNat = 0 → Img a 0 s → s.halted = false →
         s.ramStart.toNat = 0x8000 → s.mem.size = 65536 →
         ∃ i sti s' w', callN 366 p "main" i (Lang.Sem.initial p inputs) = some sti ∧ sti.world.next.1 = 0xFFFF ∧
-          WSteps (Zof a addrs (0, 0)) (s, ((st0 inputs).world, 0, (0, 0))) (s', w') ∧ s'.halted = true ∧
+          WSteps (Zof a addrs (0, 0)) (s, ((st0 inputs).world, 0, (0, 0), (0, 0))) (s', w') ∧ s'.halted = true ∧
           s'.iff1 = false ∧ w'.1 = sti.world := by
   obtain ⟨a, addrs, ha, hrun⟩ := loopH_run_halt
   refine ⟨a, addrs, ha, fun inputs s hpc I hh hrs hsz => ?_⟩

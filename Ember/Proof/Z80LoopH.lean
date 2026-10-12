@@ -71,31 +71,35 @@ theorem img_check : img.check = true := by decide +kernel
 
 /-- The machine's state: the world, the byte latched by the last read
 of `0xD1` that took one, and the position in the input when `0xD9` was
-last read. -/
-abbrev HW := World × UInt8 × (Nat × Nat)
+last read, and the value of the note to come (what has been written
+of it to `0xDA`, and how many bytes). -/
+abbrev HW := World × UInt8 × (Nat × Nat) × (Nat × Nat)
 
 def hbus (w : HW) (p : UInt16) : UInt8 :=
   if lo p = 0xD0 then (if kindOf w.1 = 2 then 0 else 1)
   else if lo p = 0xD1 then kindOf w.1
   else if lo p = 0xD2 then w.2.1
   else if lo p = 0xD8 then 0      -- which program of the image: the first
-  else if lo p = 0xD9 then (if (w.1.pos, w.1.off) ≠ w.2.2 then 1 else 0)
+  else if lo p = 0xD9 then (if (w.1.pos, w.1.off) ≠ w.2.2.1 then 1 else 0)
   else 0xFF
 
 def hdev (c : IR.Ctx) (w : HW) : IoEvent → HW
   | .none => w
   | .read p =>
     if lo p = 0xD1 then (w.1.next.2, if w.1.next.1.toNat < 256 then lo w.1.next.1 else w.2.1, w.2.2)
-    else if lo p = 0xD9 then (w.1, w.2.1, (w.1.pos, w.1.off))
+    else if lo p = 0xD9 then (w.1, w.2.1, (w.1.pos, w.1.off), w.2.2.2)
     else w
   | .write p v =>
     if lo p = 0xD3 then ((IR.Sem.effect c w.1 .outByte [v.toNat]).2, w.2)
     else if lo p = 0xD4 then ((IR.Sem.effect c w.1 .outEnd []).2, w.2)
     else if lo p = 0xD5 then ((IR.Sem.effect c w.1 .drop [v.toNat]).2, w.2)
+    else if lo p = 0xDA then (w.1, w.2.1, w.2.2.1, (w.2.2.2.1 + v.toNat * 2 ^ (8 * w.2.2.2.2), w.2.2.2.2 + 1))
+    else if lo p = 0xD6 then ((IR.Sem.effect c w.1 .note [v.toNat, w.2.2.2.1]).2, w.2.1, w.2.2.1, (0, 0))
     else w
 
-/-- The machine stands for the world `wd`, its mark at `μ`. -/
-def hrel (μ : Nat × Nat) (wd : World) (w : HW) : Prop := w.1 = wd ∧ w.2.2 = μ
+/-- The machine stands for the world `wd`, its mark at `μ`, no byte of
+a note's value pending. -/
+def hrel (μ : Nat × Nat) (wd : World) (w : HW) : Prop := w.1 = wd ∧ w.2.2.1 = μ ∧ w.2.2.2 = (0, 0)
 
 /-- The setting: the plan of the image, the image, the harness.  `μ` is
 where the mark is — the functions leave it (only the loop reads `0xD9`),
@@ -345,7 +349,8 @@ structure AtLoop (a : Assembled) (addrs : List Nat) (st : IR.Sem.St) (s : Cpu) (
   mem : ∀ x, inIv LoopH.img.plan.data x = true → s.mem.get! x = st.mem.get! x
   idle : s.mem.get! 32768 = 0
   world : w.1 = st.world
-  mark : w.2.2 = (st.world.pos, st.world.off)
+  mark : w.2.2.1 = (st.world.pos, st.world.off)
+  nval : w.2.2.2 = (0, 0)
 
 theorem orA_cond_z (s : Cpu) : (orA s).cond 1 = (s.a.toNat == 0) := orA_z s
 
@@ -375,19 +380,19 @@ theorem loop_iter {a : Assembled} {addrs : List Nat} (ha : assemble items = .ok 
       | _ => True) := by
   have F := facts ha
   obtain ⟨E, hEsym, hMsym, hElt⟩ := F.entry
-  obtain ⟨ok, hcal⟩ := hset w.2.2
-  have hl : Has (Zof a addrs w.2.2) 174 loopItems := has_of F.loop
+  obtain ⟨ok, hcal⟩ := hset w.2.2.1
+  have hl : Has (Zof a addrs w.2.2.1) 174 loopItems := has_of F.loop
   have hdat : ∀ x, inIv img.plan.data x = true → 32769 ≤ x ∧ x < 33079 := by
     intro x hx
     obtain ⟨iv, hm, h1, h2⟩ := inIv_iff.mp hx
     have := F.data iv hm
     omega
-  have M : Mach (Zof a addrs w.2.2) s := ⟨L.image, L.run⟩
+  have M : Mach (Zof a addrs w.2.2.1) s := ⟨L.image, L.run⟩
   have at1 := at_label ok (hl.get 0 rfl) L.at_
   -- does input remain?
   obtain ⟨c1, p, hp, st1, at2, M1, hS1, ha1⟩ := in_step ok (n := 0xD0) (by decide) (hl.get 1 rfl) M at1 w
   have hp' : lo p = 0xD0 := hp
-  have hdev1 : (Zof a addrs w.2.2).dev w (.read p) = w := by
+  have hdev1 : (Zof a addrs w.2.2.1).dev w (.read p) = w := by
     show hdev img.ctx w (.read p) = w
     simp [hdev, hp']
   rw [hdev1] at st1
@@ -405,7 +410,7 @@ theorem loop_iter {a : Assembled} {addrs : List Nat} (ha : assemble items = .ok 
     · simp [h1]
     · by_cases h2 : st.world.next.1 = 0x0100 <;> simp [h1, h2]
   rw [hz3] at hbr3
-  have st03 : WSteps (Zof a addrs w.2.2) (s, w) (c3, w) := st1.trans (Steps.lift ok (st2.trans st3) _)
+  have st03 : WSteps (Zof a addrs w.2.2.1) (s, w) (c3, w) := st1.trans (Steps.lift ok (st2.trans st3) _)
   have hS03 : Sys s c3 := (hS1.trans hS2).trans hS3
   by_cases hex : st.world.next.1 = 0xFFFF
   · -- the input is used up: out of the loop, and stop
@@ -429,21 +434,21 @@ theorem loop_iter {a : Assembled} {addrs : List Nat} (ha : assemble items = .ok 
   rw [hnc] at hbr6
   simp only [Bool.false_eq_true, if_false] at hbr6
   have hS06 : Sys s c6 := ((hS03.trans hS4).trans hS5).trans hS6
-  have st06 : WSteps (Zof a addrs w.2.2) (s, w) (c6, w) :=
+  have st06 : WSteps (Zof a addrs w.2.2.1) (s, w) (c6, w) :=
     st03.trans (Steps.lift ok ((st4.trans st5).trans st6) _)
   -- call the entry
   obtain ⟨c7, st7, hsp7, hpc7, I7, hh7, hrs7, hsz7, hmem7, hback⟩ := call_top ok (hl.get 7 rfl) hEsym hElt hbr6
     M6.1 M6.2 (by rw [hS06.2.1]; exact L.rs) (by rw [hS06.1]; exact L.msz) (by rw [hS06.2.2.2]; exact L.sp)
     (show (32768 : Nat) ≤ 65534 by decide)
-  have st07 : WSteps (Zof a addrs w.2.2) (s, w) (c7, w) := st06.trans (Steps.lift ok st7 _)
+  have st07 : WSteps (Zof a addrs w.2.2.1) (s, w) (c7, w) := st06.trans (Steps.lift ok st7 _)
   have hroom := F.room
-  have ent : Entry (Zof a addrs w.2.2) Loop.main st 0 c7 :=
+  have ent : Entry (Zof a addrs w.2.2.1) Loop.main st 0 c7 :=
     ⟨⟨E, hMsym, hpc7⟩, I7, hh7, by rw [hrs7, hS06.2.1]; exact L.rs, hsz7, L.isz, fun x hx => by
         have := hdat x hx
         rw [hmem7 x (by omega), hS06.1]
         exact L.mem x hx,
       ⟨by rw [hsp7]; exact hroom, by rw [hsp7]; exact Nat.le_refl _⟩, fun n sl h => by cases h⟩
-  have hout := hcal m "main" st Loop.main st 0 c7 w rfl rfl rfl ent ⟨L.world, rfl⟩
+  have hout := hcal m "main" st Loop.main st 0 c7 w rfl rfl rfl ent ⟨L.world, rfl, L.nval⟩
   cases hres : IR.Sem.callF m img.ctx "main" st with
   | fuel => trivial
   | bad => trivial
@@ -457,7 +462,7 @@ theorem loop_iter {a : Assembled} {addrs : List Nat} (ha : assemble items = .ok 
     obtain ⟨s2, w2, v, stc, hw2, _, hret⟩ := hout
     have hsp2 : s2.sp = 0 := by rw [hret.sp]; exact sp_wrap hsp7
     have at8 : At addrs (174 + 8) s2 := hback s2 (by rw [hret.pc]; show IR.Sem.rd c7.mem c7.sp.toNat 2 = _; rw [hsp7])
-    have M8 : Mach (Zof a addrs w.2.2) s2 := ⟨hret.img, hret.run⟩
+    have M8 : Mach (Zof a addrs w.2.2.1) s2 := ⟨hret.img, hret.run⟩
     have hidle2 : s2.mem.get! 32768 = 0 := by
       rw [hret.out 32768 (fun h => by
         have h' : img.plan.wrB "main" 32768 = true := h
@@ -469,15 +474,15 @@ theorem loop_iter {a : Assembled} {addrs : List Nat} (ha : assemble items = .ok 
     -- has the position in the input moved?
     obtain ⟨c9, p9, hp9, st9, at10, M9, hS9, ha9⟩ := in_step ok (n := 0xD9) (by decide) (hl.get 8 rfl) M8 at8 w2
     have hp9' : lo p9 = 0xD9 := hp9
-    have hdev9 : (Zof a addrs w.2.2).dev w2 (.read p9) = (w2.1, w2.2.1, (w2.1.pos, w2.1.off)) := by
+    have hdev9 : (Zof a addrs w.2.2.1).dev w2 (.read p9) = (w2.1, w2.2.1, (w2.1.pos, w2.1.off), w2.2.2.2) := by
       show hdev img.ctx w2 (.read p9) = _
       simp [hdev, hp9']
     rw [hdev9] at st9
     have ha9' : c9.a = 1 := by
       rw [ha9]
       show hbus w2 p9 = 1
-      have hne : (w2.1.pos, w2.1.off) ≠ w2.2.2 := by
-        rw [hw2.1, hw2.2, L.mark]
+      have hne : (w2.1.pos, w2.1.off) ≠ w2.2.2.1 := by
+        rw [hw2.1, hw2.2.1, L.mark]
         exact hmoved
       simp [hbus, hp9', hne]
     obtain ⟨st10, at11, M10, hS10⟩ := does_raw ok does_or_a (hl.get 9 rfl) M9 at10
@@ -496,10 +501,10 @@ theorem loop_iter {a : Assembled} {addrs : List Nat} (ha : assemble items = .ok 
       (by decide) M12 (by rw [hS212.2.1]; exact hret.rs) at16
     rw [xorA_a, hS212.1] at hmem13
     obtain ⟨c14, st14, M14, hS14, _, at0⟩ := jr_step ok (hl.get 17 rfl) (hl.get 0 rfl) M13 at17
-    refine ⟨c14, (w2.1, w2.2.1, (w2.1.pos, w2.1.off)), ?_, ?_⟩
+    refine ⟨c14, (w2.1, w2.2.1, (w2.1.pos, w2.1.off), w2.2.2.2), ?_, ?_⟩
     · exact wsteps_mark (((st07.trans stc).trans st9).trans
         (Steps.lift ok ((((st10.trans st11).trans st12).trans st13).trans st14) _))
-    · refine ⟨at0, M14.1, M14.2, ?_, ?_, hret.isz, ?_, fun x hx => ?_, ?_, hw2.1, ?_⟩
+    · refine ⟨at0, M14.1, M14.2, ?_, ?_, hret.isz, ?_, fun x hx => ?_, ?_, hw2.1, ?_, hw2.2.2⟩
       · rw [hS14.2.1, hrs13, hS212.2.1]
         exact hret.rs
       · rw [hS14.1, hmem13, set_size]
@@ -571,10 +576,10 @@ theorem run_core {a : Assembled} {addrs : List Nat} (ha : assemble items = .ok a
     (inputs : Array Ember.Trace.Input) (s : Cpu) (hpc : s.pc.toNat = 0) (I : Img a 0 s) (hh : s.halted = false)
     (hrs : s.ramStart.toNat = 0x8000) (hsz : s.mem.size = 65536) (j m : Nat) (st' : IR.Sem.St)
     (hmv : Moves m (st0 inputs)) (hit : irIter m img.ctx j (st0 inputs) = some st') :
-    (∃ s' w', WSteps (Zof a addrs (0, 0)) (s, ((st0 inputs).world, 0, (0, 0))) (s', w') ∧
+    (∃ s' w', WSteps (Zof a addrs (0, 0)) (s, ((st0 inputs).world, 0, (0, 0), (0, 0))) (s', w') ∧
       AtLoop a addrs st' s' w') ∨
     (∃ i st_i s' w', i ≤ j ∧ irIter m img.ctx i (st0 inputs) = some st_i ∧
-      WSteps (Zof a addrs (0, 0)) (s, ((st0 inputs).world, 0, (0, 0))) (s', w') ∧
+      WSteps (Zof a addrs (0, 0)) (s, ((st0 inputs).world, 0, (0, 0), (0, 0))) (s', w') ∧
       s'.halted = true ∧ s'.iff1 = false ∧ w'.1 = st_i.world ∧ st_i.world.next.1 = 0xFFFF) := by
   have F := facts ha
   obtain ⟨ok, _⟩ := hset (0, 0)
@@ -604,7 +609,7 @@ theorem run_core {a : Assembled} {addrs : List Nat} (ha : assemble items = .ok a
       stackHi := rfl
       size := hsize }
   obtain ⟨s1, stb, at1, I1, hh1, hrs1, hsz1, hsp1, hzeroed⟩ := boot_ok ok B hpc I hh hrs hsz
-  have L0 : AtLoop a addrs (st0 inputs) s1 ((st0 inputs).world, 0, (0, 0)) :=
+  have L0 : AtLoop a addrs (st0 inputs) s1 ((st0 inputs).world, 0, (0, 0), (0, 0)) :=
     { at_ := at1, image := I1, run := hh1, rs := hrs1, msz := hsz1,
       isz := by show (IR.initMem _ _ _).size = _; rw [initMem_eq, set_size, set_size]; simp [ByteArray.size]
       sp := hsp1
@@ -616,7 +621,8 @@ theorem run_core {a : Assembled} {addrs : List Nat} (ha : assemble items = .ok a
         rw [initMem_eq, getBang_set _ _ _ _ (by omega), getBang_set _ _ _ _ (by omega), zeros_get]
       idle := hzeroed 32768 (Nat.le_refl _) (by decide)
       world := rfl
-      mark := rfl }
+      mark := rfl
+      nval := rfl }
   rcases loop_run ha hsize hset m j (st0 inputs) s1 _ L0 hmv st' hit with
     ⟨s2, w2, stp, L2⟩ | ⟨i, sti, s2, w2, hi, hiter, stp, hh2, hi2, hw2, hex⟩
   · exact Or.inl ⟨s2, w2, (Steps.lift ok stb _).trans stp, L2⟩
@@ -636,10 +642,10 @@ theorem loopH_run :
       ∀ (inputs : Array Ember.Trace.Input) (s : Cpu), s.pc.toNat = 0 → Img a 0 s → s.halted = false →
         s.ramStart.toNat = 0x8000 → s.mem.size = 65536 →
         ∀ (j m : Nat) (st' : IR.Sem.St), Moves m (st0 inputs) → irIter m img.ctx j (st0 inputs) = some st' →
-          (∃ s' w', WSteps (Zof a addrs (0, 0)) (s, ((st0 inputs).world, 0, (0, 0))) (s', w') ∧
+          (∃ s' w', WSteps (Zof a addrs (0, 0)) (s, ((st0 inputs).world, 0, (0, 0), (0, 0))) (s', w') ∧
             AtLoop a addrs st' s' w') ∨
           (∃ i st_i s' w', i ≤ j ∧ irIter m img.ctx i (st0 inputs) = some st_i ∧
-            WSteps (Zof a addrs (0, 0)) (s, ((st0 inputs).world, 0, (0, 0))) (s', w') ∧
+            WSteps (Zof a addrs (0, 0)) (s, ((st0 inputs).world, 0, (0, 0), (0, 0))) (s', w') ∧
             s'.halted = true ∧ s'.iff1 = false ∧ w'.1 = st_i.world ∧ st_i.world.next.1 = 0xFFFF) := by
   obtain ⟨a, addrs, ha, hsize, hset⟩ := loopH_setting
   exact ⟨a, addrs, ha, fun inputs s hpc I hh hrs hsz j m st' hmv hit =>
@@ -659,7 +665,7 @@ theorem loopH_run_halt :
         ∀ (j m : Nat) (st' : IR.Sem.St), Moves m (st0 inputs) → irIter m img.ctx j (st0 inputs) = some st' →
           st'.world.next.1 = 0xFFFF →
           ∃ i st_i s' w', i ≤ j ∧ irIter m img.ctx i (st0 inputs) = some st_i ∧
-            WSteps (Zof a addrs (0, 0)) (s, ((st0 inputs).world, 0, (0, 0))) (s', w') ∧
+            WSteps (Zof a addrs (0, 0)) (s, ((st0 inputs).world, 0, (0, 0), (0, 0))) (s', w') ∧
             s'.halted = true ∧ s'.iff1 = false ∧ w'.1 = st_i.world ∧ st_i.world.next.1 = 0xFFFF := by
   obtain ⟨a, addrs, ha, hsize, hset⟩ := loopH_setting
   refine ⟨a, addrs, ha, fun inputs s hpc I hh hrs hsz j m st' hmv hit hex => ?_⟩

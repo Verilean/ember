@@ -37,10 +37,11 @@ harness do — an input oracle and an event recorder, no interrupts:
 | `0xD3` out | a byte of the frame being transmitted |
 | `0xD4` out | end of the frame |
 | `0xD5` out | drop, with its code |
-| `0xD6` out | note, with its code |
+| `0xD6` out | note, with its code; its value is the bytes written to `0xDA` since the last note |
 | `0xD7` out | trap |
 | `0xD8` in | which program of the image to run |
 | `0xD9` in | 1 when the position in the input has moved since this port was last read |
+| `0xDA` out | a byte of the value of the note to come, least significant first |
 -/
 
 namespace Ember.Z80
@@ -50,7 +51,7 @@ open Ember.Trace (Input)
 inductive HEvent where
   | tx (bytes : ByteArray)
   | drop (code : UInt8)
-  | note (code : UInt8)
+  | note (code : UInt8) (value : Nat)
   | trap
   deriving Inhabited
 
@@ -92,6 +93,8 @@ structure Machine where
   mark : Nat × Nat := (0, 0)
   program : UInt8 := 0
   frame : ByteArray := ByteArray.empty
+  /-- The value of the note to come: what has been written of it, and how many bytes. -/
+  nval : Nat × Nat := (0, 0)
   events : Array (Nat × HEvent) := #[]
   deriving Inhabited
 
@@ -147,7 +150,8 @@ def applyIo (m : Machine) : Machine :=
     | 0xD3 => { m with frame := m.frame.push v }
     | 0xD4 => { m with events := m.events.push (m.cur, .tx m.frame), frame := ByteArray.empty }
     | 0xD5 => { m with events := m.events.push (m.cur, .drop v) }
-    | 0xD6 => { m with events := m.events.push (m.cur, .note v) }
+    | 0xD6 => { m with events := m.events.push (m.cur, .note v m.nval.1), nval := (0, 0) }
+    | 0xDA => { m with nval := (m.nval.1 + v.toNat * 2 ^ (8 * m.nval.2), m.nval.2 + 1) }
     | 0xD7 => { m with events := m.events.push (m.cur, .trap) }
     | 0x80 =>
       if v &&& 3 == 3 then { m with ctrl := v, rdrf := false, ovrn := false }      -- master reset

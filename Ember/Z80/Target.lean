@@ -96,7 +96,7 @@ def runHarness (m : Machine) (k : Nat) (h : Header) (inputs : Array Input)
         match e with
         | .tx b => lines := lines.push ⟨i, .tx b⟩
         | .drop c => lines := lines.push ⟨i, .drop (dropNames.getD c.toNat s!"code-{c}")⟩
-        | .note c => lines := lines.push ⟨i, .note (noteNames.getD c.toNat s!"note-{c}")⟩
+        | .note c v => lines := lines.push ⟨i, .note s!"{noteNames.getD c.toNat s!"note-{c}"} {v}"⟩
         | .trap => trapped := true
   if trapped then lines := lines.push ⟨m.cur, .note "trap (z80)"⟩
   return { header := h, lines }

@@ -45,9 +45,12 @@ partial def parse : List String → Opts → Opts
   | "--profile" :: p :: r, o => parse r { o with profile := (Profile.ofName? p).getD .host64 }
   | a :: r, o => parse r { o with count := a.toNat?.getD o.count }
 
-/-- Lines that must agree: everything but notes. -/
+/-- Lines that must agree: everything but the note of a trap (whose
+text says where, differently in each implementation; that both trapped
+is compared apart).  The program's own notes, with their values, must
+agree. -/
 def comparable (t : Trace) : Array Line :=
-  t.lines.filter fun l => match l.ev with | .note _ => false | _ => true
+  t.lines.filter fun l => match l.ev with | .note s => !s.startsWith "trap" | _ => true
 
 def agree (a b : Trace) : Bool :=
   comparable a == comparable b && Cc.trapped a == Cc.trapped b

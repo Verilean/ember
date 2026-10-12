@@ -646,7 +646,15 @@ rt_drop: out (0xD5),a
   ret
 ", []⟩,
   ⟨"
-rt_note: out (0xD6),a
+rt_note: ld c,a
+  ld hl,rt_acc
+  ld b,4
+rt_note_l: ld a,(hl)
+  out (0xDA),a
+  inc hl
+  djnz rt_note_l
+  ld a,c
+  out (0xD6),a
   ret
 ", []⟩,
   ⟨"
