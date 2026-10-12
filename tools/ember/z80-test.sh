@@ -58,8 +58,18 @@ $z80 own-build net --plain --out $out
 $z80 replay $out/net-own-plain.ihx Tests/Ember/corpus Tests/Ember/regress
 # the static bound on the stack of each image: own-size fails when the analysis gives up or the bound
 # exceeds the room above the static RAM
+# (the exit status is that of own-size, not of a pipe into tail: on failure all it printed is shown)
+size() {
+  if o=$($z80 own-size "$@"); then
+    printf '%s\n' "$o" | tail -1
+  else
+    printf '%s\n' "$o"
+    echo "FAIL: own-size $*"
+    return 1
+  fi
+}
 for img in net sliploop; do
-  $z80 own-size $img --trace 0 | tail -1
-  $z80 own-size $img | tail -1
-  $z80 own-size $img --plain | tail -1
+  size $img --trace 0 || exit 1
+  size $img || exit 1
+  size $img --plain || exit 1
 done
