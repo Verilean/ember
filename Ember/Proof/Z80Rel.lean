@@ -77,6 +77,9 @@ structure ZCtx.OK (Z : ZCtx) : Prop where
   accSym : Z.sym "rt_acc" Z.acc
   accRam : Z.ramStart ≤ Z.acc ∧ Z.acc + 8 ≤ 65536
   accStack : Z.acc + 8 ≤ Z.stackLo ∨ Z.stackHi ≤ Z.acc
+  /-- The accumulator is not shared, and any function may have it written. -/
+  accData : ∀ x, Z.data x → x < Z.acc ∨ Z.acc + 8 ≤ x
+  accWr : ∀ f x, Z.acc ≤ x → x < Z.acc + 8 → Z.wr f x
   wrStack : ∀ f x, Z.stackLo ≤ x → x < Z.stackHi → Z.wr f x
   nostack : ∀ x, Z.data x → x < Z.stackLo ∨ Z.stackHi ≤ x
   /-- The runtime's own bytes are in RAM, are not shared, and are not the accumulator; any function may

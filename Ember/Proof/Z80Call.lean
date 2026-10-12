@@ -277,6 +277,70 @@ theorem Rel.free_stack (ok : Z.OK) (hT : FnLay Z E) {regs regs' : Regs} {ist : I
     R.isz, R.tsz, by rw [hsp]; exact R.sp, R.room, hstk', hout, ha, hhl, hacc', hina, hinhl,
     fun n sl h hown => R.inacc n sl (hacc _ _ h) hown, fun n o h => R.nacc n o (hacc n o h)⟩
 
+/-- Only the free stack, the runtime's own bytes and the accumulator may differ in `s'`. -/
+def AccFree (Z : ZCtx) (s s' : Cpu) : Prop :=
+  ∀ x, x < Z.stackLo ∨ s.sp.toNat ≤ x → ¬ Z.rt x → x < Z.acc ∨ Z.acc + 8 ≤ x → s'.mem.get! x = s.mem.get! x
+
+/-- The states agree again when the accumulator changed too: what the
+tracker says of it afterwards is to be shown. -/
+theorem Rel.acc_free (ok : Z.OK) (hT : FnLay Z E) {regs regs' : Regs} {ist : IR.Sem.St} {tmps : Array Nat}
+    {s s' : Cpu} (R : Rel Z E fr dt regs ist tmps s) (hm : AccFree Z s s') (hsz : s'.mem.size = 65536)
+    (hr : s'.ramStart = s.ramStart) (hh : s'.halted = s.halted) (hsp : s'.sp = s.sp)
+    (ha : ∀ o, o ∈ regs'.a → Own E o → s'.a.toNat = IR.Sem.opd Z.c ist tmps 1 o)
+    (hhl : ∀ o, o ∈ regs'.hl → Own E o → s'.hl.toNat = IR.Sem.opd Z.c ist tmps 2 o)
+    (hina : ∀ sl, Opd.slot sl ∈ regs'.a → Own E (.slot sl) → Z.use (sl, 1))
+    (hinhl : ∀ sl, Opd.slot sl ∈ regs'.hl → Own E (.slot sl) → Z.use (sl, 2))
+    (hacc : ∀ n o, regs'.acc = some (n, o) → Own E o → IR.Sem.rd s'.mem Z.acc n = IR.Sem.opd Z.c ist tmps n o)
+    (hinacc : ∀ n sl, regs'.acc = some (n, .slot sl) → Own E (.slot sl) → Z.use (sl, n))
+    (hnacc : ∀ n o, regs'.acc = some (n, o) → n ≤ 8) :
+    Rel Z E fr dt regs' ist tmps s' := by
+  have hstk := ok.stack
+  have hroom := R.room
+  have hspv : s.sp.toNat = fr.sp.toNat := by rw [R.sp]
+  have hacr := ok.accRam
+  have hacs := ok.accStack
+  refine ⟨⟨by rw [hr]; exact R.img.rom, fun x b hx => ?_⟩, by rw [hh]; exact R.run, fun x hx => ?_,
+    fun t h1 h2 => ?_, by rw [hr]; exact R.rs, hsz, R.isz, R.tsz, by rw [hsp]; exact R.sp, R.room,
+    fun x h1 h2 => ?_, fun x hx => ?_, ha, hhl, hacc, hina, hinhl, hinacc, hnacc⟩
+  · have hlt : x < Z.a.bytes.size := by
+      rcases Nat.lt_or_ge x Z.a.bytes.data.size with h' | h'
+      · exact h'
+      · rw [Array.getElem?_eq_none h'] at hx; cases hx
+    have hrom := R.img.rom
+    have hrs := R.rs
+    rw [Nat.zero_add, hm x (by omega) (fun h => by have := ok.rtRam x h; omega) (by omega)]
+    simpa using R.img.bytes x b hx
+  · rw [hm x (by have := ok.nostack x hx; omega) (ok.rtData x hx) (ok.accData x hx)]
+    exact R.mem x hx
+  · rw [← R.tmp t h1 h2]
+    refine rd_congr _ _ _ _ (hT.bound t h2) (fun x hx1 hx2 => hm x ?_ ?_ ?_)
+    · have := hT.nostack t h2
+      omega
+    · have := hT.nort t h2 (x - tmpAddr Z E t) (by omega)
+      rwa [show tmpAddr Z E t + (x - tmpAddr Z E t) = x by omega] at this
+    · have := hT.noacc t h2
+      omega
+  · rw [hm x (by omega) (fun h => by have := ok.rtStack x h; omega) (by omega)]
+    exact R.stk x h1 h2
+  · rw [hm x ?_ (fun h => hx (ok.rtWr _ x h)) ?_]
+    · exact R.out x hx
+    · rcases Nat.lt_or_ge x Z.stackLo with h | h
+      · exact Or.inl h
+      · rcases Nat.lt_or_ge x Z.stackHi with h' | h'
+        · exact absurd (ok.wrStack _ x h h') hx
+        · exact Or.inr (by omega)
+    · rcases Nat.lt_or_ge x Z.acc with h | h
+      · exact Or.inl h
+      · rcases Nat.lt_or_ge x (Z.acc + 8) with h' | h'
+        · exact absurd (ok.accWr _ x h h') hx
+        · exact Or.inr h'
+
+/-- A routine of the runtime that works on the accumulator: `rel` between
+the state it is entered in (with `pre`) and the state it returns in. -/
+def RtAcc (Z : ZCtx) (name : String) (pre : Cpu → Prop) (rel : Cpu → Cpu → Prop) : Prop :=
+  ∃ entry, Z.sym name entry ∧ entry < 65536 ∧
+    Routine Z entry Z.rtK pre (fun s s' => rel s s' ∧ AccFree Z s s')
+
 /-- A routine of the runtime that works on registers: `rel` between the
 state it is entered in and the state it returns in. -/
 def RtPure (Z : ZCtx) (name : String) (rel : Cpu → Cpu → Prop) : Prop :=
@@ -309,6 +373,26 @@ theorem rt_call {base : Nat} {sF : GS} (ok : Z.OK) (hT : FnLay Z E) (F : GFinal 
   have hc1sp : c1.sp.toNat = s.sp.toNat - 2 := by rw [cs.sp]; exact sub2_toNat _ (by omega)
   intro hnrt
   rw [hfree x (by omega) hnrt, cs.mem x (by omega)]
+
+/-- **A call of a routine that works on the accumulator**, from states that agree. -/
+theorem acc_call {base : Nat} {sF : GS} (ok : Z.OK) (F : GFinal Z base sF) {s0 s1 : GS}
+    {name : String} {pre : Cpu → Prop} {rel : Cpu → Cpu → Prop} (hx : GExt s1 sF)
+    (ho : s1.out = s0.out.push (.ins ⟨.call, [.imm (.sym name)]⟩)) (hrt : RtAcc Z name pre rel)
+    (hdep : Z.rtK + 2 ≤ Z.depth E.fn.name) {regs : Regs} {ist : IR.Sem.St} {tmps : Array Nat} {s : Cpu}
+    (R : Rel Z E fr dt regs ist tmps s) (hat : At Z.addrs (base + s0.out.size) s)
+    (hpre : ∀ c1, CallSt s c1 → pre c1) :
+    ∃ c1 s', CallSt s c1 ∧ Steps s s' ∧ At Z.addrs (base + s1.out.size) s' ∧ rel c1 s' ∧ AccFree Z s s' ∧
+      s'.sp = s.sp ∧ s'.halted = s.halted ∧ s'.ramStart = s.ramStart ∧ s'.mem.size = 65536 := by
+  obtain ⟨entry, hsym, hent, hR⟩ := hrt
+  have hroom := R.room
+  have hspv : s.sp.toNat = fr.sp.toNat := by rw [R.sp]
+  have hstk := ok.stack
+  obtain ⟨c1, s', cs, hst, hat', hsp', hh', hrs', hsz', hrel, hfree⟩ :=
+    call_rule ok (F.emitted hx ho) hsym hent hR hat R.img R.run R.rs R.msz (by omega) (by omega) hpre
+  refine ⟨c1, s', cs, hst, by rw [ho, Array.size_push, ← Nat.add_assoc]; exact hat', hrel, fun x hx hnrt hna => ?_,
+    hsp', by rw [hh', R.run], hrs', hsz'⟩
+  have hc1sp : c1.sp.toNat = s.sp.toNat - 2 := by rw [cs.sp]; exact sub2_toNat _ (by omega)
+  rw [hfree x (by omega) hnrt hna, cs.mem x (by omega)]
 
 end
 

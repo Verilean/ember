@@ -46,9 +46,28 @@ def RtEff (Z : ZCtx) (e : Ember.Lang.Effect) : Prop :=
         c'.ramStart = c.ramStart ∧ c'.mem.size = 65536 ∧ FreeStack Z c c' ∧
         Z.wrel (IR.Sem.effect Z.c wd e vs).2 w' ∧ ∀ r, (IR.Sem.effect Z.c wd e vs).1 = some r → c'.hl.toNat = r
 
+/-- The routines on values of `n` bytes in the accumulator. -/
+structure RtW (Z : ZCtx) (n : Nat) : Prop where
+  /-- accumulator := the `n` bytes at `HL` -/
+  ld : RtAcc Z s!"rt_ld{bits n}" (fun _ => True)
+    (fun s s' => IR.Sem.rd s'.mem Z.acc n = IR.Sem.rd s.mem s.hl.toNat n)
+  /-- the `n` bytes at `HL` (in RAM) := accumulator -/
+  st : ∃ entry, Z.sym s!"rt_st{bits n}" entry ∧ entry < 65536 ∧
+    Routine Z entry Z.rtK (fun s => s.ramStart.toNat ≤ s.hl.toNat ∧ s.hl.toNat + n ≤ 65536)
+      (fun s s' => ∀ x, x < Z.stackLo ∨ s.sp.toNat ≤ x → ¬ Z.rt x →
+        s'.mem.get! x = (IR.Sem.wr s.mem s.hl.toNat n (IR.Sem.rd s.mem Z.acc n)).get! x)
+  /-- accumulator := accumulator `op` the `n` bytes at `HL` -/
+  bin : ∀ op, RtAcc Z (routineW op n) (fun _ => True)
+    (fun s s' => IR.Sem.rd s'.mem Z.acc n = IR.binOp op n (IR.Sem.rd s.mem Z.acc n) (IR.Sem.rd s.mem s.hl.toNat n))
+  /-- the flags of accumulator − the `n` bytes at `HL` -/
+  cmp : RtPure Z s!"rt_cmp{bits n}"
+    (fun s s' => s'.flag FZ = (IR.Sem.rd s.mem Z.acc n == IR.Sem.rd s.mem s.hl.toNat n) ∧
+      s'.flag FC = decide (IR.Sem.rd s.mem Z.acc n < IR.Sem.rd s.mem s.hl.toNat n))
+
 /-- **What is taken of the runtime.** -/
 structure RtOK (Z : ZCtx) : Prop where
   bound : RtBound Z
+  wide : RtW Z 4
   eff : ∀ e, effKnown e = true → RtEff Z e
   shl8 : RtPure Z "rt_shl8" (fun s s' => s'.a.toNat = s.a.toNat * 2 ^ s.b.toNat % 256 ∧ s'.hl = s.hl)
   shr8 : RtPure Z "rt_shr8" (fun s s' => s'.a.toNat = s.a.toNat / 2 ^ s.b.toNat ∧ s'.hl = s.hl)
