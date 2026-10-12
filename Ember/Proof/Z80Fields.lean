@@ -460,4 +460,58 @@ variable (s : Cpu) (w : UInt16)
 @[zsim] theorem push_sp : (s.push w).sp = s.sp - 2 := by simp only [Cpu.push, zsim]
 end
 
+section
+variable (s : Cpu) (v : UInt8)
+@[zsim] theorem inc8_a : (s.inc8 v).2.a = s.a := rfl
+@[zsim] theorem inc8_b : (s.inc8 v).2.b = s.b := rfl
+@[zsim] theorem inc8_c : (s.inc8 v).2.c = s.c := rfl
+@[zsim] theorem inc8_d : (s.inc8 v).2.d = s.d := rfl
+@[zsim] theorem inc8_e : (s.inc8 v).2.e = s.e := rfl
+@[zsim] theorem inc8_h : (s.inc8 v).2.h = s.h := rfl
+@[zsim] theorem inc8_l : (s.inc8 v).2.l = s.l := rfl
+@[zsim] theorem inc8_sp : (s.inc8 v).2.sp = s.sp := rfl
+@[zsim] theorem inc8_pc : (s.inc8 v).2.pc = s.pc := rfl
+@[zsim] theorem inc8_mem : (s.inc8 v).2.mem = s.mem := rfl
+@[zsim] theorem inc8_halted : (s.inc8 v).2.halted = s.halted := rfl
+@[zsim] theorem inc8_ramStart : (s.inc8 v).2.ramStart = s.ramStart := rfl
+@[zsim] theorem inc8_hl : (s.inc8 v).2.hl = s.hl := rfl
+@[zsim] theorem inc8_de : (s.inc8 v).2.de = s.de := rfl
+@[zsim] theorem inc8_bc : (s.inc8 v).2.bc = s.bc := rfl
+@[zsim] theorem dec8_a : (s.dec8 v).2.a = s.a := rfl
+@[zsim] theorem dec8_b : (s.dec8 v).2.b = s.b := rfl
+@[zsim] theorem dec8_c : (s.dec8 v).2.c = s.c := rfl
+@[zsim] theorem dec8_d : (s.dec8 v).2.d = s.d := rfl
+@[zsim] theorem dec8_e : (s.dec8 v).2.e = s.e := rfl
+@[zsim] theorem dec8_h : (s.dec8 v).2.h = s.h := rfl
+@[zsim] theorem dec8_l : (s.dec8 v).2.l = s.l := rfl
+@[zsim] theorem dec8_sp : (s.dec8 v).2.sp = s.sp := rfl
+@[zsim] theorem dec8_pc : (s.dec8 v).2.pc = s.pc := rfl
+@[zsim] theorem dec8_mem : (s.dec8 v).2.mem = s.mem := rfl
+@[zsim] theorem dec8_halted : (s.dec8 v).2.halted = s.halted := rfl
+@[zsim] theorem dec8_ramStart : (s.dec8 v).2.ramStart = s.ramStart := rfl
+@[zsim] theorem dec8_hl : (s.dec8 v).2.hl = s.hl := rfl
+@[zsim] theorem dec8_de : (s.dec8 v).2.de = s.de := rfl
+@[zsim] theorem dec8_bc : (s.dec8 v).2.bc = s.bc := rfl
+@[zsim] theorem inc8_val : (s.inc8 v).1 = v + 1 := rfl
+@[zsim] theorem dec8_val : (s.dec8 v).1 = v - 1 := rfl
+end
+
+section
+variable (s : Cpu) (k v : UInt8)
+@[zsim] theorem alu_b : (s.alu k v).b = s.b := by unfold Cpu.alu; split <;> rfl
+@[zsim] theorem alu_c : (s.alu k v).c = s.c := by unfold Cpu.alu; split <;> rfl
+@[zsim] theorem alu_d : (s.alu k v).d = s.d := by unfold Cpu.alu; split <;> rfl
+@[zsim] theorem alu_e : (s.alu k v).e = s.e := by unfold Cpu.alu; split <;> rfl
+@[zsim] theorem alu_h : (s.alu k v).h = s.h := by unfold Cpu.alu; split <;> rfl
+@[zsim] theorem alu_l : (s.alu k v).l = s.l := by unfold Cpu.alu; split <;> rfl
+@[zsim] theorem alu_sp : (s.alu k v).sp = s.sp := by unfold Cpu.alu; split <;> rfl
+@[zsim] theorem alu_pc : (s.alu k v).pc = s.pc := by unfold Cpu.alu; split <;> rfl
+@[zsim] theorem alu_mem : (s.alu k v).mem = s.mem := by unfold Cpu.alu; split <;> rfl
+@[zsim] theorem alu_halted : (s.alu k v).halted = s.halted := by unfold Cpu.alu; split <;> rfl
+@[zsim] theorem alu_ramStart : (s.alu k v).ramStart = s.ramStart := by unfold Cpu.alu; split <;> rfl
+@[zsim] theorem alu_hl : (s.alu k v).hl = s.hl := by unfold Cpu.alu; split <;> rfl
+@[zsim] theorem alu_de : (s.alu k v).de = s.de := by unfold Cpu.alu; split <;> rfl
+@[zsim] theorem alu_bc : (s.alu k v).bc = s.bc := by unfold Cpu.alu; split <;> rfl
+end
+
 end Ember.Proof.Z80Gen

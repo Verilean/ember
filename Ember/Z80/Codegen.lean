@@ -301,103 +301,138 @@ def logicConst (op : Bin) (reg : Arg) (m : Nat) : GM Unit :=
     ins .ld [reg, .a]
     setRegs fun r => { r with a := [] }
 
-def genBin (op : Bin) (n : Nat) (a b : Opd) : GM Unit := do
-  let r := (← get).regs
-  if n == 1 then
-    let bAtHand := r.a.contains b && a != b
-    match op with
-    | .mul | .div | .mod =>
-      if bAtHand then
-        ins .ld [.e, .a]
-        loadA a
-      else
-        loadA a
-        match b with
-        | .const v => ins .ld [.e, n8 v]
-        | b =>
-          if a == b then ins .ld [.e, .a]
-          else
-            ins .ld [.hl, .imm (← addrOf b)]
-            ins .ld [.e, .mhl]
-            setRegs fun r => { r with hl := [] }
-      call (match op with | .mul => "rt_mul8" | .div => "rt_div8" | _ => "rt_mod8")
-    | _ =>
-      if bAtHand then
-        ins .ld [.c, .a]
-        setRegs fun r => { r with a := [] }
-        loadA a
-        alu8 op .c
-      else
-        loadA a
-        match b with
-        | .const v =>
-          let v := v % 256
-          if op == .add && v == 1 then ins .inc [.a]
-          else if op == .sub && v == 1 then ins .dec [.a]
-          else if op == .add && v == 255 then ins .dec [.a]
-          else if op == .sub && v == 255 then ins .inc [.a]
-          else alu8 op (n8 v)
-        | b =>
-          if a == b then alu8 op .a
-          else
-            ins .ld [.hl, .imm (← addrOf b)]
-            alu8 op .mhl
-            setRegs fun r => { r with hl := [] }
-    setRegs fun r => { r with a := [] }
-  else if n == 2 then
-    let bAtHand := r.hl.contains b && a != b
-    if bAtHand then
-      ins .ex [.de, .hl]
+/-- The second operand of an 8-bit routine into `E`, the first being in `A`. -/
+def loadE (a b : Opd) : GM Unit :=
+  match b with
+  | .const v => ins .ld [.e, n8 v]
+  | b =>
+    if a == b then ins .ld [.e, .a]
+    else do
+      let p ← addrOf b
+      ins .ld [.hl, .imm p]
+      ins .ld [.e, .mhl]
       setRegs fun r => { r with hl := [] }
-      loadHL a
-    else
-      loadHL a
-    let small : Option Nat := match b with
-      | .const v => if bAtHand then none else some (v % 65536)
-      | _ => none
-    match op, small with
-    | .add, some v =>
-      if v ≤ 3 then rep v (ins .inc [.hl])
-      else if v ≥ 65533 then rep (65536 - v) (ins .dec [.hl])
-      else
-        ins .ld [.de, n16 v]
-        ins .add [.hl, .de]
-    | .sub, some v =>
-      if v ≤ 3 then rep v (ins .dec [.hl])
-      else
-        ins .ld [.de, n16 (65536 - v)]
-        ins .add [.hl, .de]
-    | .and, some v | .or, some v | .xor, some v =>
-      -- byte by byte, and nothing where the constant leaves the byte alone
-      logicConst op .l (v % 256)
-      logicConst op .h (v / 256)
-    | _, _ =>
-      if !bAtHand then loadDE b
-      match op with
-      | .add => ins .add [.hl, .de]
-      | .sub =>
-        ins .or [.a]
-        ins .sbc [.hl, .de]
-      | .and | .or | .xor =>
-        ins .ld [.a, .l]
-        alu8 op .e
-        ins .ld [.l, .a]
-        ins .ld [.a, .h]
-        alu8 op .d
-        ins .ld [.h, .a]
-        setRegs fun r => { r with a := [] }
-      | op =>
-        call (routine16 op)
-        setRegs fun r => { r with a := [] }
+
+/-- `mul`, `div`, `mod` of one byte: `A := A op E` by a routine. -/
+def bin8Rt (op : Bin) (a b : Opd) : GM Unit := do
+  let r := (← get).regs
+  if r.a.contains b && a != b then do
+    ins .ld [.e, .a]
+    loadA a
+  else do
+    loadA a
+    loadE a b
+  call (match op with | .mul => "rt_mul8" | .div => "rt_div8" | _ => "rt_mod8")
+
+/-- The second operand of an 8-bit operation, the first being in `A`. -/
+def alu8Opd (op : Bin) (a b : Opd) : GM Unit :=
+  match b with
+  | .const v =>
+    if op == .add && v % 256 == 1 then ins .inc [.a]
+    else if op == .sub && v % 256 == 1 then ins .dec [.a]
+    else if op == .add && v % 256 == 255 then ins .dec [.a]
+    else if op == .sub && v % 256 == 255 then ins .inc [.a]
+    else alu8 op (n8 (v % 256))
+  | b =>
+    if a == b then alu8 op .a
+    else do
+      let p ← addrOf b
+      ins .ld [.hl, .imm p]
+      alu8 op .mhl
+      setRegs fun r => { r with hl := [] }
+
+/-- `add`, `sub`, `and`, `or`, `xor` of one byte, in `A`. -/
+def bin8Alu (op : Bin) (a b : Opd) : GM Unit := do
+  let r := (← get).regs
+  if r.a.contains b && a != b then do
+    ins .ld [.c, .a]
+    setRegs fun r => { r with a := [] }
+    loadA a
+    alu8 op .c
+  else do
+    loadA a
+    alu8Opd op a b
+
+def bin8 (op : Bin) (a b : Opd) : GM Unit := do
+  match op with
+  | .mul | .div | .mod => bin8Rt op a b
+  | _ => bin8Alu op a b
+  setRegs fun r => { r with a := [] }
+
+/-- A 16-bit operation with a constant, where that is shorter. -/
+def bin16Const (op : Bin) (v : Nat) : GM Unit :=
+  match op with
+  | .add =>
+    if v ≤ 3 then rep v (ins .inc [.hl])
+    else if v ≥ 65533 then rep (65536 - v) (ins .dec [.hl])
+    else do
+      ins .ld [.de, n16 v]
+      ins .add [.hl, .de]
+  | .sub =>
+    if v ≤ 3 then rep v (ins .dec [.hl])
+    else do
+      ins .ld [.de, n16 (65536 - v)]
+      ins .add [.hl, .de]
+  | _ => do
+    -- byte by byte, and nothing where the constant leaves the byte alone
+    logicConst op .l (v % 256)
+    logicConst op .h (v / 256)
+
+/-- A 16-bit operation, the operands in `HL` and `DE`. -/
+def bin16Reg (op : Bin) : GM Unit :=
+  match op with
+  | .add => ins .add [.hl, .de]
+  | .sub => do
+    ins .or [.a]
+    ins .sbc [.hl, .de]
+  | .and | .or | .xor => do
+    ins .ld [.a, .l]
+    alu8 op .e
+    ins .ld [.l, .a]
+    ins .ld [.a, .h]
+    alu8 op .d
+    ins .ld [.h, .a]
+    setRegs fun r => { r with a := [] }
+  | op => do
+    call (routine16 op)
+    setRegs fun r => { r with a := [] }
+
+/-- Is the constant handled without `DE`? -/
+def small16 (op : Bin) : Bool :=
+  match op with
+  | .add | .sub | .and | .or | .xor => true
+  | _ => false
+
+def bin16 (op : Bin) (a b : Opd) : GM Unit := do
+  let r := (← get).regs
+  let bAtHand := r.hl.contains b && a != b
+  if bAtHand then do
+    ins .ex [.de, .hl]
     setRegs fun r => { r with hl := [] }
-  else
-    -- the second operand by its address: a temporary at hand in the
-    -- accumulator is asked for there, and so gets its slot
-    let pb ← ptrOf n b
-    loadAcc n a
-    ins .ld [.hl, .imm pb]
-    call (routineW op n)
-    killAll
+    loadHL a
+  else loadHL a
+  match b with
+  | .const v =>
+    if !bAtHand && small16 op then bin16Const op (v % 65536)
+    else do
+      if !bAtHand then loadDE b
+      bin16Reg op
+  | _ => do
+    if !bAtHand then loadDE b
+    bin16Reg op
+  setRegs fun r => { r with hl := [] }
+
+/-- Wider: the second operand by its address — a temporary at hand in
+the accumulator is asked for there, and so gets its slot. -/
+def binW (op : Bin) (n : Nat) (a b : Opd) : GM Unit := do
+  let pb ← ptrOf n b
+  loadAcc n a
+  ins .ld [.hl, .imm pb]
+  call (routineW op n)
+  killAll
+
+def genBin (op : Bin) (n : Nat) (a b : Opd) : GM Unit :=
+  if n == 1 then bin8 op a b else if n == 2 then bin16 op a b else binW op n a b
 
 /-- Shift count into `B`, from an operand of `m` bytes. -/
 def countToB (m : Nat) (amt : Opd) : GM Unit := do
