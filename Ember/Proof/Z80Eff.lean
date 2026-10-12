@@ -49,7 +49,7 @@ theorem eff_call (ok : Z.OK) (hT : FnLay Z E) (F : GFinal Z base sF) {s0 s1 : GS
       Z.wrel (IR.Sem.effect Z.c ist.world e vs).2 w' ∧
       Rel Z E fr dt {} { ist with world := (IR.Sem.effect Z.c ist.world e vs).2 } tmps s' ∧
       ∀ r, (IR.Sem.effect Z.c ist.world e vs).1 = some r → s'.hl.toNat = r := by
-  obtain ⟨entry, hsym, hent, hspec⟩ := hrt
+  obtain ⟨entry, hsym, hent, hspec⟩ := hrt ⟨_, F.emitted hx ho⟩
   have hroom := R.room
   have hstk := ok.stack
   have hspv : s.sp.toNat = fr.sp.toNat := by rw [R.sp]

@@ -139,7 +139,7 @@ theorem loop_static (M : Around) (hlab : Labels plan M) :
 an image that holds the items `genProg` gives for it. -/
 theorem loop_ok (M : Around) (placed : Placed M.items 0 M.a M.addrs) (quiet : ∀ w, M.dev w .none = w)
     (areas : ∀ ar ad, layout.areaAddr ar = some ad → (plan.toZ M).sym (areaSym ar) ad)
-    (accSym : (plan.toZ M).sym "rt_acc" 33343) (hrt : RtOK (plan.toZ M))
+    (accSym : AccRef (plan.toZ M) → (plan.toZ M).sym "rt_acc" 33343) (hrt : RtOK (plan.toZ M))
     {c : Compiled} (hgen : genProg ir false (sharedBytes ir) = .ok c) {off : Nat}
     (hitems : ∀ j it, c.items[j]? = some it → M.items[off + j]? = some it)
     (htrap : ∃ j : Nat, M.items[j]? = some (Item.label "rt_trap")) :

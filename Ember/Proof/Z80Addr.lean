@@ -186,7 +186,7 @@ theorem checkRt_ok (ok : Z.OK) (hT : FnLay Z E) (F : GFinal Z base sF) (hrt : Rt
           (¬ s.hl.toNat < len → Trapped Z ist s'))) s0 := by
   simp only [wpg_bind, wpg_ins, wpg_call]
   refine ⟨(GExt.push _ _).trans (GExt.push _ _), trivial, fun hx hlen fr ist tmps regs s hhl R hat => ?_⟩
-  obtain ⟨entry, hsym, hent, hspec⟩ := hrt.bound
+  obtain ⟨entry, hsym, hent, hspec⟩ := hrt.bound ⟨_, F.emitted hx rfl⟩
   have hroom := R.room
   have hstk := ok.stack
   have hspv : s.sp.toNat = fr.sp.toNat := by rw [R.sp]

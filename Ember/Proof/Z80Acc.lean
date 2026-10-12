@@ -170,7 +170,8 @@ theorem st_run (ok : Z.OK) (F : GFinal Z base sF) {n : Nat} (hn : 0 < n ∧ n �
       At Z.addrs (base + (pushL [⟨.ld, [.hl, .imm p]⟩, ⟨.call, [.imm (.sym s!"rt_st{bits n}")]⟩] s1).out.size) s' ∧
       s'.sp = s.sp ∧ s'.halted = s.halted ∧ s'.ramStart = s.ramStart ∧ s'.mem.size = 65536 ∧
       FreeStack Z { s with mem := IR.Sem.wr s.mem A n (IR.Sem.rd s.mem Z.acc n) } s' := by
-  obtain ⟨entry, hsym, hent, hR⟩ := hrt.st
+  obtain ⟨entry, hsym, hent, hR⟩ := hrt.st ⟨_,
+    F.emitted (s := pushL [⟨.ld, [.hl, .imm p]⟩, ⟨.call, [.imm (.sym s!"rt_st{bits n}")]⟩] s1) hx rfl⟩
   have hroom := R.room
   have hstk := ok.stack
   have hacr := ok.accRam

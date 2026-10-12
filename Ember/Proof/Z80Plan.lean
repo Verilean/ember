@@ -164,7 +164,7 @@ def okB (P : Plan) : Bool :=
 theorem plan_ok {P : Plan} (h : okB P = true) (M : Around)
     (placed : Placed M.items 0 M.a M.addrs) (quiet : ∀ w, M.dev w .none = w)
     (areas : ∀ ar ad, P.c.layout.areaAddr ar = some ad → (P.toZ M).sym (areaSym ar) ad)
-    (accSym : (P.toZ M).sym "rt_acc" P.acc) : (P.toZ M).OK := by
+    (accSym : AccRef (P.toZ M) → (P.toZ M).sym "rt_acc" P.acc) : (P.toZ M).OK := by
   simp only [okB, Bool.and_eq_true, decide_eq_true_eq, Bool.or_eq_true] at h
   obtain ⟨⟨⟨⟨⟨⟨⟨⟨⟨hdata, hs1⟩, hs2⟩, ha1⟩, ha2⟩, has⟩, hrt⟩, hub⟩, hdb⟩, hap⟩ := h
   have hd : ∀ x, inIv P.data x = true → (P.ramStart ≤ x ∧ x < 65536) ∧ (x < P.acc ∨ P.acc + 8 ≤ x) ∧

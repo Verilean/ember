@@ -65,6 +65,10 @@ structure ZCtx where
 /-- The name `n` is the number `v` in the image. -/
 def ZCtx.sym (Z : ZCtx) (n : String) (v : Nat) : Prop := Z.a.labels.reverse.lookup n = some v
 
+/-- An instruction of the image names the accumulator `rt_acc`. -/
+def AccRef (Z : ZCtx) : Prop :=
+  ∃ (k : Nat) (i : Instr) (off : Int), Z.items[k]? = some (.ins i) ∧ i.immVal? = some (.sym "rt_acc" off)
+
 structure ZCtx.OK (Z : ZCtx) : Prop where
   placed : Placed Z.items 0 Z.a Z.addrs
   /-- An instruction that does no I/O leaves the machine as it is. -/
@@ -74,7 +78,8 @@ structure ZCtx.OK (Z : ZCtx) : Prop where
   /-- The shared bytes are in RAM, and not in the stack. -/
   ram : ∀ x, Z.data x → Z.ramStart ≤ x ∧ x < 65536
   stack : Z.ramStart ≤ Z.stackLo ∧ Z.stackHi ≤ 65536
-  accSym : Z.sym "rt_acc" Z.acc
+  /-- Where an instruction of the image names the accumulator, it is at `acc`. -/
+  accSym : AccRef Z → Z.sym "rt_acc" Z.acc
   accRam : Z.ramStart ≤ Z.acc ∧ Z.acc + 8 ≤ 65536
   accStack : Z.acc + 8 ≤ Z.stackLo ∨ Z.stackHi ≤ Z.acc
   /-- The accumulator is not shared, and any function may have it written. -/

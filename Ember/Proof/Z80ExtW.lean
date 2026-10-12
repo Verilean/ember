@@ -178,8 +178,11 @@ theorem ext24_ok (ok : Z.OK) (hT : FnLay Z E) (F : GFinal Z base sF) (d : Dst) (
       ((GExt.push _ _).trans (GExt.regs _ _)) (fun hx hrd fr ist tmps s R hat => ?_)) (fun _ s2 h => h)
     obtain ⟨ad, had, hpc⟩ := hat
     have hacr := ok.accRam
+    have href : AccRef Z := ⟨_, ⟨.ld, [.hl, .mem (.sym "rt_acc")]⟩, 0,
+      F.emitted (s := { s0 with out := s0.out.push (.ins ⟨.ld, [.hl, .mem (.sym "rt_acc")]⟩) })
+        ((GExt.regs _ _).trans hx) rfl, rfl⟩
     have hnn : (Instr.immW (Z.a.env ad) ⟨.ld, [.hl, .mem (.sym "rt_acc")]⟩).toNat = Z.acc :=
-      immW_toNat _ _ _ _ rfl (sym_val ad ok.accSym) (by omega)
+      immW_toNat _ _ _ _ rfl (sym_val ad (ok.accSym href)) (by omega)
     have hS : Sys s (((skip (op1 s) 2).setHL
         ((op1 s).rd16 (Instr.immW (Z.a.env ad) ⟨.ld, [.hl, .mem (.sym "rt_acc")]⟩))).tick 16) := by
       simp only [Sys, zsim, and_self]

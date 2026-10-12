@@ -16,7 +16,7 @@ open Ember.Z80.IR (Opd Dst Slot Area Bin)
 /-- `rt_bound`: returns with the registers as they were when `HL < BC`;
 if not, the CPU gets to `rt_trap`. -/
 def RtBound (Z : ZCtx) : Prop :=
-  ∃ entry, Z.sym "rt_bound" entry ∧ entry < 65536 ∧
+  Uses Z "rt_bound" → ∃ entry, Z.sym "rt_bound" entry ∧ entry < 65536 ∧
     ∀ c : Cpu, c.pc.toNat = entry → Img Z.a 0 c → c.halted = false → c.ramStart.toNat = Z.ramStart →
       c.mem.size = 65536 → Z.stackLo + Z.rtK ≤ c.sp.toNat → c.sp.toNat + 2 ≤ Z.stackHi →
       ∃ s', Steps c s' ∧ s'.halted = false ∧ s'.ramStart = c.ramStart ∧ s'.mem.size = 65536 ∧
@@ -40,7 +40,7 @@ def EffArgs (Z : ZCtx) (e : Ember.Lang.Effect) (vs : List Nat) (c : Cpu) : Prop 
 /-- **The routine of an effect**: it returns, having done to the machine
 what the effect does to the world; the result in `HL`. -/
 def RtEff (Z : ZCtx) (e : Ember.Lang.Effect) : Prop :=
-  ∃ entry, Z.sym (effectRoutine e) entry ∧ entry < 65536 ∧
+  Uses Z (effectRoutine e) → ∃ entry, Z.sym (effectRoutine e) entry ∧ entry < 65536 ∧
     ∀ (c : Cpu) (w : Z.W) (wd : Ember.Lang.World) (vs : List Nat), c.pc.toNat = entry → Img Z.a 0 c →
       c.halted = false → c.ramStart.toNat = Z.ramStart → c.mem.size = 65536 → Z.stackLo + Z.rtK ≤ c.sp.toNat →
       c.sp.toNat + 2 ≤ Z.stackHi → Z.wrel wd w → EffArgs Z e vs c →
@@ -54,7 +54,7 @@ structure RtW (Z : ZCtx) (n : Nat) : Prop where
   ld : RtAcc Z s!"rt_ld{bits n}" (fun _ => True)
     (fun s s' => IR.Sem.rd s'.mem Z.acc n = IR.Sem.rd s.mem s.hl.toNat n)
   /-- the `n` bytes at `HL` (in RAM) := accumulator -/
-  st : ∃ entry, Z.sym s!"rt_st{bits n}" entry ∧ entry < 65536 ∧
+  st : Uses Z s!"rt_st{bits n}" → ∃ entry, Z.sym s!"rt_st{bits n}" entry ∧ entry < 65536 ∧
     Routine Z entry Z.rtK (fun s => Z.ramStart ≤ s.hl.toNat ∧ s.hl.toNat + n ≤ 65536)
       (fun s s' => ∀ x, x < Z.stackLo ∨ s.sp.toNat ≤ x → ¬ Z.rt x →
         s'.mem.get! x = (IR.Sem.wr s.mem s.hl.toNat n (IR.Sem.rd s.mem Z.acc n)).get! x)
@@ -193,7 +193,8 @@ theorem loadE_ok (ok : Z.OK) (F : GFinal Z base sF) (a b : Opd) (s0 : GS) :
 
 theorem RtPure.mono {name : String} {rel rel' : Cpu → Cpu → Prop} (h : RtPure Z name rel)
     (hm : ∀ s s', rel s s' → rel' s s') : RtPure Z name rel' := by
-  obtain ⟨entry, h1, h2, hR⟩ := h
+  intro hu
+  obtain ⟨entry, h1, h2, hR⟩ := h hu
   refine ⟨entry, h1, h2, fun s a1 a2 a3 a4 a5 a6 a7 a8 => ?_⟩
   obtain ⟨s', b1, b2, b3, b4, b5, b6, b7, b8⟩ := hR s a1 a2 a3 a4 a5 a6 a7 a8
   exact ⟨s', b1, b2, b3, b4, b5, b6, hm _ _ b7, b8⟩

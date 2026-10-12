@@ -612,8 +612,9 @@ theorem shift4_ok (ok : Z.OK) (hT : FnLay Z E) (F : GFinal Z base sF) (hrt : RtO
     show ((4 : Nat) == 2) = false from rfl, Bool.false_eq_true, beq_self_eq_true, Bool.and_self, if_true]
   have hacr := ok.accRam
   -- the word moved within the accumulator (`P` to `Q`), then the accumulator stored
-  have core : ∀ (vp vq : Val) (P Q : Nat), (∀ pc, (Z.a.env pc).val vp = Int.ofNat P) →
-      (∀ pc, (Z.a.env pc).val vq = Int.ofNat Q) → Z.acc ≤ P → P + 2 ≤ Z.acc + 8 → Z.acc ≤ Q → Q + 2 ≤ Z.acc + 8 →
+  have core : ∀ (vp vq : Val) (P Q : Nat), (∃ off, vp = .sym "rt_acc" off) →
+      (AccRef Z → ∀ pc, (Z.a.env pc).val vp = Int.ofNat P) →
+      (AccRef Z → ∀ pc, (Z.a.env pc).val vq = Int.ofNat Q) → Z.acc ≤ P → P + 2 ≤ Z.acc + 8 → Z.acc ≤ Q → Q + 2 ≤ Z.acc + 8 →
       (∀ m : ByteArray, m.size = 65536 →
         IR.Sem.rd (IR.Sem.wr (IR.Sem.wr m Q 2 (IR.Sem.rd m P 2)) P 2 0) Z.acc 4 =
           shiftVal left 4 (IR.Sem.rd m Z.acc 4) 16) →
@@ -628,7 +629,7 @@ theorem shift4_ok (ok : Z.OK) (hT : FnLay Z E) (F : GFinal Z base sF) (hrt : RtO
         storeAcc 4 d) E
         (InsPost Z E base sF dt (dtAfter dt d) (.shift left 4 d a m (.const 16))
           ((RdW Z E dt 4 a ∧ 16 < 2 ^ (8 * m)) ∧ Wr Z E 4 d) s0) s0 := by
-    intro vp vq P Q hvp hvq hP1 hP2 hQ1 hQ2 hval
+    intro vp vq P Q hsym hvp hvq hP1 hP2 hQ1 hQ2 hval
     simp only [wpg_bind]
     refine wpg_mono (loadAcc_ok (dt := dt) ok hT F (by omega) hrt.wide hdep a s0) ?_
     intro _ s1 ⟨hx1, hacc1, hl⟩
@@ -641,7 +642,13 @@ theorem shift4_ok (ok : Z.OK) (hT : FnLay Z E) (F : GFinal Z base sF) (hrt : RtO
     have hxm : GExt (pushL [⟨.ld, [.hl, .mem vp]⟩, ⟨.ld, [.mem vq, .hl]⟩, ⟨.ld, [.hl, n16 0]⟩,
         ⟨.ld, [.mem vp, .hl]⟩] s1) sF := (GExt.regs _ _).trans (hx2.trans hxF)
     obtain ⟨s', st1, at1, R1⟩ := hl (hxp.trans hxm) fr ist tmps s hrd R hat
-    obtain ⟨s'', st2, at2, hmem, hsp', hh', hrs'⟩ := moveWord ok F vp vq P Q hvp hvq ⟨by omega, by omega⟩
+    have href : AccRef Z := by
+      obtain ⟨off, rfl⟩ := hsym
+      exact ⟨_, ⟨.ld, [.hl, .mem (.sym "rt_acc" off)]⟩, off,
+        F.emitted (s := { s1 with out := s1.out.push (.ins ⟨.ld, [.hl, .mem (.sym "rt_acc" off)]⟩) })
+          ((pushL_ext [⟨.ld, [.mem vq, .hl]⟩, ⟨.ld, [.hl, n16 0]⟩, ⟨.ld, [.mem (.sym "rt_acc" off), .hl]⟩] _).trans hxm)
+          rfl, rfl⟩
+    obtain ⟨s'', st2, at2, hmem, hsp', hh', hrs'⟩ := moveWord ok F vp vq P Q (hvp href) (hvq href) ⟨by omega, by omega⟩
       ⟨by omega, by omega⟩ hxm R1.mach R1.rs R1.msz at1
     have hfree : AccFree Z s' s'' := by
       intro x _ _ hx
@@ -660,8 +667,8 @@ theorem shift4_ok (ok : Z.OK) (hT : FnLay Z E) (F : GFinal Z base sF) (hrt : RtO
   cases left with
   | true =>
     simp only [if_true]
-    refine core (.sym "rt_acc") (.sym "rt_acc" 2) Z.acc (Z.acc + 2) (fun pc => sym_val pc ok.accSym)
-      (fun pc => sym_off pc ok.accSym 2) (by omega) (by omega) (by omega) (by omega) (fun mm hm => ?_)
+    refine core (.sym "rt_acc") (.sym "rt_acc" 2) Z.acc (Z.acc + 2) ⟨0, rfl⟩ (fun hr pc => sym_val pc (ok.accSym hr))
+      (fun hr pc => sym_off pc (ok.accSym hr) 2) (by omega) (by omega) (by omega) (by omega) (fun mm hm => ?_)
     rw [rd_add _ _ 2 2, rd_wr _ _ _ _ (by rw [wr_size, hm]; omega) (by rw [wr_size, hm]; exact Nat.le_refl _),
       rd_wr_other _ _ _ _ _ 2 (by omega) (by omega) (Or.inl (Nat.le_refl _)),
       rd_wr _ _ _ _ (by rw [hm]; omega) (by rw [hm]; exact Nat.le_refl _), rd_low mm Z.acc 2 2]
@@ -673,8 +680,8 @@ theorem shift4_ok (ok : Z.OK) (hT : FnLay Z E) (F : GFinal Z base sF) (hrt : RtO
     omega
   | false =>
     simp only [Bool.false_eq_true, if_false]
-    refine core (.sym "rt_acc" 2) (.sym "rt_acc") (Z.acc + 2) Z.acc (fun pc => sym_off pc ok.accSym 2)
-      (fun pc => sym_val pc ok.accSym) (by omega) (by omega) (by omega) (by omega) (fun mm hm => ?_)
+    refine core (.sym "rt_acc" 2) (.sym "rt_acc") (Z.acc + 2) Z.acc ⟨2, rfl⟩ (fun hr pc => sym_off pc (ok.accSym hr) 2)
+      (fun hr pc => sym_val pc (ok.accSym hr)) (by omega) (by omega) (by omega) (by omega) (fun mm hm => ?_)
     rw [rd_add _ _ 2 2, rd_wr_other _ _ _ _ _ 2 (by omega) (by omega) (Or.inr (Nat.le_refl _)),
       rd_wr _ _ _ _ (by rw [hm]; omega) (by rw [hm]; exact Nat.le_refl _),
       rd_wr _ _ _ _ (by rw [wr_size, hm]; omega) (by rw [wr_size, hm]; exact Nat.le_refl _), rd_high mm Z.acc 2 2]

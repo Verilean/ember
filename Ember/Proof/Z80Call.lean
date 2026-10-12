@@ -335,16 +335,22 @@ theorem Rel.acc_free (ok : Z.OK) (hT : FnLay Z E) {regs regs' : Regs} {ist : IR.
         · exact absurd (ok.accWr _ x h h') hx
         · exact Or.inr h'
 
+/-- The image calls the routine `name`.  What is taken of a routine of
+the runtime is taken where the image calls it: an image has the routines
+its code uses, and no others. -/
+def Uses (Z : ZCtx) (name : String) : Prop :=
+  ∃ k : Nat, Z.items[k]? = some (.ins ⟨.call, [.imm (.sym name)]⟩)
+
 /-- A routine of the runtime that works on the accumulator: `rel` between
 the state it is entered in (with `pre`) and the state it returns in. -/
 def RtAcc (Z : ZCtx) (name : String) (pre : Cpu → Prop) (rel : Cpu → Cpu → Prop) : Prop :=
-  ∃ entry, Z.sym name entry ∧ entry < 65536 ∧
+  Uses Z name → ∃ entry, Z.sym name entry ∧ entry < 65536 ∧
     Routine Z entry Z.rtK pre (fun s s' => rel s s' ∧ AccFree Z s s')
 
 /-- A routine of the runtime that works on registers: `rel` between the
 state it is entered in and the state it returns in. -/
 def RtPure (Z : ZCtx) (name : String) (rel : Cpu → Cpu → Prop) : Prop :=
-  ∃ entry, Z.sym name entry ∧ entry < 65536 ∧
+  Uses Z name → ∃ entry, Z.sym name entry ∧ entry < 65536 ∧
     Routine Z entry Z.rtK (fun _ => True) (fun s s' => rel s s' ∧ FreeStack Z s s')
 
 /-- **A call of a routine of the runtime**, from states that agree. -/
@@ -361,7 +367,7 @@ theorem rt_call {base : Nat} {sF : GS} (ok : Z.OK) (hT : FnLay Z E) (F : GFinal 
         (∀ sl, Opd.slot sl ∈ regs'.hl → Own E (.slot sl) → Z.use E.fn.name (sl, 2)) →
         (∀ n o, regs'.acc = some (n, o) → regs.acc = some (n, o)) →
         Rel Z E fr dt regs' ist tmps s' := by
-  obtain ⟨entry, hsym, hent, hR⟩ := hrt
+  obtain ⟨entry, hsym, hent, hR⟩ := hrt ⟨_, F.emitted hx ho⟩
   have hroom := R.room
   have hspv : s.sp.toNat = fr.sp.toNat := by rw [R.sp]
   have hstk := ok.stack
@@ -383,7 +389,7 @@ theorem acc_call {base : Nat} {sF : GS} (ok : Z.OK) (F : GFinal Z base sF) {s0 s
     (hpre : ∀ c1, CallSt s c1 → pre c1) :
     ∃ c1 s', CallSt s c1 ∧ Steps s s' ∧ At Z.addrs (base + s1.out.size) s' ∧ rel c1 s' ∧ AccFree Z s s' ∧
       s'.sp = s.sp ∧ s'.halted = s.halted ∧ s'.ramStart = s.ramStart ∧ s'.mem.size = 65536 := by
-  obtain ⟨entry, hsym, hent, hR⟩ := hrt
+  obtain ⟨entry, hsym, hent, hR⟩ := hrt ⟨_, F.emitted hx ho⟩
   have hroom := R.room
   have hspv : s.sp.toNat = fr.sp.toNat := by rw [R.sp]
   have hstk := ok.stack
