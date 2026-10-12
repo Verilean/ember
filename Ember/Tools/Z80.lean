@@ -799,7 +799,7 @@ def main (args : List String) : IO UInt32 := do
     | .error e => IO.println s!"FAIL {e}"; return 1
     | .ok img =>
       for (n, sz) in (ownSizes img).take 45 do IO.println s!"  {sz}\t{n}"
-      let gl := img.layout.globals.map (·.2)
+      let gl := (img.layout.globals.map (·.2)).filter (· ≥ 0x8000)
       let fr := img.layout.frames.map (·.2)
       let lo (xs : List Nat) := xs.foldl Nat.min 65536
       IO.println s!"RAM: runtime and ring {lo gl - 0x8000}, globals {lo fr - lo gl}, frames {img.layout.top - lo fr}"

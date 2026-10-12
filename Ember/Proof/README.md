@@ -744,6 +744,7 @@ footprint (`ZCtx.wr`) has changed.
 | **`loopH_ok`** (`Z80LoopHItems.lean`, `Z80LoopH.lean`) | the loopback image for the test harness, without the passes on the assembly: every function does what the IR's does **with nothing taken of the runtime** — the four routines it calls are proved, it calls no other, and the plan has `rtK = 0` (a function needs two bytes of stack per call below it) |
 | `loop_iter`, `loop_run`, `boot_ok`, `rt_zero_ok`, `ldir_zero` (`Z80Boot.lean`) | the runtime's code around the functions, from its items: start-up from reset (`di`, `ld sp,0`, `rt_init` — the RAM in use cleared by `rt_zero`, an induction over `ldir`), and the harness's loop — from its head either the loop is left or the entry is called as `IR.Sem.callF` says and the CPU is back at the head; `loop_run`: any number of turns against `irIter` |
 | **`loopH_run`** (`Z80LoopH.lean`) | the loopback image for the harness **from reset**: for any input and any number `j` of calls of `main` that end in the IR's semantics from its initial state, the machine is at the head of the loop with the world those calls leave, or left the loop after `i ≤ j` of them with the world of those `i` — nothing taken of the program, the layout, the image or the runtime |
+| **`loopH_spec`** (`Z80LoopHSpec.lean`) | the same against the **Ember semantics**: `loop_safe` (the loopback never traps, M5.5) and `lower_iter` (M7.1) composed with `loopH_run` — from reset, for any input and any `j`, `j` calls of `main` end in the Ember semantics and the machine holds their world at the head of the loop, or it left the loop after `i ≤ j` calls and stopped (`di; halt`) with the world of those, the input used up or the loop's count of idle calls full.  `LoopSrc p`: what is taken of the Ember program (it is the checked loopback program, lowered to `Loop.ir`, accepted by the checkers of M7.1 for this layout) — each computable part a `#guard` |
 
 **Checked, not proved** (translation validation, on every function
 generated): `jumpsOk` — what the generator assumes the registers hold
@@ -807,9 +808,11 @@ built by default nothing is proved: `build` runs `retThreading`,
 of 7159 in the SLIP build; `ember-z80 own-build --plain` is the image
 without them, tested like the other (random programs, the loopback, the
 corpus).  Not proved: for the board, start-up, the interrupt routine and the
-loop that calls `main`; interrupts in any image; that the calls of
-`main` end, composed with the machine (the Spec-to-IR chain and
-`loopH_run` are two theorems).  The stack: `Z.rtK` is what a
+loop that calls `main`; interrupts in any image.  Of the harness
+loopback: that the loop is not left by its count of idle calls while
+input remains, and so that all the input is processed before the
+machine stops — the count is in the runtime's own bytes, which the
+theorems about the functions do not follow through a call.  The stack: `Z.rtK` is what a
 routine of the runtime needs below its return address — 0 for the
 harness loopback (proved), 32 in the plans of the board builds
 (a placeholder: `Ember.Z80.StackBound` computes at most 4 for any

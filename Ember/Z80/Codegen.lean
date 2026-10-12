@@ -1226,7 +1226,12 @@ def build (p : IR.Prog) (platform : List Runtime.Piece) (head : List Item := [.i
   let all ← if shorten && passes then Asm.relax all else pure all
   let a ← Asm.assemble all
   if a.bytes.size > ramStart then throw s!"the image is {a.bytes.size} bytes: it does not fit below {ramStart}"
-  return { bytes := a.bytes, labels := a.labels, items := all, layout,
+  -- the constants are where the assembler put them, in ROM: with them the layout has every global,
+  -- as the IR's semantics takes it to
+  let consts := (p.globals.filter (·.const)).filterMap fun g =>
+    (a.labels.lookup (areaSym (.global g.name))).map fun ad => (g.name, ad)
+  return { bytes := a.bytes, labels := a.labels, items := all,
+           layout := { layout with globals := layout.globals ++ consts },
            codeSize := a.bytes.size, ramSize := layout.top - ramStart }
 
 end Ember.Z80.Codegen

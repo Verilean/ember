@@ -86,6 +86,7 @@ def harness (a : Assembled) (addrs : List Nat) : Harness (Zof a addrs) where
   rdNext := fun w p h => by show hdev img.ctx w (.read p) = _; simp [hdev, h]
   rdByte := fun w p h => by show (hdev img.ctx w (.read p)).1 = _; simp [hdev, h]
   rdMore := fun w p h => by show (hdev img.ctx w (.read p)).1 = _; simp [hdev, h]
+  busMore := fun w p h => by show hbus w p = _; simp [hbus, h]
   wrByte := fun w p v h => by show (hdev img.ctx w (.write p v)).1 = _; simp [hdev, h]; rfl
   wrEnd := fun w p v h => by show (hdev img.ctx w (.write p v)).1 = _; simp [hdev, h]; rfl
   wrDrop := fun w p v h => by show (hdev img.ctx w (.write p v)).1 = _; simp [hdev, h]; rfl
@@ -197,7 +198,8 @@ theorem loopH_ok :
 /-! ## From reset: start-up and the loop -/
 
 /-- The IR's state the program starts in: the memory `Ember.Z80.IR`
-starts with (`initMem`: zero but for initial values), the input still
+starts with (`initMem`: zero but for the initial values — here the
+constant `MTU`, at its address in ROM), the input still
 to come.  (This is `irInit` of `Ember.Proof.IRLower` for the loopback
 program and this layout.) -/
 def st0 (inputs : Array Ember.Trace.Input) : IR.Sem.St :=
@@ -228,7 +230,7 @@ def bootCheck : Bool :=
 
 theorem bootCheck_true : bootCheck = true := by decide +kernel
 
-theorem initMem_eq (m : ByteArray) : IR.initMem layout Loop.ir.globals m = (m.set! 0 40).set! 1 1 := rfl
+theorem initMem_eq (m : ByteArray) : IR.initMem layout Loop.ir.globals m = (m.set! 412 40).set! 413 1 := rfl
 
 theorem zeros_get (x : Nat) : (ByteArray.mk (Array.replicate 65536 0)).get! x = 0 := by
   simp [ByteArray.get!, Array.getElem!_eq_getD, Array.getD_eq_getD_getElem?, Array.getElem?_replicate]
@@ -239,7 +241,10 @@ at address 0 with the image in ROM; the machine holds the input.  For
 any number `j` of calls of `main` that end in the IR's semantics from
 its initial state: the machine gets to the head of the loop with the
 world those calls leave — the input consumed, the events emitted — or
-it left the loop after `i ≤ j` of them, with the world `i` calls leave.
+it left the loop after `i ≤ j` of them and stopped (`di; halt`), with
+the world `i` calls leave: the input used up, or — input remaining — by
+the loop's count of calls that consumed nothing (`Idle`; that this does
+not happen is not proved).
 Nothing is taken of the program, the layout, the image or the runtime. -/
 theorem loopH_run :
     ∃ (a : Assembled) (addrs : List Nat), assemble items = .ok a ∧
@@ -250,7 +255,8 @@ theorem loopH_run :
             AtLoop (Zof a addrs) 176 st' s' ∧ w'.1 = st'.world) ∨
           (∃ i st_i s' w', i ≤ j ∧ irIter m img.ctx i (st0 inputs) = some st_i ∧
             WSteps (Zof a addrs) (s, ((st0 inputs).world, 0)) (s', w') ∧
-            At addrs 197 s' ∧ w'.1 = st_i.world) := by
+            s'.halted = true ∧ s'.iff1 = false ∧ w'.1 = st_i.world ∧
+            (st_i.world.next.1 = 0xFFFF ∨ Idle st_i.world)) := by
   obtain ⟨a, addrs, ha, hsize, ok, hcal⟩ := loopH_setting
   refine ⟨a, addrs, ha, fun inputs s hpc I hh hrs hsz j m st' hit => ?_⟩
   have hbc := bootCheck_true
@@ -322,9 +328,11 @@ theorem loopH_run :
   have hcal' : ∀ m st1, Callee (Zof a addrs) (Zof a addrs).c.prog.entry st1
       (IR.Sem.callF m (Zof a addrs).c (Zof a addrs).c.prog.entry st1) := fun m st1 => hcal m _ st1
   rcases loop_run ok H N hcal' m j (st0 inputs) s1 ((st0 inputs).world, 0) L0 rfl st' hit with
-    ⟨s2, w2, stp, L2, hw2⟩ | ⟨i, sti, s2, w2, hi, hiter, stp, at2, hw2⟩
+    ⟨s2, w2, stp, L2, hw2⟩ | ⟨i, sti, s2, w2, hi, hiter, stp, at2, M2, hw2, hwhy⟩
   · exact Or.inl ⟨s2, w2, (Steps.lift ok stb _).trans stp, L2, hw2⟩
-  · exact Or.inr ⟨i, sti, s2, w2, hi, hiter, (Steps.lift ok stb _).trans stp, at2, hw2⟩
+  · obtain ⟨s3, st3, hh3, hi3, _⟩ := done_halts ok N.has M2 at2
+    exact Or.inr ⟨i, sti, s3, w2, hi, hiter, ((Steps.lift ok stb _).trans stp).trans (Steps.lift ok st3 _), hh3, hi3,
+      hw2, hwhy⟩
 
 /-- info: 'Ember.Proof.Z80Gen.LoopH.loopH_run' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in #print axioms loopH_run

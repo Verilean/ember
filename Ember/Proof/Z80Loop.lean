@@ -33,15 +33,16 @@ open Ember.Z80 Ember.Z80.Codegen Ember.Z80.Asm
 open Ember.Proof.Z80Enc Ember.Proof.IRSim
 
 def layout : IR.Layout :=
-  { globals := [("buf", 33033), ("len", 33329), ("esc", 33331), ("over", 33332)],
+  { globals := [("buf", 33033), ("len", 33329), ("esc", 33331), ("over", 33332), ("MTU", 628), ("D_OVERSIZE", 630)],
     frames := [("slip_send", 33336), ("slip_store", 33336), ("loop_rx", 33335), ("main", 33333),
       ("slip_send.t", 33343), ("slip_store.t", 33343), ("loop_rx.t", 33343), ("main.t", 33343)],
     top := 33343 }
 
-/-- The layout is the one of the image for the board. -/
+/-- The layout is the one of the image for the board, built without the passes on the assembly
+(the constants are in ROM, where the assembler put them). -/
 def layoutIsBuilt : Bool :=
   match Codegen.build ir (Runtime.board 0 ["oversize-frame"] []) (Runtime.boardHead 0x8000)
-      (reserved := (Runtime.boardCells 0x8000).2) with
+      (reserved := (Runtime.boardCells 0x8000).2) (passes := false) with
   | .ok img => img.layout.globals == layout.globals && img.layout.frames == layout.frames &&
       img.layout.top == layout.top
   | .error _ => false

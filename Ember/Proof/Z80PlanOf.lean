@@ -105,7 +105,9 @@ def depths (p : IR.Prog) (rtK : Nat) : Nat → List (String × Nat)
 
 def mkPlan (I : PlanIn) : Plan :=
   let L := I.c.layout
-  let globals : Ivs := I.c.prog.globals.filterMap fun g => (L.globals.lookup g.name).map fun a => (a, a + g.size)
+  -- the globals in RAM (the constants are in ROM: not shared bytes)
+  let globals : Ivs := (I.c.prog.globals.filter (!·.const)).filterMap fun g =>
+    (L.globals.lookup g.name).map fun a => (a, a + g.size)
   -- the frame of a function, and the slots of its temporaries
   let frameOf (f : String) : Ivs :=
     (match L.frames.lookup f with

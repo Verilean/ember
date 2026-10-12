@@ -269,7 +269,7 @@ def items : List Item := [
   .db [.num 0]]
 
 def layout : IR.Layout :=
-  { globals := [("buf", 32771), ("len", 33067), ("esc", 33069), ("over", 33070)],
+  { globals := [("buf", 32771), ("len", 33067), ("esc", 33069), ("over", 33070), ("MTU", 412), ("D_OVERSIZE", 414)],
     frames := [("slip_send", 33074), ("slip_store", 33074), ("loop_rx", 33073), ("main", 33071),
       ("slip_send.t", 33081), ("slip_store.t", 33081), ("loop_rx.t", 33081), ("main.t", 33081)],
     top := 33081 }

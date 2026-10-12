@@ -98,6 +98,7 @@ structure Harness (Z : ZCtx) where
   rdByte : ∀ w p, lo p = 0xD2 → (view (Z.dev w (.read p))).1 = (view w).1
   /-- `0xD0`: does input remain?  Asking changes nothing. -/
   rdMore : ∀ w p, lo p = 0xD0 → (view (Z.dev w (.read p))).1 = (view w).1
+  busMore : ∀ w p, lo p = 0xD0 → Z.bus w p = if kindOf (view w).1 = 2 then 0 else 1
   wrByte : ∀ w p v, lo p = 0xD3 → (view (Z.dev w (.write p v))).1 = (IR.Sem.effect Z.c (view w).1 .outByte [v.toNat]).2
   wrEnd : ∀ w p v, lo p = 0xD4 → (view (Z.dev w (.write p v))).1 = (IR.Sem.effect Z.c (view w).1 .outEnd []).2
   wrDrop : ∀ w p v, lo p = 0xD5 → (view (Z.dev w (.write p v))).1 = (IR.Sem.effect Z.c (view w).1 .drop [v.toNat]).2

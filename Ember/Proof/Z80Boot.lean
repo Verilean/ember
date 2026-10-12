@@ -259,7 +259,7 @@ theorem in_step (ok : Z.OK) {k : Nat} {n : Nat} (hn : n < 256)
     (hk : Z.items[k]? = some (.ins ⟨.in, [.a, .mem (.num (Int.ofNat n))]⟩)) {s : Cpu} (M : Mach Z s)
     (hat : At Z.addrs k s) (w : Z.W) :
     ∃ s' p, lo p = UInt8.ofNat n ∧ WSteps Z (s, w) (s', Z.dev w (.read p)) ∧ At Z.addrs (k + 1) s' ∧ Mach Z s' ∧
-      Sys s s' := by
+      Sys s s' ∧ s'.a = Z.bus w p := by
   obtain ⟨p, hp⟩ : ∃ p : UInt16, p = mk16 (op1 s).a (byteOf (Int.ofNat n)) := ⟨_, rfl⟩
   obtain ⟨c1, hc1⟩ : ∃ c1 : Cpu, c1 = (({ (skip (op1 s) 1) with a := Z.bus w p, io := .read p } : Cpu).tick 11) :=
     ⟨_, rfl⟩
@@ -267,7 +267,7 @@ theorem in_step (ok : Z.OK) {k : Nat} {n : Nat} (hn : n < 256)
   have hio1 : c1.io = .read p := by rw [hc1]; rfl
   rw [hio1] at st1
   have hS1 : Sys s c1 := by rw [hc1]; simp only [Sys, skip, zsim, and_self]
-  refine ⟨c1, p, ?_, st1, at2 rfl, M.sys hS1, hS1⟩
+  refine ⟨c1, p, ?_, st1, at2 rfl, M.sys hS1, hS1, by rw [hc1]; rfl⟩
   rw [hp, lo_mk16]
   apply UInt8.toNat_inj.mp
   rw [byteOf_toNat, UInt8.toNat_ofNat']
@@ -373,14 +373,22 @@ structure LoopNeed (Z : ZCtx) (k : Nat) (gf : IR.Fn) : Prop where
   idle : ∃ a, Z.sym "rt_idle" a ∧ Z.rt a ∧ a < 65536
   before : ∃ a, Z.sym "rt_before" a ∧ Z.rt a ∧ a < 65536
 
+/-- The loop was left with input remaining: by its count of calls that
+consumed nothing.  (That count is in the runtime's own bytes, which the
+theorems about the functions do not follow: when it reaches three is not
+said.) -/
+def Idle (w : Ember.Lang.World) : Prop := w.next.1 ≠ 0xFFFF
+
 /-- **One turn of the loop**: from its head, either the loop is left
-(the CPU is at `rt_done`, the world as it was), or the entry is called
+(the CPU is at `rt_done`, the world as it was — the input used up, or
+the count of idle calls full), or the entry is called
 and — as `IR.Sem.callF` says — the CPU is back at the head with the
 machine holding the world the call left, or it is at `rt_trap`. -/
 theorem loop_iter (ok : Z.OK) (H : Harness Z) {k : Nat} {gf : IR.Fn} (N : LoopNeed Z k gf)
     (hcal : ∀ m st1, Callee Z Z.c.prog.entry st1 (IR.Sem.callF m Z.c Z.c.prog.entry st1))
     {st : IR.Sem.St} {s : Cpu} {w : Z.W} (L : AtLoop Z k st s) (hw : Z.wrel st.world w) (m : Nat) :
-    (∃ s' w', WSteps Z (s, w) (s', w') ∧ At Z.addrs (k + 21) s' ∧ Z.wrel st.world w') ∨
+    (∃ s' w', WSteps Z (s, w) (s', w') ∧ At Z.addrs (k + 21) s' ∧ Mach Z s' ∧ Z.wrel st.world w' ∧
+      (st.world.next.1 = 0xFFFF ∨ Idle st.world)) ∨
     (match IR.Sem.callF m Z.c Z.c.prog.entry st with
      | .ok _ st' => ∃ s' w', WSteps Z (s, w) (s', w') ∧ AtLoop Z k st' s' ∧ Z.wrel st'.world w'
      | .trap st' => ∃ s' w', WSteps Z (s, w) (s', w') ∧ Z.wrel st'.world w' ∧ Trapped Z st' s'
@@ -392,7 +400,8 @@ theorem loop_iter (ok : Z.OK) (H : Harness Z) {k : Nat} {gf : IR.Fn} (N : LoopNe
   have M : Mach Z s := ⟨L.img, L.run⟩
   have at1 := at_label ok (hhas.get 0 rfl) L.at_
   -- does input remain?
-  obtain ⟨c1, p, hp, st1, at2, M1, hS1⟩ := in_step ok (n := 0xD0) (by decide) (hhas.get 1 rfl) M at1 w
+  obtain ⟨c1, p, hp, st1, at2, M1, hS1, ha1⟩ := in_step ok (n := 0xD0) (by decide) (hhas.get 1 rfl) M at1 w
+  have hwd : (H.view w).1 = st.world := (H.wrel _ _).mp hw
   have hw1 : Z.wrel st.world (Z.dev w (.read p)) := by
     rw [H.wrel, H.rdMore w p hp]
     exact (H.wrel _ _).mp hw
@@ -401,8 +410,18 @@ theorem loop_iter (ok : Z.OK) (H : Harness Z) {k : Nat} {gf : IR.Fn} (N : LoopNe
     (hhas.get 3 rfl) (hhas.get 21 rfl) M2 at3
   have st03 : WSteps Z (s, w) (c3, Z.dev w (.read p)) := st1.trans (Steps.lift ok (st2.trans st3) _)
   have hS03 : Sys s c3 := (hS1.trans hS2).trans hS3
+  have hz3 : (orA c1).cond 1 = decide ((H.view w).1.next.1 = 0xFFFF) := by
+    show (orA c1).flag FZ = _
+    rw [orA_z, ha1, H.busMore w p hp]
+    unfold kindOf
+    by_cases h1 : (H.view w).1.next.1 = 0xFFFF
+    · simp [h1]
+    · by_cases h2 : (H.view w).1.next.1 = 0x0100 <;> simp [h1, h2]
+  rw [hz3, hwd] at hbr3
   split at hbr3
-  · exact Or.inl ⟨c3, _, st03, hbr3, hw1⟩
+  · rename_i hex
+    exact Or.inl ⟨c3, _, st03, hbr3, M3, hw1, Or.inl (by simpa using hex)⟩
+  rename_i hnex
   -- three idle calls in a row?
   obtain ⟨c4, st4, at5, M4, hS4⟩ := ld_a_mem_step ok (hhas.get 4 rfl) M3 hbr3
   obtain ⟨st5, at6, M5, hS5⟩ := does_raw ok (does_cp_n 3) (hhas.get 5 rfl) M4 at5
@@ -411,7 +430,7 @@ theorem loop_iter (ok : Z.OK) (H : Harness Z) {k : Nat} {gf : IR.Fn} (N : LoopNe
   have st06 : WSteps Z (s, w) (c6, Z.dev w (.read p)) := st03.trans (Steps.lift ok ((st4.trans st5).trans st6) _)
   have hS06 : Sys s c6 := ((hS03.trans hS4).trans hS5).trans hS6
   split at hbr6
-  · exact Or.inl ⟨c6, _, st06, hbr6, hw1⟩
+  · exact Or.inl ⟨c6, _, st06, hbr6, M6, hw1, Or.inr (show st.world.next.1 ≠ 0xFFFF from by simpa using hnex)⟩
   -- note what was consumed, call the entry
   refine Or.inr ?_
   have hrs6 : c6.ramStart.toNat = Z.ramStart := by rw [hS06.2.1]; exact L.rs
@@ -530,7 +549,7 @@ theorem ldirOnce_spec (e : Cpu) :
     (ldirOnce e).ramStart = e.ramStart ∧ (ldirOnce e).io = e.io ∧
     (ldirOnce e).pc = (if (e.bc - 1 != 0) = true then e.pc - 2 else e.pc) := by
   unfold ldirOnce
-  simp only [bc_setBC, bc_keep, de_keep, hl_keep, de_wr]
+  simp only [bc_setBC, bc_keep, hl_keep, de_wr]
   by_cases hm : (e.bc - 1 != 0) = true
   · rw [if_pos hm, if_pos hm]
     refine ⟨?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_⟩ <;>
@@ -1004,6 +1023,18 @@ theorem boot_ok (ok : Z.OK) {kH kS kI kZ R N : Nat} (B : BootNeed Z kH kS kI kZ 
     rw [hmem8, hmem7]
     exact hzero x h1 h2
 
+/-- **Out of the loop the CPU stops**: `di; halt` — halted, interrupts off, memory as it was. -/
+theorem done_halts (ok : Z.OK) {k : Nat} (hhas : Has Z k loopItems) {s : Cpu} (M : Mach Z s)
+    (hat : At Z.addrs (k + 21) s) :
+    ∃ s', Steps s s' ∧ s'.halted = true ∧ s'.iff1 = false ∧ s'.mem = s.mem := by
+  have at1 := at_label ok (hhas.get 21 rfl) hat
+  obtain ⟨c1, hc1⟩ : ∃ c1 : Cpu, c1 = ({ (op1 s) with iff1 := false, iff2 := false } : Cpu).tick 4 := ⟨_, rfl⟩
+  obtain ⟨st1, at2⟩ := step_raw ok (hhas.get 22 rfl) M at1 c1 (fun _ _ _ => by rw [hc1]; rfl) (by rw [hc1]; rfl)
+  have M1 : Mach Z c1 := M.sys (by rw [hc1]; exact ⟨rfl, rfl, rfl, rfl⟩)
+  obtain ⟨c2, hc2⟩ : ∃ c2 : Cpu, c2 = ({ (op1 c1) with halted := true } : Cpu).tick 4 := ⟨_, rfl⟩
+  obtain ⟨st2, _⟩ := step_raw ok (hhas.get 23 rfl) M1 (at2 rfl) c2 (fun _ _ _ => by rw [hc2]; rfl) (by rw [hc2]; rfl)
+  exact ⟨c2, st1.trans st2, by rw [hc2]; rfl, by rw [hc2, hc1]; rfl, by rw [hc2, hc1]; rfl⟩
+
 /-! ## The loop, any number of turns -/
 
 /-- **The loop against `irIter`**: when `j` calls of the entry end in
@@ -1017,22 +1048,23 @@ theorem loop_run (ok : Z.OK) (H : Harness Z) {k : Nat} {gf : IR.Fn} (N : LoopNee
       ∀ st', irIter m Z.c j st = some st' →
         (∃ s' w', WSteps Z (s, w) (s', w') ∧ AtLoop Z k st' s' ∧ Z.wrel st'.world w') ∨
         (∃ i st_i s' w', i ≤ j ∧ irIter m Z.c i st = some st_i ∧ WSteps Z (s, w) (s', w') ∧
-          At Z.addrs (k + 21) s' ∧ Z.wrel st_i.world w')
+          At Z.addrs (k + 21) s' ∧ Mach Z s' ∧ Z.wrel st_i.world w' ∧
+          (st_i.world.next.1 = 0xFFFF ∨ Idle st_i.world))
   | 0, st, s, w, L, hw, st', h => by
     cases h
     exact Or.inl ⟨s, w, WSteps.refl Z _, L, hw⟩
   | j + 1, st, s, w, L, hw, st', h => by
     rw [irIter] at h
-    rcases loop_iter ok H N hcal L hw m with ⟨s1, w1, st1, at1, hw1⟩ | hit
-    · exact Or.inr ⟨0, st, s1, w1, Nat.zero_le _, rfl, st1, at1, hw1⟩
+    rcases loop_iter ok H N hcal L hw m with ⟨s1, w1, st1, at1, M1, hw1, hwhy⟩ | hit
+    · exact Or.inr ⟨0, st, s1, w1, Nat.zero_le _, rfl, st1, at1, M1, hw1, hwhy⟩
     · cases hc : IR.Sem.callF m Z.c Z.c.prog.entry st with
       | ok r st1 =>
         rw [hc] at h hit
         obtain ⟨s1, w1, stp, L1, hw1⟩ := hit
         rcases loop_run ok H N hcal m j st1 s1 w1 L1 hw1 st' h with ⟨s2, w2, stp2, L2, hw2⟩ |
-          ⟨i, sti, s2, w2, hi, hiter, stp2, at2, hw2⟩
+          ⟨i, sti, s2, w2, hi, hiter, stp2, at2, M2, hw2, hwhy⟩
         · exact Or.inl ⟨s2, w2, stp.trans stp2, L2, hw2⟩
-        · refine Or.inr ⟨i + 1, sti, s2, w2, by omega, ?_, stp.trans stp2, at2, hw2⟩
+        · refine Or.inr ⟨i + 1, sti, s2, w2, by omega, ?_, stp.trans stp2, at2, M2, hw2, hwhy⟩
           rw [irIter, hc]
           exact hiter
       | trap st1 => rw [hc] at h; cases h

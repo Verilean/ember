@@ -32,7 +32,7 @@ def boardPlanIn (prog : Ember.Lang.Prog) : Except String PlanIn := do
     (reserved := (Runtime.boardCells 0x8000).2)
   let envs ← progEnvs ir false (sharedBytes ir)
   let top := img.layout.top
-  let first := (img.layout.globals.map (·.2) ++ img.layout.frames.map (·.2)).foldl Nat.min top
+  let first := ((img.layout.globals.map (·.2)).filter (· ≥ 0x8000) ++ img.layout.frames.map (·.2)).foldl Nat.min top
   let (acc, rt, stackLo) :=
     match img.labels.lookup "rt_acc" with
     | some a => (a, [(0x8000, a), (a + 8, first)], top)
