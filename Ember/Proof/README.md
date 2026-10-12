@@ -233,7 +233,7 @@ occur.
 * P2 beyond what "Refinement" below lists; P3: the emitted C is proved
   ("The emitted C" below); of the Z80 back end the translation to its
   IR and the encoder are ("The IR of the Z80 back end", "The encoder"
-  below), the code generator is not (M7.3).
+  below), the code generator in part ("The code generator" below).
 
 ## How the TCP proofs are organised
 
@@ -673,8 +673,8 @@ of the code generator, which needs every access to stay in its array.
 * **the IR semantics against the interpreter**: `IR.Sem` and the
   `partial` interpreter `Ember/Z80/IRInterp.lean` are tested against
   each other, not proved equal;
-* **from the IR on**: the code generator (M7.3; "The encoder" below is
-  what it will stand on).
+* **from the IR on**: see "The code generator" below (M7.3, in
+  progress).
 
 ### The encoder (M7.4)
 
@@ -705,6 +705,51 @@ model's own `execBlock`; `Asm.relax` (it runs before `assemble`, which
 is what the theorem is about); the text parser of the runtime's
 assembly.
 
+### The code generator (M7.3, in progress)
+
+`Ember/Z80/Codegen.lean` turns a function of the IR into assembly
+items, one instruction at a time, remembering what `A`, `HL` and the
+accumulator hold.  The proofs (`Z80Gen`, `Z80Run.lean` … `Z80FnGen.lean`)
+are about the generator as it is, through a weakest-precondition
+calculus for its monad (`wpg`), over an assembled image (`ZCtx`: the
+items, their addresses by `assemble_ok`, the IR program and its layout).
+
+`Rel Z E fr dt regs ist tmps s` — a CPU state `s` and an IR state agree:
+the image is in ROM, the shared bytes are equal, a temporary with a slot
+has its value there once assigned (`dt`), the registers hold what the
+tracker `regs` says, the stack pointer and the stack above it are as the
+function found them (`fr`), and nothing outside the function's
+footprint (`ZCtx.wr`) has changed.
+
+| Theorem | Statement |
+|---|---|
+| `loadA_ok`, `loadHL_ok`, `storeA_ok`, `storeHL_ok` | an operand into `A`/`HL`, and those to a destination — a store the generator leaves out included |
+| `mov1_ok` … `cmp_ok`, `br_ok`, `jmp_ok`, `label_ok`, `ret_ok`, `trap_ok`, `call_ok` | the code of each instruction, for values of one and two bytes |
+| **`ins_ok`** (`Z80Ins.lean`) | for a covered instruction and whatever `IR.Sem.step` says it does: the code reaches the next item with the states agreeing after it; or the label's item; or calls the function and stores its result; or returns (`RetSt`); or reaches `rt_trap` |
+| `genBody_ok`, `Chain.fns` (`Z80Fn.lean`) | the generator's states before and after every instruction of a body, each with the promise of `ins_ok` |
+| **`exec_ok`**, **`fn_ok`** | from an instruction of a body with the states agreeing — and so from a function's entry (`Entry`) — the code has the `Outcome` of `IR.Sem.exec`/`callF`: it returns with the result in `A`/`HL`, the shared bytes as the IR left them and only the footprint written, or it is at `rt_trap`; by induction on the fuel, the functions called included |
+| `genFn_ok` (`Z80FnGen.lean`) | the run of `genFnCode` whose items are in the image gives what `fn_ok` needs of a function (`FnGen`) |
+
+**Checked, not proved** (translation validation, on every function
+generated): `jumpsOk` — what the generator assumes the registers hold
+after a label is what they held at every jump to it and at the fall
+into it (the generator records both; `arrive`).
+
+**Assumed for now:** `RtOK` — the specifications of the runtime's
+routines used so far (`rt_mul8`, `rt_div8`, …, `rt_not16`, `rt_neg16`);
+`FnStatic` — what a function needs of the program and the layout: its
+operands can be read and its destinations written where the layout puts
+them, a temporary is assigned before it is read with no label between
+(true of every build of the stack), the body ends with an instruction
+that does not go on, labels are unique, the stack has room.  Checkers
+for these are to come, as `irOkB` for the lowering.
+
+**Not covered yet:** `ext`, `shift`, `load`/`store`/`lea` (addresses
+and indices), `zero`, the effects (the relation has no world yet), and
+all values wider than two bytes (`Covered`); the runtime routines
+themselves; `genProg` and the whole image; the passes on the assembly
+(`peephole`, `sweep`, `packHigh`, `relax`).
+
 ### Not proven
 
 * the driver loop of `Sem.run` and the printing of the `Trace` (above);
@@ -714,7 +759,7 @@ assembly.
   ARP, DHCP) has no refinement proofs;
 * lines other than transmissions and drops (`pkt`, `tcb`, notes) are
   not compared;
-* the Z80 back end from the IR on: the translation from the IR to machine code (M7.3) is tested, not proved (the encoder, M7.4, is proved); and what "The emitted C" and "The IR of the Z80 back end" above list as not covered;
+* the Z80 back end from the IR on: the translation from the IR to machine code (M7.3) is proved in part ("The code generator": instructions of one and two bytes and functions, under assumptions still to be checked) and otherwise tested (the encoder, M7.4, is proved); and what "The emitted C" and "The IR of the Z80 back end" above list as not covered;
 * that a function *traps* exactly when the Spec rejects: the theorems
   are for states that satisfy their invariants, and show that from those
   no call traps (the fuel given is enough and every index is in range).

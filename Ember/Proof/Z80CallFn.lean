@@ -35,7 +35,7 @@ structure Entry (Z : ZCtx) (gf : IR.Fn) (st : IR.Sem.St) (v : Nat) (s : Cpu) : P
   isz : st.mem.size = 65536
   mem : ∀ x, Z.data x → s.mem.get! x = st.mem.get! x
   room : Z.stackLo + Z.depth gf.name ≤ s.sp.toNat ∧ s.sp.toNat + 2 ≤ Z.stackHi
-  arg : ∀ n sl, gf.regParam = some (n, sl) → (n = 1 → s.a.toNat = v % 256) ∧ (n = 2 → s.hl.toNat = v % 65536)
+  arg : ∀ n sl, gf.regParam = some (n, sl) → ResIn n v s
 
 /-- What the function does from `s`, for the result the IR gives. -/
 def Outcome (Z : ZCtx) (f : IR.Fn) (fr : Fr) (s : Cpu) : IR.Sem.Res → Prop
@@ -122,7 +122,7 @@ theorem call_fn (ok : Z.OK) (hT : FnLay Z E) (F : GFinal Z base sF) {s0 s1 : GS}
   -- the argument, and the state of the IR at the entry
   have hreg := N.regSz gf hgf
   have hv : ∃ v, callSt Z.c ist tmps g reg = stArg Z.c gf ist v ∧
-      ∀ n sl, gf.regParam = some (n, sl) → (n = 1 → s.a.toNat = v % 256) ∧ (n = 2 → s.hl.toNat = v % 65536) := by
+      ∀ n sl, gf.regParam = some (n, sl) → ResIn n v s := by
     cases hr : reg with
     | none =>
       rw [hr] at hreg
@@ -141,14 +141,7 @@ theorem call_fn (ok : Z.OK) (hT : FnLay Z E) (F : GFinal Z base sF) {s0 s1 : GS}
         subst hn
         refine ⟨IR.Sem.opd Z.c ist tmps n o, by simp [callSt, stArg, hp, hgf], fun m sl' h => ?_⟩
         cases h
-        obtain ⟨h1, h2⟩ := harg n o hr
-        refine ⟨fun e => ?_, fun e => ?_⟩
-        · rw [h1 e]
-          subst e
-          exact (Nat.mod_eq_of_lt (opd_lt _ _ _ 1 _)).symm
-        · rw [h2 e]
-          subst e
-          exact (Nat.mod_eq_of_lt (opd_lt _ _ _ 2 _)).symm
+        exact harg n o hr
   obtain ⟨v, hst1, hargv⟩ := hv
   have hname : gf.name = g := by
     have := List.find?_some hgf

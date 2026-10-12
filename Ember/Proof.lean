@@ -88,6 +88,7 @@ import Ember.Proof.Z80Ret
 import Ember.Proof.Z80CallFn
 import Ember.Proof.Z80Ins
 import Ember.Proof.Z80Fn
+import Ember.Proof.Z80FnGen
 
 /-!
 # Ember.Proof — proofs (plan M5): about the reference stack (P1), and that Ember code refines it (P2)
@@ -174,16 +175,25 @@ The Z80 back end (M7, begun) — `Ember.Z80.IR.Sem` is the semantics of its IR:
   without `IX`/`IY`), and `Asm.assemble` puts every item's encoding at its address with the labels
   resolved to the addresses of their items (`assemble_ok`).
 
-* `Z80Run`, `Z80Wp`, `Z80Rel`, `Z80Fields`, `Z80Load`, `Z80Store`, `Z80Instr`: **`IR → Z80`** (M7.3), begun —
-  an instruction of an assembled image as `Asm.exec` (`step_item`); a wp calculus for the generator's
-  monad; the relation between a CPU state and an IR state (`Rel`: the shared bytes, the slots of the
-  temporaries, what the generator's tracker says the registers hold); loading an operand into `A` or
-  `HL` and storing them to a destination, a store the generator leaves out included (`loadA_ok`,
-  `loadHL_ok`, `storeA_ok`, `storeHL_ok`); and the first instruction: the code of `mov` of one or two
-  bytes does what `IR.Sem.step` does (`mov1_ok`, `mov2_ok`).
+* `Z80Run`, `Z80Wp`, `Z80Rel`, `Z80Fields`, `Z80Load`, `Z80Store`, `Z80Instr`: **`IR → Z80`** (M7.3), in
+  progress — an instruction of an assembled image as `Asm.exec` (`step_item`); a wp calculus for the
+  generator's monad; the relation between a CPU state and an IR state (`Rel`: the shared bytes, the slots
+  of the temporaries, what the generator's tracker says the registers hold, the stack and the
+  function's footprint); loading an operand into `A` or `HL` and storing them (`loadA_ok`, `loadHL_ok`,
+  `storeA_ok`, `storeHL_ok`); `mov`;
+* `Z80Call`, `Z80Alu`, `Z80Mul`, `Z80Bits`, `Z80Rep`, `Z80Bin16`, `Z80Una`: calls of the runtime's
+  routines (`Routine`, `call_rule`, `RtOK`), and `bin`, `not`, `neg` of one and two bytes;
+* `Z80Flags`, `Z80Cmp`, `Z80Jump`, `Z80CmpI`, `Z80Ctl`: flags after a comparison, jumps to labels, `cmp`,
+  `br`, `jmp` and labels — what the registers hold across a jump is checked by `Codegen.jumpsOk`
+  (`arrive`);
+* `Z80Ret`, `Z80CallFn`, `Z80Ins`: `ret`, `trap`, `call` of a function of the program, and every covered
+  instruction in one statement (`ins_ok`);
+* `Z80Fn`, `Z80FnGen`: **a function's code has the outcome of the IR's function** — it returns as
+  `IR.Sem.callF` does, or reaches `rt_trap` (`exec_ok`, `fn_ok`, by induction on the fuel; `genFn_ok`).
 
-By-reference parameters and `inlineCalls` are outside M7.1; of `IR → Z80` (M7.3) the rest is not proved:
-the other instructions, control flow, calls, the runtime routines, the passes on the assembly.
+By-reference parameters and `inlineCalls` are outside M7.1; of `IR → Z80` (M7.3) not proved: `ext`,
+`shift`, `load`/`store`/`lea`, `zero`, effects, values wider than two bytes; the checks for what the
+theorems assume of a program (`FnStatic`); the runtime routines; the passes on the assembly.
 
 Every statement is about the definitions of `Ember.Spec` as they are;
 `Ember/Proof/README.md` lists the theorems, the hypotheses they need and
