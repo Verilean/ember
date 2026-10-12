@@ -1,4 +1,5 @@
-import Ember.Proof.Z80CallFn
+import Ember.Proof.Z80After
+import Ember.Proof.Z80Mem
 import Ember.Proof.Z80Bin16
 import Ember.Proof.Z80Una
 import Ember.Proof.Z80Ext
@@ -20,15 +21,6 @@ open Ember.Z80 Ember.Z80.Cpu Ember.Z80.Codegen Ember.Z80.Asm
 open Ember.Proof.Z80Enc Ember.Proof.IRSim
 open Ember.Z80.IR (Opd Dst Slot Area Bin Cmp)
 
-/-- The temporaries assigned after an instruction.  After a label none
-is taken to be: a temporary is not read across a label. -/
-def dtNext (dt : Nat → Prop) : IR.Instr → Nat → Prop
-  | .label _ => fun _ => False
-  | .mov _ d _ | .bin _ _ d _ _ | .shift _ _ d _ _ _ | .not _ d _ | .neg _ d _ | .ext _ d _ _
-  | .cmp _ _ d _ _ | .load _ d _ | .lea d _ => dtAfter dt d
-  | .call _ ret _ | .eff _ _ ret => dtRet dt ret
-  | _ => dt
-
 def size12 (n : Nat) : Bool := n == 1 || n == 2
 
 theorem size12_spec {n : Nat} (h : size12 n = true) : n = 1 ∨ n = 2 := by
@@ -38,6 +30,8 @@ theorem size12_spec {n : Nat} (h : size12 n = true) : n = 1 ∨ n = 2 := by
 def Covered : IR.Instr → Bool
   | .mov n _ _ | .bin _ n _ _ _ | .not n _ _ | .neg n _ _ | .cmp _ n _ _ _ | .br _ n _ _ _ => size12 n
   | .ext n _ m _ => (n == 1 && m == 2) || (n == 2 && m == 1)
+  | .lea _ p => addrCov p
+  | .load n _ p | .store n p _ => size12 n && addrCov p
   | .jmp _ | .label _ | .trap => true
   | .ret v => (v.map fun p => size12 p.1).getD true
   | .call _ ret reg => (ret.map fun p => size12 p.1).getD true && (reg.map fun p => size12 p.1).getD true
@@ -50,25 +44,15 @@ def Need (Z : ZCtx) (E : GEnv) (dt : Nat → Prop) : IR.Instr → Prop
   | .not n d a | .neg n d a => Rd Z E dt n a ∧ Wr Z E n d
   | .cmp _ n d a b => Rd Z E dt n a ∧ Rd Z E dt n b ∧ Wr Z E 1 d
   | .ext n d m src => Rd Z E dt m src ∧ Wr Z E n d
+  | .lea d p => AddrNeed Z E dt p ∧ Wr Z E 2 d
+  | .load n d p => AddrNeed Z E dt p ∧ AddrData Z p n ∧ Wr Z E n d
+  | .store n p src => AddrNeed Z E dt p ∧ AddrStore Z E p n ∧ Rd Z E dt n src
   | .br _ n a b l => Rd Z E dt n a ∧ Rd Z E dt n b ∧ ∃ j : Nat, Z.items[j]? = some (Item.label (lname E l))
   | .jmp _ | .label _ => True
   | .ret v => ∀ n o, v = some (n, o) → Rd Z E dt n o
   | .trap => ∃ j : Nat, Z.items[j]? = some (Item.label "rt_trap")
   | .call g ret reg => CallNeed Z E dt g ret reg
   | _ => False
-
-/-- What the code does from `s`, for what the IR's instruction does. -/
-def After (Z : ZCtx) (E : GEnv) (base : Nat) (fr : Fr) (dt : Nat → Prop) (i : IR.Instr) (s1 : GS)
-    (ist : IR.Sem.St) (tmps : Array Nat) (s : Cpu) : IR.Sem.Step → Prop
-  | .next ist' tmps' => ∃ s', Steps Z.inp s s' ∧ At Z.addrs (base + s1.out.size) s' ∧
-      Rel Z E fr (dtNext dt i) s1.regs ist' tmps' s'
-  | .goto l => ∀ j : Nat, Z.items[j]? = some (Item.label (lname E l)) →
-      ∃ s' r, Steps Z.inp s s' ∧ At Z.addrs j s' ∧ (l, r) ∈ s1.jumps ∧ Rel Z E fr dt r ist tmps s'
-  | .call g st1 ret => ∀ res, Callee Z g st1 res →
-      AfterCall Z E fr (dtNext dt i) s1.regs (base + s1.out.size) tmps ret s res
-  | .stop (.ok r st') => ∃ s' v, Steps Z.inp s s' ∧ i = .ret v ∧ RetSt Z E.fn fr st' (v.map (·.1)) r s'
-  | .stop (.trap st') => ∃ s', Steps Z.inp s s' ∧ Trapped Z st' s'
-  | .stop _ => True
 
 /-- **What the generator promises for the instruction `i`.**  A label
 is told apart: the states agree after it for what `jumpsOk` checks. -/
@@ -193,9 +177,30 @@ theorem ins_ok (ok : Z.OK) (hT : FnLay Z E) (F : GFinal Z base sF) (hrt : RtOK Z
     · refine wpg_mono (ext21_ok (dt := dt) ok hT F d src s0) ?_
       intro _ s1 ⟨hx, h⟩
       exact ⟨hx, fun hxF hN => h hxF hN⟩
-  | load _ _ _ => cases hc
-  | store _ _ _ => cases hc
-  | lea _ _ => cases hc
+  | load n d p =>
+    have hc' : (size12 n && addrCov p) = true := hc
+    rw [Bool.and_eq_true] at hc'
+    rcases size12_spec hc'.1 with rfl | rfl
+    · refine wpg_mono (load1_ok (dt := dt) ok hT F hrt hdep d p hc'.2 s0) ?_
+      intro _ s1 ⟨hx, h⟩
+      exact ⟨hx, fun hxF hN => h hxF hN⟩
+    · refine wpg_mono (load2_ok (dt := dt) ok hT F hrt hdep d p hc'.2 s0) ?_
+      intro _ s1 ⟨hx, h⟩
+      exact ⟨hx, fun hxF hN => h hxF hN⟩
+  | store n p src =>
+    have hc' : (size12 n && addrCov p) = true := hc
+    rw [Bool.and_eq_true] at hc'
+    rcases size12_spec hc'.1 with rfl | rfl
+    · refine wpg_mono (store1_ok (dt := dt) ok hT F hrt hdep p src hc'.2 s0) ?_
+      intro _ s1 ⟨hx, h⟩
+      exact ⟨hx, fun hxF hN => h hxF hN⟩
+    · refine wpg_mono (store2_ok (dt := dt) ok hT F hrt hdep p src hc'.2 s0) ?_
+      intro _ s1 ⟨hx, h⟩
+      exact ⟨hx, fun hxF hN => h hxF hN⟩
+  | lea d p =>
+    refine wpg_mono (lea_ok (dt := dt) ok hT F hrt hdep d p hc s0) ?_
+    intro _ s1 ⟨hx, h⟩
+    exact ⟨hx, fun hxF hN => h hxF hN⟩
   | zero _ _ => cases hc
   | eff _ _ _ => cases hc
 
