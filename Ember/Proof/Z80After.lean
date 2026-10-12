@@ -24,14 +24,14 @@ def dtNext (dt : Nat → Prop) : IR.Instr → Nat → Prop
 /-- What the code does from `s`, for what the IR's instruction does. -/
 def After (Z : ZCtx) (E : GEnv) (base : Nat) (fr : Fr) (dt : Nat → Prop) (i : IR.Instr) (s1 : GS)
     (ist : IR.Sem.St) (tmps : Array Nat) (s : Cpu) : IR.Sem.Step → Prop
-  | .next ist' tmps' => ∃ s', Steps Z.inp s s' ∧ At Z.addrs (base + s1.out.size) s' ∧
+  | .next ist' tmps' => ∃ s', Steps s s' ∧ At Z.addrs (base + s1.out.size) s' ∧
       Rel Z E fr (dtNext dt i) s1.regs ist' tmps' s'
   | .goto l => ∀ j : Nat, Z.items[j]? = some (Item.label (lname E l)) →
-      ∃ s' r, Steps Z.inp s s' ∧ At Z.addrs j s' ∧ (l, r) ∈ s1.jumps ∧ Rel Z E fr dt r ist tmps s'
+      ∃ s' r, Steps s s' ∧ At Z.addrs j s' ∧ (l, r) ∈ s1.jumps ∧ Rel Z E fr dt r ist tmps s'
   | .call g st1 ret => ∀ res, Callee Z g st1 res →
       AfterCall Z E fr (dtNext dt i) s1.regs (base + s1.out.size) tmps ret s res
-  | .stop (.ok r st') => ∃ s' v, Steps Z.inp s s' ∧ i = .ret v ∧ RetSt Z E.fn fr st' (v.map (·.1)) r s'
-  | .stop (.trap st') => ∃ s', Steps Z.inp s s' ∧ Trapped Z st' s'
+  | .stop (.ok r st') => ∃ s' v, Steps s s' ∧ i = .ret v ∧ RetSt Z E.fn fr st' (v.map (·.1)) r s'
+  | .stop (.trap st') => ∃ s', Steps s s' ∧ Trapped Z st' s'
   | .stop _ => True
 
 end Ember.Proof.Z80Gen

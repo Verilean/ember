@@ -134,19 +134,20 @@ def LoadA (Z : ZCtx) (E : GEnv) (base : Nat) (sF : GS) (dt : Nat → Prop) (o : 
   GExt s0 s1 ∧ s1.regs.hl = s0.regs.hl ∧ o ∈ s1.regs.a ∧
     (GExt s1 sF → ∀ fr ist tmps s, Rd Z E dt 1 o → Rel Z E fr dt s0.regs ist tmps s →
       At Z.addrs (base + s0.out.size) s →
-      ∃ s', Steps Z.inp s s' ∧ At Z.addrs (base + s1.out.size) s' ∧ Rel Z E fr dt s1.regs ist tmps s' ∧ KeepA s s' ∧
+      ∃ s', Steps s s' ∧ At Z.addrs (base + s1.out.size) s' ∧ Rel Z E fr dt s1.regs ist tmps s' ∧ KeepA s s' ∧
         s'.a.toNat = IR.Sem.opd Z.c ist tmps 1 o)
 
-/-- One instruction, emitted and run. -/
+/-- One instruction, emitted and run: it does no I/O, and does the same whatever the bus would answer. -/
 theorem run_ins (ok : Z.OK) (F : GFinal Z base sF) {s0 s1 : GS} {i : Instr} (hx : GExt s1 sF)
     (ho : s1.out = s0.out.push (.ins i)) {s s' : Cpu} (I : Img Z.a 0 s) (hh : s.halted = false)
     (hat : At Z.addrs (base + s0.out.size) s)
-    (hexec : ∀ ad, Z.addrs[base + s0.out.size]? = some ad → exec (Z.a.env ad) i s Z.inp = some s')
-    (hf : i.falls = true) : Steps Z.inp s s' ∧ At Z.addrs (base + s1.out.size) s' := by
+    (hexec : ∀ ad, Z.addrs[base + s0.out.size]? = some ad → ∀ {inp}, exec (Z.a.env ad) i s inp = some s')
+    (hf : i.falls = true) (hio : s'.io = .none := by first | rfl | simp only [zsim]) :
+    Steps s s' ∧ At Z.addrs (base + s1.out.size) s' := by
   obtain ⟨ad, had, hpc⟩ := hat
-  obtain ⟨hst, hnext⟩ := step_item ok.placed I (F.emitted hx ho) had hpc hh (hexec ad had)
-  refine ⟨Steps.one hst, ?_⟩
-  have := hnext hf
+  have hstep := fun inp => step_item ok.placed I (F.emitted hx ho) had hpc hh (inp := inp) (hexec ad had)
+  refine ⟨Steps.one (fun inp => (hstep inp).1) hio, ?_⟩
+  have := (hstep (fun _ => 0)).2 hf
   rw [ho, Array.size_push, ← Nat.add_assoc]
   exact this
 
@@ -158,7 +159,7 @@ theorem loadA_ok (ok : Z.OK) (F : GFinal Z base sF) (o : Opd) (s0 : GS) :
   · simp only [h1, if_true, wpg_pure]
     have hmem : o ∈ s0.regs.a := by simpa using h1
     exact ⟨GExt.refl _, rfl, hmem, fun _ fr ist tmps s hrd R hat =>
-      ⟨s, Steps.refl _ _, hat, R, KeepA.refl s, R.ra o hmem hrd.own⟩⟩
+      ⟨s, Steps.refl _, hat, R, KeepA.refl s, R.ra o hmem hrd.own⟩⟩
   · simp only [h1, Bool.false_eq_true, if_false]
     by_cases h2 : (s0.regs.hl.contains o && isSlot o) = true
     · simp only [h2, if_true, wpg_bind, wpg_ins, wpg_setRegs]
@@ -218,6 +219,7 @@ theorem loadA_ok (ok : Z.OK) (F : GFinal Z base sF) (o : Opd) (s0 : GS) :
           (fun ad' had' => by
             rw [ho1, had] at had'
             cases had'
+            intro _
             rfl) rfl
         have hval : (({ (skip (op1 s) 2) with
             a := (op1 s).rd (Instr.immW (Z.a.env ad) ⟨.ld, [.a, .mem (opdVal E o)]⟩) } : Cpu).tick 13).a.toNat =
@@ -282,7 +284,7 @@ def LoadHL (Z : ZCtx) (E : GEnv) (base : Nat) (sF : GS) (dt : Nat → Prop) (o :
   GExt s0 s1 ∧ s1.regs.a = s0.regs.a ∧ o ∈ s1.regs.hl ∧
     (GExt s1 sF → ∀ fr ist tmps s, Rd Z E dt 2 o → Rel Z E fr dt s0.regs ist tmps s →
       At Z.addrs (base + s0.out.size) s →
-      ∃ s', Steps Z.inp s s' ∧ At Z.addrs (base + s1.out.size) s' ∧ Rel Z E fr dt s1.regs ist tmps s' ∧ KeepHL s s' ∧
+      ∃ s', Steps s s' ∧ At Z.addrs (base + s1.out.size) s' ∧ Rel Z E fr dt s1.regs ist tmps s' ∧ KeepHL s s' ∧
         s'.hl.toNat = IR.Sem.opd Z.c ist tmps 2 o)
 
 theorem loadHL_ok (ok : Z.OK) (F : GFinal Z base sF) (o : Opd) (s0 : GS) :
@@ -293,7 +295,7 @@ theorem loadHL_ok (ok : Z.OK) (F : GFinal Z base sF) (o : Opd) (s0 : GS) :
   · simp only [h1, if_true, wpg_pure]
     have hmem : o ∈ s0.regs.hl := by simpa using h1
     exact ⟨GExt.refl _, rfl, hmem, fun _ fr ist tmps s hrd R hat =>
-      ⟨s, Steps.refl _ _, hat, R, KeepHL.refl s, R.rhl o hmem hrd.own⟩⟩
+      ⟨s, Steps.refl _, hat, R, KeepHL.refl s, R.rhl o hmem hrd.own⟩⟩
   · simp only [h1, Bool.false_eq_true, if_false]
     have mem_case : ∀ o : Opd, (∀ v, o ≠ .const v) →
         wpg (do
@@ -319,6 +321,7 @@ theorem loadHL_ok (ok : Z.OK) (F : GFinal Z base sF) (o : Opd) (s0 : GS) :
         (fun ad' had' => by
           rw [ho1, had] at had'
           cases had'
+          intro _
           rfl) rfl
       have hval : (((skip (op1 s) 2).setHL
           ((op1 s).rd16 (Instr.immW (Z.a.env ad) ⟨.ld, [.hl, .mem (opdVal E o)]⟩))).tick 16).hl.toNat =

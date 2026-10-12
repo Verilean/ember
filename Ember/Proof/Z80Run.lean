@@ -172,22 +172,36 @@ def run (inp : UInt16 → UInt8) : Nat → Cpu → Cpu
   | 0, s => s
   | n + 1, s => run inp n (s.step inp)
 
-/-- The CPU gets from `s` to `s'`. -/
-def Steps (inp : UInt16 → UInt8) (s s' : Cpu) : Prop := ∃ n, run inp n s = s'
+/-- The CPU gets from `s` to `s'` without input or output: in some
+number of steps, none of which uses the I/O bus — so whatever the bus
+would answer (`inp`). -/
+def Steps (s s' : Cpu) : Prop :=
+  ∀ inp : UInt16 → UInt8, ∃ n, run inp n s = s' ∧ ∀ k, k < n → (run inp (k + 1) s).io = .none
 
-theorem Steps.refl (inp : UInt16 → UInt8) (s : Cpu) : Steps inp s s := ⟨0, rfl⟩
+theorem Steps.refl (s : Cpu) : Steps s s := fun _ => ⟨0, rfl, fun _ h => absurd h (Nat.not_lt_zero _)⟩
 
 theorem run_add (inp : UInt16 → UInt8) : ∀ (n m : Nat) (s : Cpu), run inp (n + m) s = run inp m (run inp n s)
   | 0, m, s => by simp [run]
   | n + 1, m, s => by
     rw [show n + 1 + m = (n + m) + 1 by omega, run, run, run_add inp n m]
 
-theorem Steps.trans {inp : UInt16 → UInt8} {s s' s'' : Cpu} (h1 : Steps inp s s') (h2 : Steps inp s' s'') :
-    Steps inp s s'' := by
-  obtain ⟨n, rfl⟩ := h1
-  obtain ⟨m, rfl⟩ := h2
-  exact ⟨n + m, run_add inp n m s⟩
+theorem Steps.trans {s s' s'' : Cpu} (h1 : Steps s s') (h2 : Steps s' s'') : Steps s s'' := by
+  intro inp
+  obtain ⟨n, hn, hq1⟩ := h1 inp
+  obtain ⟨m, hm, hq2⟩ := h2 inp
+  refine ⟨n + m, by rw [run_add, hn, hm], fun k hk => ?_⟩
+  rcases Nat.lt_or_ge k n with h | h
+  · exact hq1 k h
+  · have := hq2 (k - n) (by omega)
+    rw [← hn, ← run_add, show n + (k - n + 1) = k + 1 by omega] at this
+    exact this
 
-theorem Steps.one {inp : UInt16 → UInt8} {s s' : Cpu} (h : s.step inp = s') : Steps inp s s' := ⟨1, h⟩
+theorem Steps.one {s s' : Cpu} (h : ∀ inp, s.step inp = s') (hio : s'.io = .none) : Steps s s' := fun inp =>
+  ⟨1, h inp, fun k hk => by
+    have : k = 0 := by omega
+    subst this
+    show (s.step inp).io = _
+    rw [h inp]
+    exact hio⟩
 
 end Ember.Proof.Z80Enc

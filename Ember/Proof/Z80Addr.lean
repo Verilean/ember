@@ -26,11 +26,11 @@ def addHLHL (s : Cpu) : Cpu :=
   (((op1 s).add16 (op1 s).hl ((op1 s).rp .hl 2)).2.setHL ((op1 s).add16 (op1 s).hl ((op1 s).rp .hl 2)).1).tick 11
 
 theorem does_ld_bc (v : Nat) : Does ⟨.ld, [.bc, n16 v]⟩ (ldBC v) :=
-  ⟨fun _ _ _ => rfl, rfl, fun s => by simp only [Sys, ldBC, zsim, and_self]⟩
+  ⟨fun _ _ _ => rfl, rfl, fun s => by simp only [Sys, ldBC, zsim, and_self], fun s => by simp only [ldBC, zsim]⟩
 theorem does_add_hl_bc : Does ⟨.add, [.hl, .bc]⟩ addHLBC :=
-  ⟨fun _ _ _ => rfl, rfl, fun s => by simp only [Sys, addHLBC, zsim, and_self]⟩
+  ⟨fun _ _ _ => rfl, rfl, fun s => by simp only [Sys, addHLBC, zsim, and_self], fun s => by simp only [addHLBC, zsim]⟩
 theorem does_add_hl_hl : Does ⟨.add, [.hl, .hl]⟩ addHLHL :=
-  ⟨fun _ _ _ => rfl, rfl, fun s => by simp only [Sys, addHLHL, zsim, and_self]⟩
+  ⟨fun _ _ _ => rfl, rfl, fun s => by simp only [Sys, addHLHL, zsim, and_self], fun s => by simp only [addHLHL, zsim]⟩
 
 theorem ldBC_keep (v : Nat) (s : Cpu) : KeepADE s (ldBC v s) := by simp only [KeepADE, Sys, ldBC, zsim, and_self]
 theorem ldBC_hl (v : Nat) (s : Cpu) : (ldBC v s).hl = s.hl := by simp only [ldBC, zsim]
@@ -59,11 +59,11 @@ variable {Z : ZCtx} {E : GEnv} {base : Nat} {sF : GS} {dt : Nat → Prop}
 theorem scale_ok (ok : Z.OK) (F : GFinal Z base sF) : ∀ (fuel sc : Nat) (s0 : GS),
     wpg (scaleHL fuel sc) E (fun _ s1 => GExt s0 s1 ∧ s1.regs = s0.regs ∧
       (GExt s1 sF → ∀ s, Mach Z s → At Z.addrs (base + s0.out.size) s →
-        ∃ s', Steps Z.inp s s' ∧ At Z.addrs (base + s1.out.size) s' ∧ Mach Z s' ∧ KeepADE s s' ∧
+        ∃ s', Steps s s' ∧ At Z.addrs (base + s1.out.size) s' ∧ Mach Z s' ∧ KeepADE s s' ∧
           ∀ k, sc = 2 ^ k → k ≤ fuel → s'.hl.toNat = s.hl.toNat * sc % 65536)) s0
   | 0, sc, s0 => by
     rw [scaleHL, wpg_pure]
-    refine ⟨GExt.refl _, rfl, fun _ s M hat => ⟨s, Steps.refl _ _, hat, M, KeepADE.refl s, fun k hk hle => ?_⟩⟩
+    refine ⟨GExt.refl _, rfl, fun _ s M hat => ⟨s, Steps.refl _, hat, M, KeepADE.refl s, fun k hk hle => ?_⟩⟩
     have : k = 0 := by omega
     subst this
     subst hk
@@ -88,7 +88,7 @@ theorem scale_ok (ok : Z.OK) (F : GFinal Z base sF) : ∀ (fuel sc : Nat) (s0 : 
         congr 1
         rw [Nat.mul_assoc, Nat.mul_comm 2]
     · rw [if_neg h, wpg_pure]
-      refine ⟨GExt.refl _, rfl, fun _ s M hat => ⟨s, Steps.refl _ _, hat, M, KeepADE.refl s, fun k hk hle => ?_⟩⟩
+      refine ⟨GExt.refl _, rfl, fun _ s M hat => ⟨s, Steps.refl _, hat, M, KeepADE.refl s, fun k hk hle => ?_⟩⟩
       have hk0 : sc = 1 := by
         cases k with
         | zero => exact hk
@@ -111,7 +111,7 @@ theorem checkInline_ok (ok : Z.OK) (F : GFinal Z base sF) (len : Nat) (s0 : GS) 
       ins .jp [.c, .imm (.sym "rt_trap")]) E (fun _ s1 => GExt s0 s1 ∧ s1.regs = s0.regs ∧
       (GExt s1 sF → 0 < len ∧ len ≤ 65536 → ∀ j : Nat, Z.items[j]? = some (Item.label "rt_trap") → ∀ s, Mach Z s →
         At Z.addrs (base + s0.out.size) s →
-        ∃ s', Steps Z.inp s s' ∧ Mach Z s' ∧ KeepADE s s' ∧
+        ∃ s', Steps s s' ∧ Mach Z s' ∧ KeepADE s s' ∧
           (if s.hl.toNat < len then At Z.addrs (base + s1.out.size) s' ∧ s'.hl.toNat = s.hl.toNat + 65536 - len
            else At Z.addrs j s'))) s0 := by
   simp only [wpg_bind, wpg_ins]
@@ -180,7 +180,7 @@ theorem checkRt_ok (ok : Z.OK) (hT : FnLay Z E) (F : GFinal Z base sF) (hrt : Rt
       call "rt_bound") E (fun _ s1 => GExt s0 s1 ∧ s1.regs = s0.regs ∧
       (GExt s1 sF → len < 65536 → ∀ fr ist tmps regs s, regs.hl = [] → Rel Z E fr dt regs ist tmps s →
         At Z.addrs (base + s0.out.size) s →
-        ∃ s', Steps Z.inp s s' ∧
+        ∃ s', Steps s s' ∧
           (s.hl.toNat < len → At Z.addrs (base + s1.out.size) s' ∧ Rel Z E fr dt regs ist tmps s' ∧
             s'.a = s.a ∧ s'.de = s.de ∧ s'.hl = s.hl) ∧
           (¬ s.hl.toNat < len → Trapped Z ist s'))) s0 := by
@@ -234,7 +234,7 @@ theorem genCheck_ok (ok : Z.OK) (hT : FnLay Z E) (F : GFinal Z base sF) (hrt : R
     wpg (genCheck x inl) E (fun _ s1 => GExt s0 s1 ∧ s1.regs = s0.regs ∧
       (GExt s1 sF → CheckNeed Z x inl → ∀ fr ist tmps regs s, regs.hl = [] → Rel Z E fr dt regs ist tmps s →
         At Z.addrs (base + s0.out.size) s →
-        ∃ s', Steps Z.inp s s' ∧
+        ∃ s', Steps s s' ∧
           (lenOK x.len s.hl.toNat → At Z.addrs (base + s1.out.size) s' ∧ Rel Z E fr dt regs ist tmps s' ∧
             s'.a = s.a ∧ s'.de = s.de ∧ s'.hl.toNat = s.hl.toNat + checkDelta x inl) ∧
           (¬ lenOK x.len s.hl.toNat → Trapped Z ist s'))) s0 := by
@@ -242,7 +242,7 @@ theorem genCheck_ok (ok : Z.OK) (hT : FnLay Z E) (F : GFinal Z base sF) (hrt : R
   cases hl : x.len with
   | none =>
     refine ⟨GExt.refl _, rfl, fun _ _ fr ist tmps regs s _ R hat =>
-      ⟨s, Steps.refl _ _, fun _ => ⟨hat, R, rfl, rfl, by simp [checkDelta, hl]⟩, fun h => ?_⟩⟩
+      ⟨s, Steps.refl _, fun _ => ⟨hat, R, rfl, rfl, by simp [checkDelta, hl]⟩, fun h => ?_⟩⟩
     exact absurd (fun len h' => by cases h') h
   | some len =>
     have hlen : ∀ i, lenOK (some len) i ↔ i < len :=
@@ -298,7 +298,7 @@ theorem addBase_ok (ok : Z.OK) (F : GFinal Z base sF) (sl : Slot) (off : Nat) (s
       ins .add [.hl, .bc]) E (fun _ s1 => GExt s0 s1 ∧ s1.regs = s0.regs ∧
       (GExt s1 sF → (∃ ad, Z.c.layout.areaAddr sl.area = some ad) → Z.c.layout.addr sl + off < 65536 →
         ∀ s, Mach Z s → At Z.addrs (base + s0.out.size) s →
-        ∃ s', Steps Z.inp s s' ∧ At Z.addrs (base + s1.out.size) s' ∧ Mach Z s' ∧ KeepADE s s' ∧
+        ∃ s', Steps s s' ∧ At Z.addrs (base + s1.out.size) s' ∧ Mach Z s' ∧ KeepADE s s' ∧
           s'.hl.toNat = (s.hl.toNat + (Z.c.layout.addr sl + off)) % 65536)) s0 := by
   simp only [wpg_bind]
   refine wpg_noteAddr sl _ _ (fun s1 ho1 hr1 hj1 hl1 => ?_)
@@ -319,6 +319,7 @@ theorem addBase_ok (ok : Z.OK) (F : GFinal Z base sF) (sl : Slot) (off : Nat) (s
     (fun ad' had' => by
       rw [ho1, had] at had'
       cases had'
+      intro _
       rfl) rfl hS1
   obtain ⟨st2, at2, M2⟩ := run_reg ok F
     (s0 := { s1 with out := s1.out.push (.ins ⟨.ld, [.bc, .imm (slotVal { sl with off := sl.off + off })]⟩) })
@@ -407,9 +408,9 @@ def AddrPost (Z : ZCtx) (E : GEnv) (base : Nat) (sF : GS) (dt : Nat → Prop) (p
     (GExt s1 sF → AddrNeed Z E dt p → ∀ fr ist tmps s, Rel Z E fr dt s0.regs ist tmps s →
       At Z.addrs (base + s0.out.size) s →
       match IR.Sem.addr Z.c ist tmps p with
-      | some a => ∃ s', Steps Z.inp s s' ∧ At Z.addrs (base + s1.out.size) s' ∧ Rel Z E fr dt s1.regs ist tmps s' ∧
+      | some a => ∃ s', Steps s s' ∧ At Z.addrs (base + s1.out.size) s' ∧ Rel Z E fr dt s1.regs ist tmps s' ∧
           s'.a = s.a ∧ s'.de = s.de ∧ s'.hl.toNat = a % 65536
-      | none => ∃ s', Steps Z.inp s s' ∧ Trapped Z ist s')
+      | none => ∃ s', Steps s s' ∧ Trapped Z ist s')
 
 /-- **The address into `HL`.** -/
 theorem genAddr_ok (ok : Z.OK) (hT : FnLay Z E) (F : GFinal Z base sF) (hrt : RtOK Z)
@@ -444,6 +445,7 @@ theorem genAddr_ok (ok : Z.OK) (hT : FnLay Z E) (F : GFinal Z base sF) (hrt : Rt
         (fun ad' had' => by
           rw [ho1, had] at had'
           cases had'
+          intro _
           rfl) rfl hS
       have haddr : IR.Sem.addr Z.c ist tmps p = some (Z.c.layout.addr sl + p.off) := by
         simp only [IR.Sem.addr, hr, hi]
@@ -463,7 +465,7 @@ theorem genAddr_ok (ok : Z.OK) (hT : FnLay Z E) (F : GFinal Z base sF) (hrt : Rt
           GExt s0 s1 ∧ s1.regs.a = s0.regs.a ∧
           (GExt s1 sF → ∀ fr ist tmps s, Rd Z E dt x.size x.opd → Rel Z E fr dt s0.regs ist tmps s →
             At Z.addrs (base + s0.out.size) s →
-            ∃ s', Steps Z.inp s s' ∧ At Z.addrs (base + s1.out.size) s' ∧
+            ∃ s', Steps s s' ∧ At Z.addrs (base + s1.out.size) s' ∧
               Rel Z E fr dt { s1.regs with hl := [] } ist tmps s' ∧ s'.a = s.a ∧ s'.de = s.de ∧
               s'.hl.toNat = IR.Sem.opd Z.c ist tmps x.size x.opd)) s0 →
           wpg (do

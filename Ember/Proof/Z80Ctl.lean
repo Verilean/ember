@@ -105,7 +105,7 @@ theorem jmp_ok (ok : Z.OK) (F : GFinal Z base sF) (l : Nat) (s0 : GS) :
     wpg (genInstr (.jmp l)) E (fun _ s1 => GExt s0 s1 ∧ (l, s0.regs) ∈ s1.jumps ∧
       (GExt s1 sF → ∀ fr ist tmps s j, Z.items[j]? = some (.label (lname E l)) →
         Rel Z E fr dt s0.regs ist tmps s → At Z.addrs (base + s0.out.size) s →
-        ∃ s', Steps Z.inp s s' ∧ At Z.addrs j s' ∧ Rel Z E fr dt s0.regs ist tmps s')) s0 := by
+        ∃ s', Steps s s' ∧ At Z.addrs j s' ∧ Rel Z E fr dt s0.regs ist tmps s')) s0 := by
   simp only [genInstr, wpg_bind, wpg_localLabel, wpg_ins]
   refine wpg_jumpTo l _ _ (fun s1 ho hr hl hj => ?_)
   rw [wpg_modify]
@@ -121,7 +121,7 @@ theorem br_ok (ok : Z.OK) (F : GFinal Z base sF) (op : Cmp) (n : Nat) (hn : n = 
     wpg (genInstr (.br op n a b l)) E (fun _ s1 => GExt s0 s1 ∧ (l, s1.regs) ∈ s1.jumps ∧
       (GExt s1 sF → ∀ fr ist tmps s j, Z.items[j]? = some (.label (lname E l)) → Rd Z E dt n a → Rd Z E dt n b →
         Rel Z E fr dt s0.regs ist tmps s → At Z.addrs (base + s0.out.size) s →
-        ∃ s', Steps Z.inp s s' ∧ Rel Z E fr dt s1.regs ist tmps s' ∧
+        ∃ s', Steps s s' ∧ Rel Z E fr dt s1.regs ist tmps s' ∧
           (if IR.cmpOp op (IR.Sem.opd Z.c ist tmps n a) (IR.Sem.opd Z.c ist tmps n b) then At Z.addrs j s'
            else At Z.addrs (base + s1.out.size) s'))) s0 := by
   simp only [genInstr, wpg_bind]

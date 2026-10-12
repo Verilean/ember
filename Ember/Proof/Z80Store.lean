@@ -340,7 +340,7 @@ def StoreA (Z : ZCtx) (E : GEnv) (base : Nat) (sF : GS) (dt : Nat → Prop) (d :
   GExt s0 s1 ∧ d.opd ∈ s1.regs.a ∧ (∀ o, o ∈ s1.regs.hl → o ∈ s0.regs.hl) ∧
     (GExt s1 sF → ∀ fr ist tmps s v, Wr Z E 1 d → Rel Z E fr dt s0.regs ist tmps s →
       At Z.addrs (base + s0.out.size) s → s.a.toNat = v % 256 →
-      ∃ s', Steps Z.inp s s' ∧ At Z.addrs (base + s1.out.size) s' ∧
+      ∃ s', Steps s s' ∧ At Z.addrs (base + s1.out.size) s' ∧
         Rel Z E fr (dtAfter dt d) s1.regs (IR.Sem.setDst Z.c ist tmps 1 d v).1 (IR.Sem.setDst Z.c ist tmps 1 d v).2 s' ∧
         KeepR s s')
 
@@ -462,6 +462,7 @@ theorem storeA_ok {base : Nat} {sF : GS} (ok : Z.OK) (hT : FnLay Z E) (F : GFina
         (fun ad' had' => by
           rw [had] at had'
           cases had'
+          intro _
           rfl) rfl
       have hmem := ld_mem_a ok (s := s) (pc := ad) (i := ⟨.ld, [.mem (slotVal sl), .a]⟩) rfl harea hb
         (by rw [R.rs]; exact W.ram) hA
@@ -491,7 +492,7 @@ theorem storeA_ok {base : Nat} {sF : GS} (ok : Z.OK) (hT : FnLay Z E) (F : GFina
         fun hx fr ist tmps s v W R hat hA => ?_⟩
       have hb := ok.dbound sl 1 W.dst
       obtain ⟨ka, khl⟩ := kill_keep ok R W.dst v
-      refine ⟨s, Steps.refl _ _, hat, ?_, KeepR.refl s⟩
+      refine ⟨s, Steps.refl _, hat, ?_, KeepR.refl s⟩
       refine Rel.dt_mono (Rel.wr_dead ok R W v (W.dead harea' lv hlv hdeadk)
         (fun o ho hown => ?_) (fun o ho hown => khl o ho hown) (fun a ha hown => ?_) (fun a ha hown => ?_)
         (kill_acc ok R W v (Or.inr rfl)).1 (kill_acc ok R W v (Or.inr rfl)).2.1
@@ -531,6 +532,7 @@ theorem storeA_ok {base : Nat} {sF : GS} (ok : Z.OK) (hT : FnLay Z E) (F : GFina
         (fun ad' had' => by
           rw [had] at had'
           cases had'
+          intro _
           rfl) rfl
       have hmem := ld_mem_a ok (s := s) (pc := ad) (sl := { area := .frame E.fn.name, off := E.tmpOff[t]! })
         (i := ⟨.ld, [.mem (slotVal { area := .frame E.fn.name, off := E.tmpOff[t]! }), .a]⟩) rfl harea hb
@@ -556,7 +558,7 @@ theorem storeA_ok {base : Nat} {sF : GS} (ok : Z.OK) (hT : FnLay Z E) (F : GFina
       refine ⟨GExt.of_out (List.prefix_refl _) rfl rfl, by simp [Dst.opd], fun o ho => (List.mem_filter.mp ho).1,
         fun hx fr ist tmps s v W R hat hA => ?_⟩
       obtain ⟨ka, khl⟩ := forget_keep R t (IR.modN 1 v)
-      refine ⟨s, Steps.refl _ _, hat, ?_, KeepR.refl s⟩
+      refine ⟨s, Steps.refl _, hat, ?_, KeepR.refl s⟩
       refine Rel.wr_tmp ok hT R W v (by rw [if_neg hsp]) rfl rfl rfl
         (fun o ho hown => ?_) (fun o ho hown => khl o ho hown) (fun a ha hown => ?_) (fun a ha hown => ?_)
         (forget_acc hT ok R t (IR.modN 1 v) 0 v (Or.inr rfl)).1 (forget_acc hT ok R t (IR.modN 1 v) 0 v (Or.inr rfl)).2.1
@@ -615,7 +617,7 @@ def StoreHL (Z : ZCtx) (E : GEnv) (base : Nat) (sF : GS) (dt : Nat → Prop) (d 
   GExt s0 s1 ∧ d.opd ∈ s1.regs.hl ∧ (∀ o, o ∈ s1.regs.a → o ∈ s0.regs.a) ∧
     (GExt s1 sF → ∀ fr ist tmps s v, Wr Z E 2 d → Rel Z E fr dt s0.regs ist tmps s →
       At Z.addrs (base + s0.out.size) s → s.hl.toNat = v % 65536 →
-      ∃ s', Steps Z.inp s s' ∧ At Z.addrs (base + s1.out.size) s' ∧
+      ∃ s', Steps s s' ∧ At Z.addrs (base + s1.out.size) s' ∧
         Rel Z E fr (dtAfter dt d) s1.regs (IR.Sem.setDst Z.c ist tmps 2 d v).1 (IR.Sem.setDst Z.c ist tmps 2 d v).2 s' ∧
         KeepR s s')
 
@@ -646,6 +648,7 @@ theorem storeHL_ok {base : Nat} {sF : GS} (ok : Z.OK) (hT : FnLay Z E) (F : GFin
         (fun ad' had' => by
           rw [had] at had'
           cases had'
+          intro _
           rfl) rfl
       have hmem := ld_mem_hl ok (s := s) (pc := ad) (i := ⟨.ld, [.mem (slotVal sl), .hl]⟩) rfl harea hb
         (by rw [R.rs]; exact W.ram) hHL
@@ -674,7 +677,7 @@ theorem storeHL_ok {base : Nat} {sF : GS} (ok : Z.OK) (hT : FnLay Z E) (F : GFin
         fun hx fr ist tmps s v W R hat hHL => ?_⟩
       have hb := ok.dbound sl 2 W.dst
       obtain ⟨ka, khl⟩ := kill_keep ok R W.dst v
-      refine ⟨s, Steps.refl _ _, hat, ?_, KeepR.refl s⟩
+      refine ⟨s, Steps.refl _, hat, ?_, KeepR.refl s⟩
       refine Rel.dt_mono (Rel.wr_dead ok R W v (W.dead harea' lv hlv hdeadk)
         (fun o ho hown => ka o ho hown) (fun o ho hown => ?_) (fun a ha hown => ?_) (fun a ha hown => ?_)
         (kill_acc ok R W v (Or.inr rfl)).1 (kill_acc ok R W v (Or.inr rfl)).2.1
@@ -713,6 +716,7 @@ theorem storeHL_ok {base : Nat} {sF : GS} (ok : Z.OK) (hT : FnLay Z E) (F : GFin
         (fun ad' had' => by
           rw [had] at had'
           cases had'
+          intro _
           rfl) rfl
       have hmem := ld_mem_hl ok (s := s) (pc := ad) (sl := { area := .frame E.fn.name, off := E.tmpOff[t]! })
         (i := ⟨.ld, [.mem (slotVal { area := .frame E.fn.name, off := E.tmpOff[t]! }), .hl]⟩) rfl harea hb
@@ -738,7 +742,7 @@ theorem storeHL_ok {base : Nat} {sF : GS} (ok : Z.OK) (hT : FnLay Z E) (F : GFin
       refine ⟨GExt.of_out (List.prefix_refl _) rfl rfl, by simp [Dst.opd], fun o ho => (List.mem_filter.mp ho).1,
         fun hx fr ist tmps s v W R hat hHL => ?_⟩
       obtain ⟨ka, khl⟩ := forget_keep R t (IR.modN 2 v)
-      refine ⟨s, Steps.refl _ _, hat, ?_, KeepR.refl s⟩
+      refine ⟨s, Steps.refl _, hat, ?_, KeepR.refl s⟩
       refine Rel.wr_tmp ok hT R W v (by rw [if_neg hsp]) rfl rfl rfl
         (fun o ho hown => ka o ho hown) (fun o ho hown => ?_) (fun a ha hown => ?_) (fun a ha hown => ?_)
         (forget_acc hT ok R t (IR.modN 2 v) 0 v (Or.inr rfl)).1 (forget_acc hT ok R t (IR.modN 2 v) 0 v (Or.inr rfl)).2.1

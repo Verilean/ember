@@ -39,8 +39,8 @@ structure Entry (Z : ZCtx) (gf : IR.Fn) (st : IR.Sem.St) (v : Nat) (s : Cpu) : P
 
 /-- What the function does from `s`, for the result the IR gives. -/
 def Outcome (Z : ZCtx) (f : IR.Fn) (fr : Fr) (s : Cpu) : IR.Sem.Res → Prop
-  | .ok r st' => ∃ s' v, Steps Z.inp s s' ∧ IR.Instr.ret v ∈ f.body.toList ∧ RetSt Z f fr st' (v.map (·.1)) r s'
-  | .trap st' => ∃ s', Steps Z.inp s s' ∧ Trapped Z st' s'
+  | .ok r st' => ∃ s' v, Steps s s' ∧ IR.Instr.ret v ∈ f.body.toList ∧ RetSt Z f fr st' (v.map (·.1)) r s'
+  | .trap st' => ∃ s', Steps s s' ∧ Trapped Z st' s'
   | _ => True
 
 /-- The function `g`, entered with the IR in the state `st1` (its
@@ -69,9 +69,9 @@ structure CallNeed (Z : ZCtx) (E : GEnv) (dt : Nat → Prop) (g : String) (ret :
 /-- What follows a call, for the result of the function called. -/
 def AfterCall (Z : ZCtx) (E : GEnv) (fr : Fr) (dt' : Nat → Prop) (regs' : Regs) (k' : Nat) (tmps : Array Nat)
     (ret : Option (Nat × Dst)) (s : Cpu) : IR.Sem.Res → Prop
-  | .ok r st2 => ∃ s', Steps Z.inp s s' ∧ At Z.addrs k' s' ∧
+  | .ok r st2 => ∃ s', Steps s s' ∧ At Z.addrs k' s' ∧
       Rel Z E fr dt' regs' (IR.Sem.setRet Z.c st2 tmps ret r).1 (IR.Sem.setRet Z.c st2 tmps ret r).2 s'
-  | .trap st2 => ∃ s', Steps Z.inp s s' ∧ Trapped Z st2 s'
+  | .trap st2 => ∃ s', Steps s s' ∧ Trapped Z st2 s'
   | _ => True
 
 /-- The temporaries assigned once the result of a call is. -/
@@ -105,9 +105,9 @@ theorem call_fn (ok : Z.OK) (hT : FnLay Z E) (F : GFinal Z base sF) {s0 s1 : GS}
       (n = 2 → s.hl.toNat = IR.Sem.opd Z.c ist tmps n o))
     (res : IR.Sem.Res) (hc : Callee Z g (callSt Z.c ist tmps g reg) res) :
     match res with
-    | .ok r st2 => ∃ s', Steps Z.inp s s' ∧ At Z.addrs (base + s1.out.size) s' ∧ Rel Z E fr dt {} st2 tmps s' ∧
+    | .ok r st2 => ∃ s', Steps s s' ∧ At Z.addrs (base + s1.out.size) s' ∧ Rel Z E fr dt {} st2 tmps s' ∧
         ∀ n d, ret = some (n, d) → ResIn n (r.getD 0) s'
-    | .trap st2 => ∃ s', Steps Z.inp s s' ∧ Trapped Z st2 s'
+    | .trap st2 => ∃ s', Steps s s' ∧ Trapped Z st2 s'
     | _ => True := by
   obtain ⟨gf, hgf⟩ := N.fn
   obtain ⟨j, hj⟩ := N.label
@@ -226,12 +226,12 @@ theorem argLoad_ok (ok : Z.OK) (F : GFinal Z base sF) (reg : Option (Nat × Opd)
     wpg (argLoad reg) E (fun _ s1 => GExt s0 s1 ∧
       (GExt s1 sF → (∀ n o, reg = some (n, o) → Rd Z E dt n o) → ∀ fr ist tmps s,
         Rel Z E fr dt s0.regs ist tmps s → At Z.addrs (base + s0.out.size) s →
-        ∃ s', Steps Z.inp s s' ∧ At Z.addrs (base + s1.out.size) s' ∧ Rel Z E fr dt s1.regs ist tmps s' ∧
+        ∃ s', Steps s s' ∧ At Z.addrs (base + s1.out.size) s' ∧ Rel Z E fr dt s1.regs ist tmps s' ∧
           ∀ n o, reg = some (n, o) → (n = 1 → s'.a.toNat = IR.Sem.opd Z.c ist tmps n o) ∧
             (n = 2 → s'.hl.toNat = IR.Sem.opd Z.c ist tmps n o))) s0 := by
   cases reg with
   | none =>
-    exact ⟨GExt.refl _, fun _ _ fr ist tmps s R hat => ⟨s, Steps.refl _ _, hat, R, fun n o h => by cases h⟩⟩
+    exact ⟨GExt.refl _, fun _ _ fr ist tmps s R hat => ⟨s, Steps.refl _, hat, R, fun n o h => by cases h⟩⟩
   | some p =>
     obtain ⟨n, o⟩ := p
     rcases hsz n o rfl with rfl | rfl
@@ -259,12 +259,12 @@ theorem retStore_ok (ok : Z.OK) (hT : FnLay Z E) (F : GFinal Z base sF) (ret : O
       (GExt s2 sF → (∀ n d, ret = some (n, d) → Wr Z E n d) → ∀ fr ist tmps s r,
         Rel Z E fr dt s1.regs ist tmps s → At Z.addrs (base + s1.out.size) s →
         (∀ n d, ret = some (n, d) → ResIn n (Option.getD r 0) s) →
-        ∃ s', Steps Z.inp s s' ∧ At Z.addrs (base + s2.out.size) s' ∧
+        ∃ s', Steps s s' ∧ At Z.addrs (base + s2.out.size) s' ∧
           Rel Z E fr (dtRet dt ret) s2.regs (IR.Sem.setRet Z.c ist tmps ret r).1
             (IR.Sem.setRet Z.c ist tmps ret r).2 s')) s1 := by
   cases ret with
   | none =>
-    exact ⟨GExt.refl _, fun _ _ fr ist tmps s r R hat _ => ⟨s, Steps.refl _ _, hat, R⟩⟩
+    exact ⟨GExt.refl _, fun _ _ fr ist tmps s r R hat _ => ⟨s, Steps.refl _, hat, R⟩⟩
   | some p =>
     obtain ⟨n, d⟩ := p
     rcases hsz n d rfl with rfl | rfl

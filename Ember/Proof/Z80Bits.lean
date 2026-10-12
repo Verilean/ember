@@ -129,6 +129,7 @@ variable (s : Cpu) (w x : UInt16)
 @[zsim] theorem add16_mem : (s.add16 w x).2.mem = s.mem := rfl
 @[zsim] theorem add16_halted : (s.add16 w x).2.halted = s.halted := rfl
 @[zsim] theorem add16_ramStart : (s.add16 w x).2.ramStart = s.ramStart := rfl
+@[zsim] theorem add16_io : (s.add16 w x).2.io = s.io := rfl
 @[zsim] theorem add16_hl : (s.add16 w x).2.hl = s.hl := rfl
 @[zsim] theorem add16_de : (s.add16 w x).2.de = s.de := rfl
 @[zsim] theorem add16_bc : (s.add16 w x).2.bc = s.bc := rfl
@@ -142,6 +143,7 @@ variable (s : Cpu) (w x : UInt16)
 @[zsim] theorem sbc16_mem : (s.sbc16 w).mem = s.mem := rfl
 @[zsim] theorem sbc16_halted : (s.sbc16 w).halted = s.halted := rfl
 @[zsim] theorem sbc16_ramStart : (s.sbc16 w).ramStart = s.ramStart := rfl
+@[zsim] theorem sbc16_io : (s.sbc16 w).io = s.io := rfl
 @[zsim] theorem sbc16_de : (s.sbc16 w).de = s.de := rfl
 @[zsim] theorem sbc16_bc : (s.sbc16 w).bc = s.bc := rfl
 

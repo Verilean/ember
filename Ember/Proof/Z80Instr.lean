@@ -20,7 +20,7 @@ def InsPost (Z : ZCtx) (E : GEnv) (base : Nat) (sF : GS) (dt dt' : Nat → Prop)
     (GExt s1 sF → H → ∀ fr ist tmps s, Rel Z E fr dt s0.regs ist tmps s → At Z.addrs (base + s0.out.size) s →
       match IR.Sem.step Z.c ist tmps i with
       | .next ist' tmps' =>
-        ∃ s', Steps Z.inp s s' ∧ At Z.addrs (base + s1.out.size) s' ∧ Rel Z E fr dt' s1.regs ist' tmps' s'
+        ∃ s', Steps s s' ∧ At Z.addrs (base + s1.out.size) s' ∧ Rel Z E fr dt' s1.regs ist' tmps' s'
       | _ => True)
 
 theorem opd_lt (c : IR.Ctx) (ist : IR.Sem.St) (tmps : Array Nat) (n : Nat) (o : Opd) :

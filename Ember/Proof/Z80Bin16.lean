@@ -72,7 +72,7 @@ def HlPost (Z : ZCtx) (E : GEnv) (base : Nat) (sF : GS) (dt : Nat → Prop) (H :
     (_ : Unit) (s1 : GS) : Prop :=
   GExt s0 s1 ∧
     (GExt s1 sF → H → ∀ fr ist tmps s, Rel Z E fr dt s0.regs ist tmps s → At Z.addrs (base + s0.out.size) s →
-      ∃ s', Steps Z.inp s s' ∧ At Z.addrs (base + s1.out.size) s' ∧
+      ∃ s', Steps s s' ∧ At Z.addrs (base + s1.out.size) s' ∧
         Rel Z E fr dt { s1.regs with hl := [] } ist tmps s' ∧ s'.hl.toNat = res s.hl.toNat)
 
 /-- `HL` plus or minus a constant. -/
@@ -82,7 +82,7 @@ theorem addConst_ok (ok : Z.OK) (F : GFinal Z base sF) (v : Nat) (hv : v < 65536
   by_cases h3 : v ≤ 3
   · rw [if_pos h3, wpg_rep_ins]
     refine ⟨pushK_ext _ _ _, fun hx _ fr ist tmps s R hat => ?_⟩
-    obtain ⟨st, at', _⟩ := run_rep ok F incHL (fun _ _ _ => rfl) rfl (fun s => (incHL_keep s).1) v s0 s hx R.mach hat
+    obtain ⟨st, at', _⟩ := run_rep ok F incHL (fun _ _ _ => rfl) rfl (fun s => (incHL_keep s).1) (fun _ => rfl) v s0 s hx R.mach hat
     have hk := iter_inv incHL KeepADE KeepADE.refl (fun _ _ _ => KeepADE.trans) incHL_keep v s
     refine ⟨_, st, at', R.hl_gone hk.1 rfl (Or.inr ⟨by rw [pushK_regs], hk.2.1⟩)
       (fun n o h => by rw [pushK_regs] at h; exact h), ?_⟩
@@ -92,7 +92,7 @@ theorem addConst_ok (ok : Z.OK) (F : GFinal Z base sF) (v : Nat) (hv : v < 65536
     by_cases h5 : v ≥ 65533
     · rw [if_pos h5, wpg_rep_ins]
       refine ⟨pushK_ext _ _ _, fun hx _ fr ist tmps s R hat => ?_⟩
-      obtain ⟨st, at', _⟩ := run_rep ok F decHL (fun _ _ _ => rfl) rfl (fun s => (decHL_keep s).1) (65536 - v) s0 s hx
+      obtain ⟨st, at', _⟩ := run_rep ok F decHL (fun _ _ _ => rfl) rfl (fun s => (decHL_keep s).1) (fun _ => rfl) (65536 - v) s0 s hx
         R.mach hat
       have hk := iter_inv decHL KeepADE KeepADE.refl (fun _ _ _ => KeepADE.trans) decHL_keep (65536 - v) s
       refine ⟨_, st, at', R.hl_gone hk.1 rfl (Or.inr ⟨by rw [pushK_regs], hk.2.1⟩)
@@ -121,7 +121,7 @@ theorem subConst_ok (ok : Z.OK) (F : GFinal Z base sF) (v : Nat) (hv : v < 65536
   by_cases h3 : v ≤ 3
   · rw [if_pos h3, wpg_rep_ins]
     refine ⟨pushK_ext _ _ _, fun hx _ fr ist tmps s R hat => ?_⟩
-    obtain ⟨st, at', _⟩ := run_rep ok F decHL (fun _ _ _ => rfl) rfl (fun s => (decHL_keep s).1) v s0 s hx R.mach hat
+    obtain ⟨st, at', _⟩ := run_rep ok F decHL (fun _ _ _ => rfl) rfl (fun s => (decHL_keep s).1) (fun _ => rfl) v s0 s hx R.mach hat
     have hk := iter_inv decHL KeepADE KeepADE.refl (fun _ _ _ => KeepADE.trans) decHL_keep v s
     refine ⟨_, st, at', R.hl_gone hk.1 rfl (Or.inr ⟨by rw [pushK_regs], hk.2.1⟩)
       (fun n o h => by rw [pushK_regs] at h; exact h), ?_⟩
@@ -152,7 +152,7 @@ def HlDePost (Z : ZCtx) (E : GEnv) (base : Nat) (sF : GS) (dt : Nat → Prop) (H
     (s0 : GS) (_ : Unit) (s1 : GS) : Prop :=
   GExt s0 s1 ∧
     (GExt s1 sF → H → ∀ fr ist tmps s, Rel Z E fr dt s0.regs ist tmps s → At Z.addrs (base + s0.out.size) s →
-      ∃ s', Steps Z.inp s s' ∧ At Z.addrs (base + s1.out.size) s' ∧
+      ∃ s', Steps s s' ∧ At Z.addrs (base + s1.out.size) s' ∧
         Rel Z E fr dt { s1.regs with hl := [] } ist tmps s' ∧ s'.hl.toNat = res s.hl.toNat s.de.toNat)
 
 theorem addReg_ok (ok : Z.OK) (F : GFinal Z base sF) (s0 : GS) :
@@ -191,21 +191,21 @@ def aluR (k y : UInt8) (s : Cpu) : Cpu := ((op1 s).alu k ((op1 s).reg .hl y)).ti
 def aluN (k : UInt8) (v : Nat) (s : Cpu) : Cpu := ((skip (op1 s) 1).alu k (byteOf (Int.ofNat (v % 256)))).tick 7
 
 theorem does_ld_a_l : Does ⟨.ld, [.a, .l]⟩ (ldAR 5) :=
-  ⟨fun _ _ _ => rfl, rfl, fun s => by simp only [Sys, ldAR, zsim, and_self]⟩
+  ⟨fun _ _ _ => rfl, rfl, fun s => by simp only [Sys, ldAR, zsim, and_self], fun s => by simp only [ldAR, zsim]⟩
 theorem does_ld_a_h : Does ⟨.ld, [.a, .h]⟩ (ldAR 4) :=
-  ⟨fun _ _ _ => rfl, rfl, fun s => by simp only [Sys, ldAR, zsim, and_self]⟩
+  ⟨fun _ _ _ => rfl, rfl, fun s => by simp only [Sys, ldAR, zsim, and_self], fun s => by simp only [ldAR, zsim]⟩
 theorem does_ld_l_a : Does ⟨.ld, [.l, .a]⟩ (ldRA 5) :=
-  ⟨fun _ _ _ => rfl, rfl, fun s => by simp only [Sys, ldRA, zsim, and_self]⟩
+  ⟨fun _ _ _ => rfl, rfl, fun s => by simp only [Sys, ldRA, zsim, and_self], fun s => by simp only [ldRA, zsim]⟩
 theorem does_ld_h_a : Does ⟨.ld, [.h, .a]⟩ (ldRA 4) :=
-  ⟨fun _ _ _ => rfl, rfl, fun s => by simp only [Sys, ldRA, zsim, and_self]⟩
+  ⟨fun _ _ _ => rfl, rfl, fun s => by simp only [Sys, ldRA, zsim, and_self], fun s => by simp only [ldRA, zsim]⟩
 
 theorem does_alu_reg {op : Bin} {k : UInt8} (hk : aluK op = some k) {x : Arg} {z : UInt8} (hz : r8? x = some z) :
     Does (aluIns op x) (aluR k z) :=
-  ⟨fun _ _ _ => exec_alu_reg _ _ _ hk hz, aluIns_falls _ _, fun s => by simp only [Sys, aluR, zsim, and_self]⟩
+  ⟨fun _ _ _ => exec_alu_reg _ _ _ hk hz, aluIns_falls _ _, fun s => by simp only [Sys, aluR, zsim, and_self], fun s => by simp only [aluR, zsim]⟩
 
 theorem does_alu_imm {op : Bin} {k : UInt8} (hk : aluK op = some k) (v : Nat) :
     Does (aluIns op (n8 v)) (aluN k v) :=
-  ⟨fun _ _ _ => exec_alu_imm _ _ _ hk v, aluIns_falls _ _, fun s => by simp only [Sys, aluN, zsim, and_self]⟩
+  ⟨fun _ _ _ => exec_alu_imm _ _ _ hk v, aluIns_falls _ _, fun s => by simp only [Sys, aluN, zsim, and_self], fun s => by simp only [aluN, zsim]⟩
 
 /-- `and`, `or`, `xor`. -/
 def isLogic (op : Bin) : Prop := op = .and ∨ op = .or ∨ op = .xor
@@ -275,12 +275,12 @@ theorem logicConstL_ok (ok : Z.OK) (F : GFinal Z base sF) {op : Bin} {k : UInt8}
     (hl : isLogic op) (m : Nat) (hm : m < 256) (s0 : GS) :
     wpg (logicConst op .l m) E (fun _ s1 => GExt s0 s1 ∧ s1.regs.hl = s0.regs.hl ∧ s1.regs.acc = s0.regs.acc ∧
       (GExt s1 sF → ∀ s, Mach Z s → At Z.addrs (base + s0.out.size) s →
-        ∃ s', Steps Z.inp s s' ∧ At Z.addrs (base + s1.out.size) s' ∧ Mach Z s' ∧ Sys s s' ∧
+        ∃ s', Steps s s' ∧ At Z.addrs (base + s1.out.size) s' ∧ Mach Z s' ∧ Sys s s' ∧
           s'.l.toNat = IR.binOp op 1 s.l.toNat m ∧ s'.h = s.h ∧ (s1.regs.a = [] ∨ (s1.regs.a = s0.regs.a ∧ s'.a = s.a)))) s0 := by
   unfold logicConst
   by_cases h1 : (if (op == Bin.and) = true then m == 255 else m == 0) = true
   · rw [if_pos h1, wpg_pure]
-    refine ⟨GExt.of_out (List.prefix_refl _) rfl rfl, rfl, rfl, fun _ s M hat => ⟨s, Steps.refl _ _, hat, M, Sys.refl s, ?_, rfl, Or.inr ⟨rfl, rfl⟩⟩⟩
+    refine ⟨GExt.of_out (List.prefix_refl _) rfl rfl, rfl, rfl, fun _ s M hat => ⟨s, Steps.refl _, hat, M, Sys.refl s, ?_, rfl, Or.inr ⟨rfl, rfl⟩⟩⟩
     have hx := s.l.toNat_lt
     rcases hl with rfl | rfl | rfl
     · have : m = 255 := by
@@ -363,12 +363,12 @@ theorem logicConstH_ok (ok : Z.OK) (F : GFinal Z base sF) {op : Bin} {k : UInt8}
     (hl : isLogic op) (m : Nat) (hm : m < 256) (s0 : GS) :
     wpg (logicConst op .h m) E (fun _ s1 => GExt s0 s1 ∧ s1.regs.hl = s0.regs.hl ∧ s1.regs.acc = s0.regs.acc ∧
       (GExt s1 sF → ∀ s, Mach Z s → At Z.addrs (base + s0.out.size) s →
-        ∃ s', Steps Z.inp s s' ∧ At Z.addrs (base + s1.out.size) s' ∧ Mach Z s' ∧ Sys s s' ∧
+        ∃ s', Steps s s' ∧ At Z.addrs (base + s1.out.size) s' ∧ Mach Z s' ∧ Sys s s' ∧
           s'.h.toNat = IR.binOp op 1 s.h.toNat m ∧ s'.l = s.l ∧ (s1.regs.a = [] ∨ (s1.regs.a = s0.regs.a ∧ s'.a = s.a)))) s0 := by
   unfold logicConst
   by_cases h1 : (if (op == Bin.and) = true then m == 255 else m == 0) = true
   · rw [if_pos h1, wpg_pure]
-    refine ⟨GExt.of_out (List.prefix_refl _) rfl rfl, rfl, rfl, fun _ s M hat => ⟨s, Steps.refl _ _, hat, M, Sys.refl s, ?_, rfl, Or.inr ⟨rfl, rfl⟩⟩⟩
+    refine ⟨GExt.of_out (List.prefix_refl _) rfl rfl, rfl, rfl, fun _ s M hat => ⟨s, Steps.refl _, hat, M, Sys.refl s, ?_, rfl, Or.inr ⟨rfl, rfl⟩⟩⟩
     have hx := s.h.toNat_lt
     rcases hl with rfl | rfl | rfl
     · have : m = 255 := by
@@ -555,7 +555,7 @@ def LoadDE (Z : ZCtx) (E : GEnv) (base : Nat) (sF : GS) (dt : Nat → Prop) (o :
   GExt s0 s1 ∧ s1.regs = s0.regs ∧
     (GExt s1 sF → ∀ fr ist tmps s, Rd Z E dt 2 o → Rel Z E fr dt s0.regs ist tmps s →
       At Z.addrs (base + s0.out.size) s →
-      ∃ s', Steps Z.inp s s' ∧ At Z.addrs (base + s1.out.size) s' ∧ Rel Z E fr dt s1.regs ist tmps s' ∧
+      ∃ s', Steps s s' ∧ At Z.addrs (base + s1.out.size) s' ∧ Rel Z E fr dt s1.regs ist tmps s' ∧
         s'.hl = s.hl ∧ s'.a = s.a ∧ s'.de.toNat = IR.Sem.opd Z.c ist tmps 2 o)
 
 theorem loadDE_ok (ok : Z.OK) (F : GFinal Z base sF) (o : Opd) (s0 : GS) :
@@ -573,8 +573,8 @@ theorem loadDE_ok (ok : Z.OK) (F : GFinal Z base sF) (o : Opd) (s0 : GS) :
         intro p hp
         simp only [List.mem_cons, List.not_mem_nil, or_false] at hp
         rcases hp with rfl | rfl
-        · exact ⟨fun _ _ _ => rfl, rfl, fun s => by simp only [Sys, zsim, and_self]⟩
-        · exact ⟨fun _ _ _ => rfl, rfl, fun s => by simp only [Sys, zsim, and_self]⟩) s0 s hx R.mach hat
+        · exact ⟨fun _ _ _ => rfl, rfl, fun s => by simp only [Sys, zsim, and_self], fun s => by simp only [zsim]⟩
+        · exact ⟨fun _ _ _ => rfl, rfl, fun s => by simp only [Sys, zsim, and_self], fun s => by simp only [zsim]⟩) s0 s hx R.mach hat
     refine ⟨_, st, at', R.keep hS (by simp only [List.map, runL, zsim]) (by simp only [List.map, runL, zsim]),
       by simp only [List.map, runL, zsim], by simp only [List.map, runL, zsim], ?_⟩
     rw [← R.rhl o hmem hrd.own, de_toNat, hl_toNat]
@@ -602,6 +602,7 @@ theorem loadDE_ok (ok : Z.OK) (F : GFinal Z base sF) (o : Opd) (s0 : GS) :
         (fun ad' had' => by
           rw [ho1, had] at had'
           cases had'
+          intro _
           rfl) rfl (by simp only [Sys, zsim, and_self])
       refine ⟨_, st, at', ?_, by simp only [zsim], by simp only [zsim], ?_⟩
       · rw [hr1]
@@ -630,7 +631,7 @@ def Bin16 (Z : ZCtx) (E : GEnv) (base : Nat) (sF : GS) (dt : Nat → Prop) (op :
   GExt s0 s1 ∧
     (GExt s1 sF → RtOK Z ∧ Z.rtK + 2 ≤ Z.depth E.fn.name → ∀ fr ist tmps s, Rd Z E dt 2 a → Rd Z E dt 2 b →
       Rel Z E fr dt s0.regs ist tmps s → At Z.addrs (base + s0.out.size) s →
-      ∃ s', Steps Z.inp s s' ∧ At Z.addrs (base + s1.out.size) s' ∧ Rel Z E fr dt s1.regs ist tmps s' ∧
+      ∃ s', Steps s s' ∧ At Z.addrs (base + s1.out.size) s' ∧ Rel Z E fr dt s1.regs ist tmps s' ∧
         s'.hl.toNat = IR.binOp op 2 (IR.Sem.opd Z.c ist tmps 2 a) (IR.Sem.opd Z.c ist tmps 2 b))
 
 theorem small16_iff (op : Bin) : small16 op = (aluK op).isSome := by cases op <;> rfl
@@ -645,7 +646,7 @@ theorem bin16_ok (ok : Z.OK) (hT : FnLay Z E) (F : GFinal Z base sF) (op : Bin) 
   have regfin : ∀ (s1 : GS), GExt s0 s1 →
       (∀ s2, GExt s1 s2 → GExt s2 sF → ∀ fr ist tmps s, Rd Z E dt 2 a → Rd Z E dt 2 b →
         Rel Z E fr dt s0.regs ist tmps s → At Z.addrs (base + s0.out.size) s →
-        ∃ s', Steps Z.inp s s' ∧ At Z.addrs (base + s1.out.size) s' ∧ Rel Z E fr dt s1.regs ist tmps s' ∧
+        ∃ s', Steps s s' ∧ At Z.addrs (base + s1.out.size) s' ∧ Rel Z E fr dt s1.regs ist tmps s' ∧
           s'.hl.toNat = IR.Sem.opd Z.c ist tmps 2 a ∧ s'.de.toNat = IR.Sem.opd Z.c ist tmps 2 b) →
       wpg (do bin16Reg op; setRegs fun r => { r with hl := [] }) E (Bin16 Z E base sF dt op a b s0) s1 := by
     intro s1 hx1 hpre

@@ -58,14 +58,14 @@ theorem jpTo_keep (nn : UInt16) (s : Cpu) : KeepR s (jpTo nn s) := by simp only 
 /-- **An unconditional jump to a label.** -/
 theorem jp_step (ok : Z.OK) {k j : Nat} {l : String} (hk : Z.items[k]? = some (.ins ⟨.jp, [.imm (.sym l)]⟩))
     (hj : Z.items[j]? = some (.label l)) {s : Cpu} (M : Mach Z s) (hat : At Z.addrs k s) :
-    ∃ s', Steps Z.inp s s' ∧ At Z.addrs j s' ∧ Mach Z s' ∧ Sys s s' ∧ KeepR s s' := by
+    ∃ s', Steps s s' ∧ At Z.addrs j s' ∧ Mach Z s' ∧ Sys s s' ∧ KeepR s s' := by
   obtain ⟨ad, had, hpc⟩ := hat
   obtain ⟨T, hT, hsym, hTlt⟩ := label_at ok hj M.1
   have hnn : (Instr.immW (Z.a.env ad) ⟨.jp, [.imm (.sym l)]⟩).toNat = T :=
     immW_toNat _ _ _ _ rfl (sym_val ad hsym) hTlt
-  obtain ⟨hst, _⟩ := step_item ok.placed M.1 hk had hpc M.2 (inp := Z.inp)
-    (s' := jpTo (Instr.immW (Z.a.env ad) ⟨.jp, [.imm (.sym l)]⟩) s) rfl
-  refine ⟨_, Steps.one hst, ⟨T, hT, ?_⟩, M.sys (jpTo_sys _ _), jpTo_sys _ _, jpTo_keep _ _⟩
+  have hst := fun inp => (step_item ok.placed M.1 hk had hpc M.2 (inp := inp)
+    (s' := jpTo (Instr.immW (Z.a.env ad) ⟨.jp, [.imm (.sym l)]⟩) s) rfl).1
+  refine ⟨_, Steps.one hst (by simp only [jpTo, zsim]), ⟨T, hT, ?_⟩, M.sys (jpTo_sys _ _), jpTo_sys _ _, jpTo_keep _ _⟩
   simp only [jpTo, zsim]
   exact hnn
 
@@ -74,6 +74,10 @@ def jpCC (c : UInt8) (nn : UInt16) (s : Cpu) : Cpu :=
   (if (op1 s).cond c then ({ (skip (op1 s) 2) with pc := nn } : Cpu) else skip (op1 s) 2).tick 10
 
 theorem cond_op1 (s : Cpu) (c : UInt8) : (op1 s).cond c = s.cond c := rfl
+
+theorem jpCC_io (c : UInt8) (nn : UInt16) (s : Cpu) : (jpCC c nn s).io = .none := by
+  unfold jpCC
+  split <;> simp only [zsim]
 
 theorem jpCC_sys (c : UInt8) (nn : UInt16) (s : Cpu) : Sys s (jpCC c nn s) := by
   unfold jpCC
@@ -95,14 +99,14 @@ theorem immVal_jp_cc (op : Cmp) (v : Val) : (⟨.jp, [condOf op, .imm v]⟩ : In
 theorem jp_cc_step (ok : Z.OK) {k j : Nat} (op : Cmp) {l : String}
     (hk : Z.items[k]? = some (.ins ⟨.jp, [condOf op, .imm (.sym l)]⟩))
     (hj : Z.items[j]? = some (.label l)) {s : Cpu} (M : Mach Z s) (hat : At Z.addrs k s) :
-    ∃ s', Steps Z.inp s s' ∧ Mach Z s' ∧ Sys s s' ∧ KeepR s s' ∧
+    ∃ s', Steps s s' ∧ Mach Z s' ∧ Sys s s' ∧ KeepR s s' ∧
       (if s.cond (ccOf op) then At Z.addrs j s' else At Z.addrs (k + 1) s') := by
   obtain ⟨ad, had, hpc⟩ := hat
   obtain ⟨T, hT, hsym, hTlt⟩ := label_at ok hj M.1
   have hnn : (Instr.immW (Z.a.env ad) ⟨.jp, [condOf op, .imm (.sym l)]⟩).toNat = T :=
     immW_toNat _ _ _ _ (immVal_jp_cc op _) (sym_val ad hsym) hTlt
-  obtain ⟨hst, _⟩ := step_item ok.placed M.1 hk had hpc M.2 (inp := Z.inp) (exec_jp_cc _ op _ s _)
-  refine ⟨_, Steps.one hst, M.sys (jpCC_sys _ _ _), jpCC_sys _ _ _, jpCC_keep _ _ _, ?_⟩
+  have hst := fun inp => (step_item ok.placed M.1 hk had hpc M.2 (inp := inp) (exec_jp_cc _ op _ s _)).1
+  refine ⟨_, Steps.one hst (jpCC_io _ _ _), M.sys (jpCC_sys _ _ _), jpCC_sys _ _ _, jpCC_keep _ _ _, ?_⟩
   by_cases hc : s.cond (ccOf op) = true
   · rw [if_pos hc]
     refine ⟨T, hT, ?_⟩
@@ -167,6 +171,10 @@ def jrCC (c : UInt8) (n : UInt8) (s : Cpu) : Cpu :=
   if (op1 s).cond c then ({ (skip (op1 s) 1) with pc := (skip (op1 s) 1).pc + sext n } : Cpu).tick 12
   else (skip (op1 s) 1).tick 7
 
+theorem jrCC_io (c n : UInt8) (s : Cpu) : (jrCC c n s).io = .none := by
+  unfold jrCC
+  split <;> simp only [zsim]
+
 theorem jrCC_sys (c n : UInt8) (s : Cpu) : Sys s (jrCC c n s) := by
   unfold jrCC
   split <;> simp only [Sys, zsim, and_self]
@@ -179,7 +187,7 @@ theorem jrCC_keep (c n : UInt8) (s : Cpu) : KeepR s (jrCC c n s) := by
 theorem jr_cc_step (ok : Z.OK) {k j : Nat} (z : Bool) {l : String}
     (hk : Z.items[k]? = some (.ins ⟨.jr, [if z then .z else .nz, .imm (.sym l)]⟩))
     (hj : Z.items[j]? = some (.label l)) {s : Cpu} (M : Mach Z s) (hat : At Z.addrs k s) :
-    ∃ s', Steps Z.inp s s' ∧ Mach Z s' ∧ Sys s s' ∧ KeepR s s' ∧
+    ∃ s', Steps s s' ∧ Mach Z s' ∧ Sys s s' ∧ KeepR s s' ∧
       (if s.flag FZ = z then At Z.addrs j s' else At Z.addrs (k + 1) s') := by
   obtain ⟨ad, had, hpc⟩ := hat
   obtain ⟨T, hT, hsym, hTlt⟩ := label_at ok hj M.1
@@ -201,8 +209,9 @@ theorem jr_cc_step (ok : Z.OK) {k j : Nat} (z : Bool) {l : String}
   have hpcv : (Z.a.env ad).pc = Int.ofNat ad := rfl
   rw [hpcv] at r1 r2
   have hlt' := hlt (by intro e; rw [e] at hlen; cases hlen)
-  have hexec : exec (Z.a.env ad) ⟨.jr, [if z then .z else .nz, .imm (.sym l)]⟩ s Z.inp =
+  have hexec : ∀ inp, exec (Z.a.env ad) ⟨.jr, [if z then .z else .nz, .imm (.sym l)]⟩ s inp =
       some (jrCC (if z then 1 else 0) (byteOf (Int.ofNat T - (Int.ofNat ad + 2))) s) := by
+    intro inp
     cases z
     · show _ = some (jrCC 0 _ s)
       have : Instr.immB (Z.a.env ad) ⟨.jr, [.nz, .imm (.sym l)]⟩ = byteOf (Int.ofNat T - (Int.ofNat ad + 2)) := by
@@ -218,8 +227,8 @@ theorem jr_cc_step (ok : Z.OK) {k j : Nat} (z : Bool) {l : String}
         rfl
       rw [← this]
       rfl
-  obtain ⟨hst, _⟩ := step_item ok.placed M.1 hk had hpc M.2 (inp := Z.inp) hexec
-  refine ⟨_, Steps.one hst, M.sys (jrCC_sys _ _ _), jrCC_sys _ _ _, jrCC_keep _ _ _, ?_⟩
+  have hst := fun inp => (step_item ok.placed M.1 hk had hpc M.2 (inp := inp) (hexec inp)).1
+  refine ⟨_, Steps.one hst (jrCC_io _ _ _), M.sys (jrCC_sys _ _ _), jrCC_sys _ _ _, jrCC_keep _ _ _, ?_⟩
   have hcond : s.cond (if z then 1 else 0) = decide (s.flag FZ = z) := by
     cases z
     · show (!s.flag FZ) = _

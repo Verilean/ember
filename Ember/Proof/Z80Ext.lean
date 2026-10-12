@@ -29,12 +29,12 @@ theorem thenStoreA (ok : Z.OK) (hT : FnLay Z E) (F : GFinal Z base sF) (d : Dst)
     (val : IR.Sem.St → Array Nat → Nat) (hx1 : GExt s0 s1)
     (run : GExt s1 sF → H → ∀ fr ist tmps s, Rel Z E fr dt s0.regs ist tmps s →
       At Z.addrs (base + s0.out.size) s →
-      ∃ s', Steps Z.inp s s' ∧ At Z.addrs (base + s1.out.size) s' ∧ Rel Z E fr dt s1.regs ist tmps s' ∧
+      ∃ s', Steps s s' ∧ At Z.addrs (base + s1.out.size) s' ∧ Rel Z E fr dt s1.regs ist tmps s' ∧
         s'.a.toNat = val ist tmps % 256) :
     wpg (storeA d) E (fun _ s2 => GExt s0 s2 ∧
       (GExt s2 sF → H ∧ Wr Z E 1 d → ∀ fr ist tmps s, Rel Z E fr dt s0.regs ist tmps s →
         At Z.addrs (base + s0.out.size) s →
-        ∃ s', Steps Z.inp s s' ∧ At Z.addrs (base + s2.out.size) s' ∧
+        ∃ s', Steps s s' ∧ At Z.addrs (base + s2.out.size) s' ∧
           Rel Z E fr (dtAfter dt d) s2.regs (IR.Sem.setDst Z.c ist tmps 1 d (val ist tmps)).1
             (IR.Sem.setDst Z.c ist tmps 1 d (val ist tmps)).2 s')) s1 := by
   refine wpg_mono (storeA_ok (dt := dt) ok hT F d s1) ?_
@@ -49,12 +49,12 @@ theorem thenStoreHL (ok : Z.OK) (hT : FnLay Z E) (F : GFinal Z base sF) (d : Dst
     (val : IR.Sem.St → Array Nat → Nat) (hx1 : GExt s0 s1)
     (run : GExt s1 sF → H → ∀ fr ist tmps s, Rel Z E fr dt s0.regs ist tmps s →
       At Z.addrs (base + s0.out.size) s →
-      ∃ s', Steps Z.inp s s' ∧ At Z.addrs (base + s1.out.size) s' ∧ Rel Z E fr dt s1.regs ist tmps s' ∧
+      ∃ s', Steps s s' ∧ At Z.addrs (base + s1.out.size) s' ∧ Rel Z E fr dt s1.regs ist tmps s' ∧
         s'.hl.toNat = val ist tmps % 65536) :
     wpg (storeHL d) E (fun _ s2 => GExt s0 s2 ∧
       (GExt s2 sF → H ∧ Wr Z E 2 d → ∀ fr ist tmps s, Rel Z E fr dt s0.regs ist tmps s →
         At Z.addrs (base + s0.out.size) s →
-        ∃ s', Steps Z.inp s s' ∧ At Z.addrs (base + s2.out.size) s' ∧
+        ∃ s', Steps s s' ∧ At Z.addrs (base + s2.out.size) s' ∧
           Rel Z E fr (dtAfter dt d) s2.regs (IR.Sem.setDst Z.c ist tmps 2 d (val ist tmps)).1
             (IR.Sem.setDst Z.c ist tmps 2 d (val ist tmps)).2 s')) s1 := by
   refine wpg_mono (storeHL_ok (dt := dt) ok hT F d s1) ?_
@@ -106,6 +106,7 @@ theorem ext12_ok (ok : Z.OK) (hT : FnLay Z E) (F : GFinal Z base sF) (d : Dst) (
       (fun ad' had' => by
         rw [ho1, had] at had'
         cases had'
+        intro _
         rfl) rfl
     refine ⟨_, hst, hat', R.of_sys (by simp only [Sys, zsim, and_self]) rfl (fun o h => by rw [← hr1]; exact h)
       (fun o ho hown => R.rhl o (by rw [← hr1]; exact ho) hown) (fun n o h => by rw [← hr1]; exact h), ?_⟩
@@ -118,14 +119,14 @@ theorem byte0 : (byteOf (Int.ofNat (0 % 256))).toNat = 0 := by decide
 def ldH0 (s : Cpu) : Cpu := ((skip (op1 s) 1).setReg .hl 4 (byteOf (Int.ofNat (0 % 256)))).tick 7
 
 theorem does_ld_h_0 : Does ⟨.ld, [.h, n8 0]⟩ ldH0 :=
-  ⟨fun _ _ _ => rfl, rfl, fun s => by simp only [Sys, ldH0, zsim, and_self]⟩
+  ⟨fun _ _ _ => rfl, rfl, fun s => by simp only [Sys, ldH0, zsim, and_self], fun s => by simp only [ldH0, zsim]⟩
 
 /-- **A byte into `HL`**, the upper byte zero; `A` and `DE` are as they were. -/
 theorem loadHLByte_ok (ok : Z.OK) (F : GFinal Z base sF) (o : Opd) (s0 : GS) :
     wpg (loadHLByte o) E (fun _ s1 => GExt s0 s1 ∧ s1.regs = s0.regs ∧
       (GExt s1 sF → ∀ fr ist tmps s, Rd Z E dt 1 o → Rel Z E fr dt s0.regs ist tmps s →
         At Z.addrs (base + s0.out.size) s →
-        ∃ s', Steps Z.inp s s' ∧ At Z.addrs (base + s1.out.size) s' ∧ KeepADE s s' ∧
+        ∃ s', Steps s s' ∧ At Z.addrs (base + s1.out.size) s' ∧ KeepADE s s' ∧
           s'.hl.toNat = IR.Sem.opd Z.c ist tmps 1 o)) s0 := by
   unfold loadHLByte
   simp only [wpg_bind, wpg_get]
@@ -136,7 +137,7 @@ theorem loadHLByte_ok (ok : Z.OK) (F : GFinal Z base sF) (o : Opd) (s0 : GS) :
         ins .ld [.h, n8 0]) E (fun _ s1 => GExt s0 s1 ∧ s1.regs = s0.regs ∧
       (GExt s1 sF → ∀ fr ist tmps s, Rd Z E dt 1 o → Rel Z E fr dt s0.regs ist tmps s →
         At Z.addrs (base + s0.out.size) s →
-        ∃ s', Steps Z.inp s s' ∧ At Z.addrs (base + s1.out.size) s' ∧ KeepADE s s' ∧
+        ∃ s', Steps s s' ∧ At Z.addrs (base + s1.out.size) s' ∧ KeepADE s s' ∧
           s'.hl.toNat = IR.Sem.opd Z.c ist tmps 1 o)) s0 := by
     intro o hc
     simp only [wpg_bind]
@@ -159,6 +160,7 @@ theorem loadHLByte_ok (ok : Z.OK) (F : GFinal Z base sF) (o : Opd) (s0 : GS) :
       (fun ad' had' => by
         rw [ho1, had] at had'
         cases had'
+        intro _
         rfl) rfl
     have hS1 : Sys s (((skip (op1 s) 2).setHL
         ((op1 s).rd16 (Instr.immW (Z.a.env ad) ⟨.ld, [.hl, .mem (opdVal E o)]⟩))).tick 16) := by

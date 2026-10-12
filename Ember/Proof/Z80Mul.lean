@@ -19,7 +19,7 @@ def RtBound (Z : ZCtx) : Prop :=
   ∃ entry, Z.sym "rt_bound" entry ∧ entry < 65536 ∧
     ∀ c : Cpu, c.pc.toNat = entry → Img Z.a 0 c → c.halted = false → c.ramStart.toNat = Z.ramStart →
       c.mem.size = 65536 → Z.stackLo + Z.rtK ≤ c.sp.toNat → c.sp.toNat + 2 ≤ Z.stackHi →
-      ∃ s', Steps Z.inp c s' ∧ s'.halted = false ∧ s'.ramStart = c.ramStart ∧ s'.mem.size = 65536 ∧
+      ∃ s', Steps c s' ∧ s'.halted = false ∧ s'.ramStart = c.ramStart ∧ s'.mem.size = 65536 ∧
         FreeStack Z c s' ∧ s'.a = c.a ∧ s'.de = c.de ∧
         (if c.hl.toNat < c.bc.toNat then s'.pc = c.rd16 c.sp ∧ s'.sp = c.sp + 2 ∧ s'.hl = c.hl
          else ∃ j : Nat, Z.items[j]? = some (Item.label "rt_trap") ∧ At Z.addrs j s')
@@ -56,7 +56,7 @@ def LoadE (Z : ZCtx) (E : GEnv) (base : Nat) (sF : GS) (dt : Nat → Prop) (a b 
   GExt s0 s1 ∧ s1.regs.a = s0.regs.a ∧ (∀ o, o ∈ s1.regs.hl → o ∈ s0.regs.hl) ∧
     (GExt s1 sF → ∀ fr ist tmps s, Rd Z E dt 1 b → Rel Z E fr dt s0.regs ist tmps s →
       At Z.addrs (base + s0.out.size) s → s.a.toNat = IR.Sem.opd Z.c ist tmps 1 a →
-      ∃ s', Steps Z.inp s s' ∧ At Z.addrs (base + s1.out.size) s' ∧ Rel Z E fr dt s1.regs ist tmps s' ∧
+      ∃ s', Steps s s' ∧ At Z.addrs (base + s1.out.size) s' ∧ Rel Z E fr dt s1.regs ist tmps s' ∧
         s'.a = s.a ∧ s'.e.toNat = IR.Sem.opd Z.c ist tmps 1 b)
 
 theorem loadE_ok (ok : Z.OK) (F : GFinal Z base sF) (a b : Opd) (s0 : GS) :
@@ -64,13 +64,14 @@ theorem loadE_ok (ok : Z.OK) (F : GFinal Z base sF) (a b : Opd) (s0 : GS) :
   unfold loadE
   -- one instruction that sets `E`
   have one : ∀ (b : Opd) (i : Instr) (f : Cpu → Cpu), (∀ env s inp, exec env i s inp = some (f s)) → i.falls = true →
-      (∀ s, Sys s (f s)) → (∀ s, (f s).hl = s.hl) → (∀ s, (f s).a = s.a) →
+      (∀ s, Sys s (f s)) → (∀ s, (f s).io = .none) → (∀ s, (f s).hl = s.hl) → (∀ s, (f s).a = s.a) →
       (∀ (s : Cpu) (ist : IR.Sem.St) (tmps : Array Nat), s.a.toNat = IR.Sem.opd Z.c ist tmps 1 a →
         (f s).e.toNat = IR.Sem.opd Z.c ist tmps 1 b) →
       LoadE Z E base sF dt a b s0 () { s0 with out := s0.out.push (.ins i) } := by
-    intro b i f hexec hfalls hsys hhl ha hval
+    intro b i f hexec hfalls hsys hio hhl ha hval
     refine ⟨GExt.of_out (by simp) rfl rfl, rfl, fun o ho => ho, fun hx fr ist tmps s hrd R hat hA => ?_⟩
     obtain ⟨hst, hat', _⟩ := run_reg ok F (s0 := s0) hx rfl R.mach hat (f s) (fun ad _ => hexec _ _ _) hfalls (hsys s)
+      (hio s)
     exact ⟨_, hst, hat', R.keep (hsys s) (ha s) (hhl s), ha s, hval s ist tmps hA⟩
   have mem_case : ∀ b : Opd, (∀ v, b ≠ .const v) →
       wpg (if (a == b) = true then ins .ld [.e, .a]
@@ -85,7 +86,7 @@ theorem loadE_ok (ok : Z.OK) (F : GFinal Z base sF) (a b : Opd) (s0 : GS) :
       have hab' : a = b := by simpa using hab
       subst hab'
       refine one _ ⟨.ld, [.e, .a]⟩ (fun s => ((op1 s).setReg .hl 3 ((op1 s).reg .hl 7)).tick 4) (fun _ _ _ => rfl) rfl
-        (fun s => by simp only [Sys, zsim, and_self]) (fun s => by simp only [zsim]) (fun s => by simp only [zsim])
+        (fun s => by simp only [Sys, zsim, and_self]) (fun s => by simp only [zsim]) (fun s => by simp only [zsim]) (fun s => by simp only [zsim])
         (fun s ist tmps hA => by simp only [zsim]; exact hA)
     · rw [if_neg hab]
       simp only [wpg_bind]
@@ -106,6 +107,7 @@ theorem loadE_ok (ok : Z.OK) (F : GFinal Z base sF) (a b : Opd) (s0 : GS) :
         (fun ad' had' => by
           rw [ho1, had] at had'
           cases had'
+          intro _
           rfl) rfl (by simp only [Sys, zsim, and_self])
       obtain ⟨st2, at2, _⟩ := run_reg ok F
         (s0 := { s1 with out := s1.out.push (.ins ⟨.ld, [.hl, .imm (opdVal E b)]⟩) })
@@ -131,7 +133,7 @@ theorem loadE_ok (ok : Z.OK) (F : GFinal Z base sF) (a b : Opd) (s0 : GS) :
   | const v =>
     simp only [wpg_ins]
     refine one _ ⟨.ld, [.e, n8 v]⟩ (fun s => ((skip (op1 s) 1).setReg .hl 3 (byteOf (Int.ofNat (v % 256)))).tick 7)
-      (fun _ _ _ => rfl) rfl (fun s => by simp only [Sys, zsim, and_self]) (fun s => by simp only [zsim])
+      (fun _ _ _ => rfl) rfl (fun s => by simp only [Sys, zsim, and_self]) (fun s => by simp only [zsim]) (fun s => by simp only [zsim])
       (fun s => by simp only [zsim]) (fun s ist tmps _ => ?_)
     simp only [zsim]
     rw [byteOf_toNat, opd_const]
@@ -198,7 +200,7 @@ theorem bin8Rt_ok (ok : Z.OK) (hT : FnLay Z E) (F : GFinal Z base sF) {op : Bin}
   have fin : ∀ (s1 : GS), GExt s0 s1 → ∀ (pre : GS → Prop),
       (∀ s2, GExt s2 sF → pre s2 → ∀ fr ist tmps s, Rd Z E dt 1 a → Rd Z E dt 1 b → Rel Z E fr dt s0.regs ist tmps s →
         At Z.addrs (base + s0.out.size) s →
-        ∃ s', Steps Z.inp s s' ∧ At Z.addrs (base + s1.out.size) s' ∧ Rel Z E fr dt s1.regs ist tmps s' ∧
+        ∃ s', Steps s s' ∧ At Z.addrs (base + s1.out.size) s' ∧ Rel Z E fr dt s1.regs ist tmps s' ∧
           s'.a.toNat = IR.Sem.opd Z.c ist tmps 1 a ∧ s'.e.toNat = IR.Sem.opd Z.c ist tmps 1 b) →
       (∀ s2, GExt s1 s2 → pre s2) →
       wpg (do call (rt8name op); setRegs fun r => { r with a := [] }) E

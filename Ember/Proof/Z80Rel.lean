@@ -28,7 +28,6 @@ structure ZCtx where
   a : Assembled
   addrs : List Nat
   c : IR.Ctx
-  inp : UInt16 → UInt8
   /-- The bytes the generated code and the IR share. -/
   data : Nat → Prop
   /-- Where RAM starts. -/

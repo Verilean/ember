@@ -23,12 +23,12 @@ def rlaA (s : Cpu) : Cpu :=
         Cpu.bit ((op1 s).a &&& 0x80 != 0) FC } : Cpu).tick 4
 
 theorem does_ld_a_n (v : Nat) : Does ⟨.ld, [.a, n8 v]⟩ (ldAN v) :=
-  ⟨fun _ _ _ => rfl, rfl, fun s => by simp only [Sys, ldAN, zsim, and_self]⟩
+  ⟨fun _ _ _ => rfl, rfl, fun s => by simp only [Sys, ldAN, zsim, and_self], fun s => by simp only [ldAN, zsim]⟩
 
-theorem does_rla : Does ⟨.rla, []⟩ rlaA := ⟨fun _ _ _ => rfl, rfl, fun s => by simp only [Sys, rlaA, zsim, and_self]⟩
+theorem does_rla : Does ⟨.rla, []⟩ rlaA := ⟨fun _ _ _ => rfl, rfl, fun s => by simp only [Sys, rlaA, zsim, and_self], fun s => by simp only [rlaA, zsim]⟩
 
 theorem does_sbc_a_a : Does ⟨.sbc, [.a, .a]⟩ (aluR 3 7) :=
-  ⟨fun _ _ _ => rfl, rfl, fun s => by simp only [Sys, aluR, zsim, and_self]⟩
+  ⟨fun _ _ _ => rfl, rfl, fun s => by simp only [Sys, aluR, zsim, and_self], fun s => by simp only [aluR, zsim]⟩
 
 /-- `ld a,0; rla`: the carry as a number. -/
 theorem lt_val (s : Cpu) : (rlaA (ldAN 0 s)).a.toNat = if s.flag FC then 1 else 0 := by
@@ -71,16 +71,16 @@ theorem push4_get {α : Type} (o : Array α) (a b c d : α) :
 /-- An instruction of the image that leaves memory alone, run. -/
 theorem run_at (ok : Z.OK) {k : Nat} {i : Instr} {f : Cpu → Cpu} (hk : Z.items[k]? = some (.ins i)) (hd : Does i f)
     {s : Cpu} (M : Mach Z s) (hat : At Z.addrs k s) :
-    Steps Z.inp s (f s) ∧ At Z.addrs (k + 1) (f s) ∧ Mach Z (f s) := by
+    Steps s (f s) ∧ At Z.addrs (k + 1) (f s) ∧ Mach Z (f s) := by
   obtain ⟨ad, had, hpc⟩ := hat
-  obtain ⟨hst, hnext⟩ := step_item ok.placed M.1 hk had hpc M.2 (inp := Z.inp) (hd.exec _ _ _)
-  exact ⟨Steps.one hst, hnext hd.falls, M.sys (hd.sys s)⟩
+  have hst := fun inp => step_item ok.placed M.1 hk had hpc M.2 (inp := inp) (hd.exec _ _ _)
+  exact ⟨Steps.one (fun inp => (hst inp).1) (hd.io s), (hst (fun _ => 0)).2 hd.falls, M.sys (hd.sys s)⟩
 
 /-- What the code that turns the flags into 0 or 1 promises. -/
 def Mat (Z : ZCtx) (base : Nat) (sF : GS) (op : Cmp) (s1 : GS) (_ : Unit) (s2 : GS) : Prop :=
   GExt s1 s2 ∧ s2.regs = s1.regs ∧
     (GExt s2 sF → ∀ s x y, Mach Z s → At Z.addrs (base + s1.out.size) s → FlagsOf op x y s →
-      ∃ s', Steps Z.inp s s' ∧ At Z.addrs (base + s2.out.size) s' ∧ Sys s s' ∧ s'.hl = s.hl ∧
+      ∃ s', Steps s s' ∧ At Z.addrs (base + s2.out.size) s' ∧ Sys s s' ∧ s'.hl = s.hl ∧
         s'.a.toNat = if IR.cmpOp op x y then 1 else 0)
 
 theorem mat_lt (ok : Z.OK) (F : GFinal Z base sF) (s1 : GS) :

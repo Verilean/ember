@@ -55,11 +55,11 @@ def cpR (z : UInt8) (s : Cpu) : Cpu := ((op1 s).alu 7 ((op1 s).reg .hl z)).tick 
 def cpN (v : Nat) (s : Cpu) : Cpu := ((skip (op1 s) 1).alu 7 (byteOf (Int.ofNat (v % 256)))).tick 7
 def cpM (s : Cpu) : Cpu := ((op1 s).alu 7 ((op1 s).rd (op1 s).hl)).tick 7
 
-theorem does_cp_c : Does ⟨.cp, [.c]⟩ (cpR 1) := ⟨fun _ _ _ => rfl, rfl, fun s => by simp only [Sys, cpR, zsim, and_self]⟩
-theorem does_cp_a : Does ⟨.cp, [.a]⟩ (cpR 7) := ⟨fun _ _ _ => rfl, rfl, fun s => by simp only [Sys, cpR, zsim, and_self]⟩
+theorem does_cp_c : Does ⟨.cp, [.c]⟩ (cpR 1) := ⟨fun _ _ _ => rfl, rfl, fun s => by simp only [Sys, cpR, zsim, and_self], fun s => by simp only [cpR, zsim]⟩
+theorem does_cp_a : Does ⟨.cp, [.a]⟩ (cpR 7) := ⟨fun _ _ _ => rfl, rfl, fun s => by simp only [Sys, cpR, zsim, and_self], fun s => by simp only [cpR, zsim]⟩
 theorem does_cp_n (v : Nat) : Does ⟨.cp, [n8 v]⟩ (cpN v) :=
-  ⟨fun _ _ _ => rfl, rfl, fun s => by simp only [Sys, cpN, zsim, and_self]⟩
-theorem does_cp_m : Does ⟨.cp, [.mhl]⟩ cpM := ⟨fun _ _ _ => rfl, rfl, fun s => by simp only [Sys, cpM, zsim, and_self]⟩
+  ⟨fun _ _ _ => rfl, rfl, fun s => by simp only [Sys, cpN, zsim, and_self], fun s => by simp only [cpN, zsim]⟩
+theorem does_cp_m : Does ⟨.cp, [.mhl]⟩ cpM := ⟨fun _ _ _ => rfl, rfl, fun s => by simp only [Sys, cpM, zsim, and_self], fun s => by simp only [cpM, zsim]⟩
 
 /-- After `cp v` the flags compare `A` and `v`. -/
 theorem cp_flags (op : Cmp) (s : Cpu) (v : UInt8) (n : UInt64) :
@@ -99,7 +99,7 @@ theorem cpM_flags (op : Cmp) (s : Cpu) : FlagsOf op s.a.toNat (s.rd s.hl).toNat 
 def incA (s : Cpu) : Cpu :=
   (((op1 s).inc8 ((op1 s).reg .hl 7)).2.setReg .hl 7 ((op1 s).inc8 ((op1 s).reg .hl 7)).1).tick 4
 
-theorem does_inc_a : Does ⟨.inc, [.a]⟩ incA := ⟨fun _ _ _ => rfl, rfl, fun s => by simp only [Sys, incA, zsim, and_self]⟩
+theorem does_inc_a : Does ⟨.inc, [.a]⟩ incA := ⟨fun _ _ _ => rfl, rfl, fun s => by simp only [Sys, incA, zsim, and_self], fun s => by simp only [incA, zsim]⟩
 
 theorem byte_val (v : Nat) (hv : v < 256) : (byteOf (Int.ofNat (v % 256))).toNat = v := by
   rw [byteOf_toNat]
@@ -164,7 +164,7 @@ def Flags (Z : ZCtx) (E : GEnv) (base : Nat) (sF : GS) (dt : Nat → Prop) (op :
   GExt s0 s1 ∧
     (GExt s1 sF → H → ∀ fr ist tmps s, Rd Z E dt n a → Rd Z E dt n b → Rel Z E fr dt s0.regs ist tmps s →
       At Z.addrs (base + s0.out.size) s →
-      ∃ s', Steps Z.inp s s' ∧ At Z.addrs (base + s1.out.size) s' ∧ Rel Z E fr dt s1.regs ist tmps s' ∧
+      ∃ s', Steps s s' ∧ At Z.addrs (base + s1.out.size) s' ∧ Rel Z E fr dt s1.regs ist tmps s' ∧
         FlagsOf op (IR.Sem.opd Z.c ist tmps n a) (IR.Sem.opd Z.c ist tmps n b) s')
 
 /-- `cp` with the second operand, `A` holding the first. -/
@@ -172,7 +172,7 @@ theorem cp8Opd_ok (ok : Z.OK) (F : GFinal Z base sF) (op : Cmp) (a b : Opd) (s0 
     wpg (cp8Opd a b) E (fun _ s1 => GExt s0 s1 ∧
       (GExt s1 sF → ∀ fr ist tmps s, Rd Z E dt 1 b → Rel Z E fr dt s0.regs ist tmps s →
         At Z.addrs (base + s0.out.size) s → s.a.toNat = IR.Sem.opd Z.c ist tmps 1 a →
-        ∃ s', Steps Z.inp s s' ∧ At Z.addrs (base + s1.out.size) s' ∧ Rel Z E fr dt s1.regs ist tmps s' ∧
+        ∃ s', Steps s s' ∧ At Z.addrs (base + s1.out.size) s' ∧ Rel Z E fr dt s1.regs ist tmps s' ∧
           FlagsOf op (IR.Sem.opd Z.c ist tmps 1 a) (IR.Sem.opd Z.c ist tmps 1 b) s')) s0 := by
   unfold cp8Opd
   have mem_case : ∀ b : Opd, (∀ v, b ≠ .const v) →
@@ -184,7 +184,7 @@ theorem cp8Opd_ok (ok : Z.OK) (F : GFinal Z base sF) (op : Cmp) (a b : Opd) (s0 
           setRegs fun r => { r with hl := [] }) E (fun _ s1 => GExt s0 s1 ∧
       (GExt s1 sF → ∀ fr ist tmps s, Rd Z E dt 1 b → Rel Z E fr dt s0.regs ist tmps s →
         At Z.addrs (base + s0.out.size) s → s.a.toNat = IR.Sem.opd Z.c ist tmps 1 a →
-        ∃ s', Steps Z.inp s s' ∧ At Z.addrs (base + s1.out.size) s' ∧ Rel Z E fr dt s1.regs ist tmps s' ∧
+        ∃ s', Steps s s' ∧ At Z.addrs (base + s1.out.size) s' ∧ Rel Z E fr dt s1.regs ist tmps s' ∧
           FlagsOf op (IR.Sem.opd Z.c ist tmps 1 a) (IR.Sem.opd Z.c ist tmps 1 b) s')) s0 := by
     intro b hc
     by_cases hab : (a == b) = true
@@ -216,6 +216,7 @@ theorem cp8Opd_ok (ok : Z.OK) (F : GFinal Z base sF) (op : Cmp) (a b : Opd) (s0 
         (fun ad' had' => by
           rw [ho1, had] at had'
           cases had'
+          intro _
           rfl) rfl (by simp only [Sys, zsim, and_self])
       obtain ⟨st2, at2, _⟩ := run_reg ok F
         (s0 := { s1 with out := s1.out.push (.ins ⟨.ld, [.hl, .imm (opdVal E b)]⟩) })
@@ -260,7 +261,7 @@ theorem zeroTest_spec {op : Cmp} {b : Opd} (h : zeroTest op b = true) : b = .con
 /-- `or a` as the model runs it. -/
 def orA (s : Cpu) : Cpu := ((op1 s).alu 6 ((op1 s).reg .hl 7)).tick 4
 
-theorem does_or_a : Does ⟨.or, [.a]⟩ orA := ⟨fun _ _ _ => rfl, rfl, fun s => by simp only [Sys, orA, zsim, and_self]⟩
+theorem does_or_a : Does ⟨.or, [.a]⟩ orA := ⟨fun _ _ _ => rfl, rfl, fun s => by simp only [Sys, orA, zsim, and_self], fun s => by simp only [orA, zsim]⟩
 
 theorem orA_a (s : Cpu) : (orA s).a = s.a := by
   simp only [orA, zsim]
@@ -351,7 +352,7 @@ theorem eqHL_ok (ok : Z.OK) (F : GFinal Z base sF) (v : Nat) (hv : v < 65536)
     (hk : v = 65535 ∨ v % 256 = 0 ∨ v / 256 = 0) (s0 : GS) :
     wpg (eqHL v) E (fun _ s1 => GExt s0 s1 ∧ s1.regs = s0.regs ∧
       (GExt s1 sF → ∀ s, Mach Z s → At Z.addrs (base + s0.out.size) s →
-        ∃ s', Steps Z.inp s s' ∧ At Z.addrs (base + s1.out.size) s' ∧ Sys s s' ∧ s'.hl = s.hl ∧
+        ∃ s', Steps s s' ∧ At Z.addrs (base + s1.out.size) s' ∧ Sys s s' ∧ s'.hl = s.hl ∧
           s'.flag FZ = (s.hl.toNat == v))) s0 := by
   unfold eqHL
   by_cases h1 : (v == 65535) = true
@@ -418,10 +419,10 @@ theorem u16_beq (a b : UInt16) : (a == b) = (a.toNat == b.toNat) := by
 def sbcDE (s : Cpu) : Cpu := ((op2 s).sbc16 ((op2 s).rp .hl 1)).tick 15
 
 theorem does_sbc_de : Does ⟨.sbc, [.hl, .de]⟩ sbcDE :=
-  ⟨fun _ _ _ => rfl, rfl, fun s => by simp only [Sys, sbcDE, zsim, and_self]⟩
+  ⟨fun _ _ _ => rfl, rfl, fun s => by simp only [Sys, sbcDE, zsim, and_self], fun s => by simp only [sbcDE, zsim]⟩
 
 theorem does_add_de : Does ⟨.add, [.hl, .de]⟩ addHLDE :=
-  ⟨fun _ _ _ => rfl, rfl, fun s => by simp only [Sys, addHLDE, zsim, and_self]⟩
+  ⟨fun _ _ _ => rfl, rfl, fun s => by simp only [Sys, addHLDE, zsim, and_self], fun s => by simp only [addHLDE, zsim]⟩
 
 /-- `or a; sbc hl,de`: the flags compare `HL` and `DE`. -/
 theorem sub_flags (s : Cpu) :
@@ -464,7 +465,7 @@ theorem sub16_ok (ok : Z.OK) (F : GFinal Z base sF) (op : Cmp) (a b : Opd) (s0 :
   have fin : ∀ (s1 : GS), GExt s0 s1 →
       (∀ s2, GExt s1 s2 → GExt s2 sF → ∀ fr ist tmps s, Rd Z E dt 2 a → Rd Z E dt 2 b →
         Rel Z E fr dt s0.regs ist tmps s → At Z.addrs (base + s0.out.size) s →
-        ∃ s', Steps Z.inp s s' ∧ At Z.addrs (base + s1.out.size) s' ∧ Rel Z E fr dt s1.regs ist tmps s' ∧
+        ∃ s', Steps s s' ∧ At Z.addrs (base + s1.out.size) s' ∧ Rel Z E fr dt s1.regs ist tmps s' ∧
           s'.hl.toNat = IR.Sem.opd Z.c ist tmps 2 a ∧ s'.de.toNat = IR.Sem.opd Z.c ist tmps 2 b) →
       wpg (do
         ins .or [.a]

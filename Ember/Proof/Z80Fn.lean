@@ -164,7 +164,7 @@ structure FnGen.OK (G : FnGen) (Z : ZCtx) (f : IR.Fn) : Prop where
   labels : ∀ pc l, f.body[pc]? = some (.label l) → f.body.findIdx? (· == .label l) = some pc
   /-- From the entry to the first instruction: the parameter in a register is stored. -/
   entry : ∀ st v s, Entry Z f st v s →
-    ∃ s', Steps Z.inp s s' ∧ At Z.addrs (G.base + (G.gs 0).out.size) s' ∧
+    ∃ s', Steps s s' ∧ At Z.addrs (G.base + (G.gs 0).out.size) s' ∧
       Rel Z G.E ⟨s.sp, s.mem⟩ (fun _ => False) (G.gs 0).regs (stArg Z.c f st v)
         (Array.replicate f.tmps.size 0) s'
 
@@ -230,7 +230,7 @@ theorem labelAt_spec {f : IR.Fn} {l i : Nat} (h : IR.Sem.labelAt f l = some i) :
     rw [this]
   | _ => rw [hb] at hp; cases hp
 
-theorem Outcome.steps {f : IR.Fn} {fr : Fr} {s s' : Cpu} {res : IR.Sem.Res} (h1 : Steps Z.inp s s')
+theorem Outcome.steps {f : IR.Fn} {fr : Fr} {s s' : Cpu} {res : IR.Sem.Res} (h1 : Steps s s')
     (h : Outcome Z f fr s' res) : Outcome Z f fr s res := by
   cases res with
   | ok r st =>

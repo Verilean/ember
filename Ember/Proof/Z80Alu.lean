@@ -104,10 +104,10 @@ theorem Mach.sys {s s' : Cpu} (M : Mach Z s) (h : Sys s s') : Mach Z s' :=
 /-- One instruction that leaves memory alone, emitted and run. -/
 theorem run_reg (ok : Z.OK) (F : GFinal Z base sF) {s0 s1 : GS} {i : Instr} (hx : GExt s1 sF)
     (ho : s1.out = s0.out.push (.ins i)) {s : Cpu} (M : Mach Z s) (hat : At Z.addrs (base + s0.out.size) s)
-    (s' : Cpu) (hexec : ∀ ad, Z.addrs[base + s0.out.size]? = some ad → exec (Z.a.env ad) i s Z.inp = some s')
-    (hf : i.falls = true) (hS : Sys s s') :
-    Steps Z.inp s s' ∧ At Z.addrs (base + s1.out.size) s' ∧ Mach Z s' := by
-  obtain ⟨h1, h2⟩ := run_ins ok F hx ho M.1 M.2 hat hexec hf
+    (s' : Cpu) (hexec : ∀ ad, Z.addrs[base + s0.out.size]? = some ad → ∀ {inp}, exec (Z.a.env ad) i s inp = some s')
+    (hf : i.falls = true) (hS : Sys s s') (hio : s'.io = .none := by first | rfl | simp only [zsim]) :
+    Steps s s' ∧ At Z.addrs (base + s1.out.size) s' ∧ Mach Z s' := by
+  obtain ⟨h1, h2⟩ := run_ins ok F hx ho M.1 M.2 hat (fun ad had => hexec ad had) hf hio
   exact ⟨h1, h2, M.sys hS⟩
 
 /-- The states agree when only registers changed and the tracker claims nothing of `A`. -/
@@ -126,7 +126,7 @@ def AluOpd (Z : ZCtx) (E : GEnv) (base : Nat) (sF : GS) (dt : Nat → Prop) (op 
   GExt s0 s1 ∧ s1.regs.a = s0.regs.a ∧ (∀ o, o ∈ s1.regs.hl → o ∈ s0.regs.hl) ∧
     (GExt s1 sF → ∀ fr ist tmps s, Rd Z E dt 1 b → Rel Z E fr dt s0.regs ist tmps s →
       At Z.addrs (base + s0.out.size) s → s.a.toNat = IR.Sem.opd Z.c ist tmps 1 a →
-      ∃ s', Steps Z.inp s s' ∧ At Z.addrs (base + s1.out.size) s' ∧
+      ∃ s', Steps s s' ∧ At Z.addrs (base + s1.out.size) s' ∧
         Rel Z E fr dt { s1.regs with a := [] } ist tmps s' ∧
         s'.a.toNat = IR.binOp op 1 (IR.Sem.opd Z.c ist tmps 1 a) (IR.Sem.opd Z.c ist tmps 1 b))
 
@@ -144,14 +144,15 @@ theorem alu8Opd_ok (ok : Z.OK) (F : GFinal Z base sF) {op : Bin} {k : UInt8} (hk
   unfold alu8Opd
   -- an instruction on `A` alone, with the value it leaves
   have one : ∀ (i : Instr) (f : Cpu → Cpu), (∀ env s inp, exec env i s inp = some (f s)) → i.falls = true →
-      (∀ s, Sys s (f s)) → (∀ s, (f s).hl = s.hl) →
+      (∀ s, Sys s (f s)) → (∀ s, (f s).io = .none) → (∀ s, (f s).hl = s.hl) →
       (∀ (s : Cpu) (ist : IR.Sem.St) (tmps : Array Nat),
         s.a.toNat = IR.Sem.opd Z.c ist tmps 1 a →
         (f s).a.toNat = IR.binOp op 1 (IR.Sem.opd Z.c ist tmps 1 a) (IR.Sem.opd Z.c ist tmps 1 b)) →
       AluOpd Z E base sF dt op a b s0 () { s0 with out := s0.out.push (.ins i) } := by
-    intro i f hexec hfalls hsys hhl hval
+    intro i f hexec hfalls hsys hio hhl hval
     refine ⟨GExt.of_out (by simp) rfl rfl, rfl, fun o ho => ho, fun hx fr ist tmps s hrd R hat hA => ?_⟩
     obtain ⟨hst, hat', _⟩ := run_reg ok F (s0 := s0) hx rfl R.mach hat (f s) (fun ad _ => hexec _ _ _) hfalls (hsys s)
+      (hio s)
     exact ⟨_, hst, hat', R.of_sys (hsys s) rfl (fun o ho => ho) (fun o ho hown => by rw [hhl]; exact R.rhl o ho hown)
       (fun n o h => h), hval s ist tmps hA⟩
   have incA : ∀ s : Cpu, (((op1 s).inc8 ((op1 s).reg .hl 7)).2.setReg .hl 7 ((op1 s).inc8 ((op1 s).reg .hl 7)).1 |>.tick 4).a.toNat
@@ -210,6 +211,7 @@ theorem alu8Opd_ok (ok : Z.OK) (F : GFinal Z base sF) {op : Bin} {k : UInt8} (hk
         (fun ad' had' => by
           rw [ho1, had] at had'
           cases had'
+          intro _
           rfl) rfl (by simp only [Sys, zsim, and_self])
       -- the operation, with `(hl)`
       obtain ⟨st2, at2, _⟩ := run_reg ok F
@@ -236,7 +238,7 @@ theorem alu8Opd_ok (ok : Z.OK) (F : GFinal Z base sF) {op : Bin} {k : UInt8} (hk
       obtain ⟨hop, hv⟩ := h1
       obtain rfl := bin_beq hop
       refine one _ (fun s => ((op1 s).inc8 ((op1 s).reg .hl 7)).2.setReg .hl 7 ((op1 s).inc8 ((op1 s).reg .hl 7)).1 |>.tick 4)
-        (fun _ _ _ => rfl) rfl (fun s => by simp only [Sys, zsim, and_self]) (fun s => by simp only [zsim])
+        (fun _ _ _ => rfl) rfl (fun s => by simp only [Sys, zsim, and_self]) (fun s => by simp only [zsim]) (fun s => by simp only [zsim])
         (fun s ist tmps hA => ?_)
       rw [incA, opd_const, ← hA]
       show _ = (s.a.toNat + v % 2 ^ (8 * 1)) % 2 ^ (8 * 1)
@@ -249,7 +251,7 @@ theorem alu8Opd_ok (ok : Z.OK) (F : GFinal Z base sF) {op : Bin} {k : UInt8} (hk
         obtain ⟨hop, hv⟩ := h2
         obtain rfl := bin_beq hop
         refine one _ (fun s => ((op1 s).dec8 ((op1 s).reg .hl 7)).2.setReg .hl 7 ((op1 s).dec8 ((op1 s).reg .hl 7)).1 |>.tick 4)
-          (fun _ _ _ => rfl) rfl (fun s => by simp only [Sys, zsim, and_self]) (fun s => by simp only [zsim])
+          (fun _ _ _ => rfl) rfl (fun s => by simp only [Sys, zsim, and_self]) (fun s => by simp only [zsim]) (fun s => by simp only [zsim])
           (fun s ist tmps hA => ?_)
         rw [decA, opd_const, ← hA]
         show _ = (s.a.toNat + 2 ^ (8 * 1) - v % 2 ^ (8 * 1)) % 2 ^ (8 * 1)
@@ -262,7 +264,7 @@ theorem alu8Opd_ok (ok : Z.OK) (F : GFinal Z base sF) {op : Bin} {k : UInt8} (hk
           obtain ⟨hop, hv⟩ := h3
           obtain rfl := bin_beq hop
           refine one _ (fun s => ((op1 s).dec8 ((op1 s).reg .hl 7)).2.setReg .hl 7 ((op1 s).dec8 ((op1 s).reg .hl 7)).1 |>.tick 4)
-            (fun _ _ _ => rfl) rfl (fun s => by simp only [Sys, zsim, and_self]) (fun s => by simp only [zsim])
+            (fun _ _ _ => rfl) rfl (fun s => by simp only [Sys, zsim, and_self]) (fun s => by simp only [zsim]) (fun s => by simp only [zsim])
             (fun s ist tmps hA => ?_)
           rw [decA, opd_const, ← hA]
           show _ = (s.a.toNat + v % 2 ^ (8 * 1)) % 2 ^ (8 * 1)
@@ -275,7 +277,7 @@ theorem alu8Opd_ok (ok : Z.OK) (F : GFinal Z base sF) {op : Bin} {k : UInt8} (hk
             obtain ⟨hop, hv⟩ := h4
             obtain rfl := bin_beq hop
             refine one _ (fun s => ((op1 s).inc8 ((op1 s).reg .hl 7)).2.setReg .hl 7 ((op1 s).inc8 ((op1 s).reg .hl 7)).1 |>.tick 4)
-              (fun _ _ _ => rfl) rfl (fun s => by simp only [Sys, zsim, and_self]) (fun s => by simp only [zsim])
+              (fun _ _ _ => rfl) rfl (fun s => by simp only [Sys, zsim, and_self]) (fun s => by simp only [zsim]) (fun s => by simp only [zsim])
               (fun s ist tmps hA => ?_)
             rw [incA, opd_const, ← hA]
             show _ = (s.a.toNat + 2 ^ (8 * 1) - v % 2 ^ (8 * 1)) % 2 ^ (8 * 1)
@@ -284,7 +286,7 @@ theorem alu8Opd_ok (ok : Z.OK) (F : GFinal Z base sF) {op : Bin} {k : UInt8} (hk
           · simp only [h4, Bool.false_eq_true, if_false]
             rw [wpg_alu8 hk]
             refine one _ (fun s => ((skip (op1 s) 1).alu k (byteOf (Int.ofNat (v % 256 % 256)))).tick 7)
-              (fun _ _ _ => exec_alu_imm _ _ _ hk _) (aluIns_falls _ _) (fun s => by simp only [Sys, zsim, and_self])
+              (fun _ _ _ => exec_alu_imm _ _ _ hk _) (aluIns_falls _ _) (fun s => by simp only [Sys, zsim, and_self]) (fun s => by simp only [zsim])
               (fun s => by simp only [zsim]) (fun s ist tmps hA => ?_)
             simp only [zsim]
             rw [alu_val hk, opd_const, ← hA, byteOf_toNat]
@@ -308,7 +310,7 @@ def Bin8A (Z : ZCtx) (E : GEnv) (base : Nat) (sF : GS) (dt : Nat → Prop) (op :
   GExt s0 s1 ∧ (∀ o, o ∈ s1.regs.hl → o ∈ s0.regs.hl) ∧
     (GExt s1 sF → ∀ fr ist tmps s, Rd Z E dt 1 a → Rd Z E dt 1 b → Rel Z E fr dt s0.regs ist tmps s →
       At Z.addrs (base + s0.out.size) s →
-      ∃ s', Steps Z.inp s s' ∧ At Z.addrs (base + s1.out.size) s' ∧
+      ∃ s', Steps s s' ∧ At Z.addrs (base + s1.out.size) s' ∧
         Rel Z E fr dt { s1.regs with a := [] } ist tmps s' ∧
         s'.a.toNat = IR.binOp op 1 (IR.Sem.opd Z.c ist tmps 1 a) (IR.Sem.opd Z.c ist tmps 1 b))
 
@@ -366,7 +368,7 @@ def Bin8 (Z : ZCtx) (E : GEnv) (base : Nat) (sF : GS) (dt : Nat → Prop) (op : 
   GExt s0 s1 ∧
     (GExt s1 sF → H → ∀ fr ist tmps s, Rd Z E dt 1 a → Rd Z E dt 1 b → Rel Z E fr dt s0.regs ist tmps s →
       At Z.addrs (base + s0.out.size) s →
-      ∃ s', Steps Z.inp s s' ∧ At Z.addrs (base + s1.out.size) s' ∧ Rel Z E fr dt s1.regs ist tmps s' ∧
+      ∃ s', Steps s s' ∧ At Z.addrs (base + s1.out.size) s' ∧ Rel Z E fr dt s1.regs ist tmps s' ∧
         s'.a.toNat = IR.binOp op 1 (IR.Sem.opd Z.c ist tmps 1 a) (IR.Sem.opd Z.c ist tmps 1 b))
 
 theorem bin8_alu (op : Bin) {k : UInt8} (hk : aluK op = some k) (a b : Opd) :

@@ -47,15 +47,16 @@ variable {Z : ZCtx} {E : GEnv} {base : Nat} {sF : GS} {dt : Nat → Prop} {fr : 
 
 /-- **An instruction repeated**: its effect, iterated. -/
 theorem run_rep (ok : Z.OK) (F : GFinal Z base sF) {i : Instr} (f : Cpu → Cpu)
-    (hexec : ∀ env s inp, exec env i s inp = some (f s)) (hf : i.falls = true) (hS : ∀ s, Sys s (f s)) :
+    (hexec : ∀ env s inp, exec env i s inp = some (f s)) (hf : i.falls = true) (hS : ∀ s, Sys s (f s))
+    (hio : ∀ s, (f s).io = .none) :
     ∀ (k : Nat) (s0 : GS) (s : Cpu), GExt (pushK (.ins i) k s0) sF → Mach Z s →
       At Z.addrs (base + s0.out.size) s →
-      Steps Z.inp s (iter k f s) ∧ At Z.addrs (base + (pushK (.ins i) k s0).out.size) (iter k f s) ∧ Mach Z (iter k f s)
-  | 0, s0, s, _, M, hat => ⟨Steps.refl _ _, hat, M⟩
+      Steps s (iter k f s) ∧ At Z.addrs (base + (pushK (.ins i) k s0).out.size) (iter k f s) ∧ Mach Z (iter k f s)
+  | 0, s0, s, _, M, hat => ⟨Steps.refl _, hat, M⟩
   | k + 1, s0, s, hx, M, hat => by
     obtain ⟨st1, at1, M1⟩ := run_reg ok F (s0 := s0) (s1 := { s0 with out := s0.out.push (.ins i) })
-      ((pushK_ext _ k _).trans hx) rfl M hat (f s) (fun ad _ => hexec _ _ _) hf (hS s)
-    obtain ⟨st2, at2, M2⟩ := run_rep ok F f hexec hf hS k _ (f s) hx M1 at1
+      ((pushK_ext _ k _).trans hx) rfl M hat (f s) (fun ad _ => hexec _ _ _) hf (hS s) (hio s)
+    obtain ⟨st2, at2, M2⟩ := run_rep ok F f hexec hf hS hio k _ (f s) hx M1 at1
     exact ⟨st1.trans st2, at2, M2⟩
 
 /-- Instructions emitted one after the other. -/
@@ -85,19 +86,20 @@ structure Does (i : Instr) (f : Cpu → Cpu) : Prop where
   exec : ∀ env s inp, exec env i s inp = some (f s)
   falls : i.falls = true
   sys : ∀ s, Sys s (f s)
+  io : ∀ s, (f s).io = .none
 
 /-- **Instructions one after the other**, each leaving memory alone. -/
 theorem run_list (ok : Z.OK) (F : GFinal Z base sF) :
     ∀ (l : List (Instr × (Cpu → Cpu))), (∀ p, p ∈ l → Does p.1 p.2) → ∀ (s0 : GS) (s : Cpu),
       GExt (pushL (l.map (·.1)) s0) sF → Mach Z s → At Z.addrs (base + s0.out.size) s →
-      Steps Z.inp s (runL (l.map (·.2)) s) ∧
+      Steps s (runL (l.map (·.2)) s) ∧
         At Z.addrs (base + (pushL (l.map (·.1)) s0).out.size) (runL (l.map (·.2)) s) ∧
         Mach Z (runL (l.map (·.2)) s) ∧ Sys s (runL (l.map (·.2)) s)
-  | [], _, s0, s, _, M, hat => ⟨Steps.refl _ _, hat, M, Sys.refl s⟩
+  | [], _, s0, s, _, M, hat => ⟨Steps.refl _, hat, M, Sys.refl s⟩
   | (i, f) :: r, h, s0, s, hx, M, hat => by
     have hd := h (i, f) (by simp)
     obtain ⟨st1, at1, M1⟩ := run_reg ok F (s0 := s0) (s1 := { s0 with out := s0.out.push (.ins i) })
-      ((pushL_ext _ _).trans hx) rfl M hat (f s) (fun ad _ => hd.exec _ _ _) hd.falls (hd.sys s)
+      ((pushL_ext _ _).trans hx) rfl M hat (f s) (fun ad _ => hd.exec _ _ _) hd.falls (hd.sys s) (hd.io s)
     obtain ⟨st2, at2, M2, S2⟩ := run_list ok F r (fun p hp => h p (by simp [hp])) _ (f s) hx M1 at1
     exact ⟨st1.trans st2, at2, M2, (hd.sys s).trans S2⟩
 

@@ -526,4 +526,40 @@ variable (s : Cpu) (v : UInt8)
 @[zsim] theorem setReg3_bc : (s.setReg .hl 3 v).bc = s.bc := rfl
 end
 
+/-! ## No I/O -/
+
+section
+variable (s : Cpu) (n : UInt64) (k : UInt16) (v : UInt8) (w : UInt16) (x : UInt16)
+
+@[zsim] theorem tick_io : (s.tick n).io = s.io := rfl
+@[zsim] theorem skip_io : (skip s k).io = s.io := rfl
+@[zsim] theorem op1_io : (op1 s).io = .none := rfl
+@[zsim] theorem op2_io : (op2 s).io = .none := rfl
+@[zsim] theorem setHL_io : (s.setHL w).io = s.io := rfl
+@[zsim] theorem setDE_io : (s.setDE w).io = s.io := rfl
+@[zsim] theorem setBC_io : (s.setBC w).io = s.io := rfl
+@[zsim] theorem setReg0_io : (s.setReg .hl 0 v).io = s.io := rfl
+@[zsim] theorem setReg1_io : (s.setReg .hl 1 v).io = s.io := rfl
+@[zsim] theorem setReg2_io : (s.setReg .hl 2 v).io = s.io := rfl
+@[zsim] theorem setReg3_io : (s.setReg .hl 3 v).io = s.io := rfl
+@[zsim] theorem setReg7_io : (s.setReg .hl 7 v).io = s.io := rfl
+@[zsim] theorem setReg4_io : (s.setReg .hl 4 v).io = s.io := rfl
+@[zsim] theorem setReg5_io : (s.setReg .hl 5 v).io = s.io := rfl
+@[zsim] theorem alu0_io : (s.alu 0 v).io = s.io := rfl
+@[zsim] theorem alu1_io : (s.alu 1 v).io = s.io := rfl
+@[zsim] theorem alu2_io : (s.alu 2 v).io = s.io := rfl
+@[zsim] theorem alu3_io : (s.alu 3 v).io = s.io := rfl
+@[zsim] theorem alu4_io : (s.alu 4 v).io = s.io := rfl
+@[zsim] theorem alu5_io : (s.alu 5 v).io = s.io := rfl
+@[zsim] theorem alu6_io : (s.alu 6 v).io = s.io := rfl
+@[zsim] theorem alu7_io : (s.alu 7 v).io = s.io := rfl
+@[zsim] theorem wr_io : (s.wr x v).io = s.io := by unfold Cpu.wr; split <;> rfl
+@[zsim] theorem wr16_io : (s.wr16 x w).io = s.io := by simp only [Cpu.wr16, zsim]
+@[zsim] theorem push_io : (s.push w).io = s.io := by simp only [Cpu.push, zsim]
+@[zsim] theorem inc8_io : (s.inc8 v).2.io = s.io := rfl
+@[zsim] theorem dec8_io : (s.dec8 v).2.io = s.io := rfl
+@[zsim] theorem alu_io (k' : UInt8) : (s.alu k' v).io = s.io := by unfold Cpu.alu; split <;> rfl
+
+end
+
 end Ember.Proof.Z80Gen

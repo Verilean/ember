@@ -17,8 +17,8 @@ def cplA (s : Cpu) : Cpu :=
 def negA (s : Cpu) : Cpu :=
   ({ (op2 s) with a := (sub8 0 (op2 s).a false).1, f := (sub8 0 (op2 s).a false).2 } : Cpu).tick 8
 
-theorem does_cpl : Does ⟨.cpl, []⟩ cplA := ⟨fun _ _ _ => rfl, rfl, fun s => by simp only [Sys, cplA, zsim, and_self]⟩
-theorem does_neg : Does ⟨.neg, []⟩ negA := ⟨fun _ _ _ => rfl, rfl, fun s => by simp only [Sys, negA, zsim, and_self]⟩
+theorem does_cpl : Does ⟨.cpl, []⟩ cplA := ⟨fun _ _ _ => rfl, rfl, fun s => by simp only [Sys, cplA, zsim, and_self], fun s => by simp only [cplA, zsim]⟩
+theorem does_neg : Does ⟨.neg, []⟩ negA := ⟨fun _ _ _ => rfl, rfl, fun s => by simp only [Sys, negA, zsim, and_self], fun s => by simp only [negA, zsim]⟩
 
 theorem cplA_a (s : Cpu) : (cplA s).a.toNat = 255 - s.a.toNat := by
   simp only [cplA, zsim]
@@ -45,7 +45,7 @@ theorem unA_ok (ok : Z.OK) (hT : FnLay Z E) (F : GFinal Z base sF) {op : Op} (f 
       (fun _ s1 => GExt s0 s1 ∧
         (GExt s1 sF → Rd Z E dt 1 a ∧ Wr Z E 1 d → ∀ fr ist tmps s, Rel Z E fr dt s0.regs ist tmps s →
           At Z.addrs (base + s0.out.size) s →
-          ∃ s', Steps Z.inp s s' ∧ At Z.addrs (base + s1.out.size) s' ∧
+          ∃ s', Steps s s' ∧ At Z.addrs (base + s1.out.size) s' ∧
             Rel Z E fr (dtAfter dt d) s1.regs
               (IR.Sem.setDst Z.c ist tmps 1 d (g (IR.Sem.opd Z.c ist tmps 1 a))).1
               (IR.Sem.setDst Z.c ist tmps 1 d (g (IR.Sem.opd Z.c ist tmps 1 a))).2 s')) s0 := by
@@ -58,7 +58,7 @@ theorem unA_ok (ok : Z.OK) (hT : FnLay Z E) (F : GFinal Z base sF) {op : Op} (f 
   refine ⟨hx1.trans (((GExt.push _ _).trans (GExt.regs _ _)).trans hx2), fun hxF ⟨hrd, hwr⟩ fr ist tmps s R hat => ?_⟩
   obtain ⟨s', st1, at1, R1, _, hA⟩ := hl (((GExt.push _ _).trans (GExt.regs _ _)).trans (hx2.trans hxF)) fr ist tmps s hrd R hat
   obtain ⟨st2, at2, _⟩ := run_reg ok F (s0 := s1) (s1 := { s1 with out := s1.out.push (.ins ⟨op, []⟩) })
-    ((GExt.regs _ _).trans (hx2.trans hxF)) rfl R1.mach at1 (f s') (fun ad _ => hd.exec _ _ _) hd.falls (hd.sys s')
+    ((GExt.regs _ _).trans (hx2.trans hxF)) rfl R1.mach at1 (f s') (fun ad _ => hd.exec _ _ _) hd.falls (hd.sys s') (hd.io s')
   have R2 : Rel Z E fr dt { s1.regs with a := [] } ist tmps (f s') :=
     R1.of_sys (hd.sys s') rfl (fun o ho => ho) (fun o ho hown => by rw [hhl]; exact R1.rhl o ho hown) (fun n o h => h)
   obtain ⟨s'', st3, at3, R3, _⟩ := hs hxF fr ist tmps (f s') (g (IR.Sem.opd Z.c ist tmps 1 a)) hwr R2 at2 (by
@@ -92,7 +92,7 @@ theorem unHL_ok (ok : Z.OK) (hT : FnLay Z E) (F : GFinal Z base sF) (name : Stri
         (GExt s1 sF → Rd Z E dt 2 a ∧ Wr Z E 2 d ∧ RtPure Z name (fun s s' => s'.hl.toNat = g s.hl.toNat) ∧
             Z.rtK + 2 ≤ Z.depth E.fn.name →
           ∀ fr ist tmps s, Rel Z E fr dt s0.regs ist tmps s → At Z.addrs (base + s0.out.size) s →
-          ∃ s', Steps Z.inp s s' ∧ At Z.addrs (base + s1.out.size) s' ∧
+          ∃ s', Steps s s' ∧ At Z.addrs (base + s1.out.size) s' ∧
             Rel Z E fr (dtAfter dt d) s1.regs
               (IR.Sem.setDst Z.c ist tmps 2 d (g (IR.Sem.opd Z.c ist tmps 2 a))).1
               (IR.Sem.setDst Z.c ist tmps 2 d (g (IR.Sem.opd Z.c ist tmps 2 a))).2 s')) s0 := by

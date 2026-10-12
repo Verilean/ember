@@ -46,14 +46,14 @@ variable {Z : ZCtx} {E : GEnv} {base : Nat} {sF : GS} {dt : Nat → Prop} {fr : 
 theorem ret_step (ok : Z.OK) (F : GFinal Z base sF) {s0 s1 : GS} (hx : GExt s1 sF)
     (ho : s1.out = s0.out.push (.ins ⟨.ret, []⟩)) {regs : Regs} {ist : IR.Sem.St} {tmps : Array Nat} {s : Cpu}
     (R : Rel Z E fr dt regs ist tmps s) (hat : At Z.addrs (base + s0.out.size) s) (sz r : Option Nat)
-    (hres : ∀ n, sz = some n → ResIn n (r.getD 0) s) : ∃ s', Steps Z.inp s s' ∧ RetSt Z E.fn fr ist sz r s' := by
+    (hres : ∀ n, sz = some n → ResIn n (r.getD 0) s) : ∃ s', Steps s s' ∧ RetSt Z E.fn fr ist sz r s' := by
   obtain ⟨ad, had, hpc⟩ := hat
-  obtain ⟨hst, _⟩ := step_item ok.placed R.img (F.emitted hx ho) had hpc R.run (inp := Z.inp)
-    (s' := (retTo (op1 s)).tick 10) rfl
+  have hst := fun inp => (step_item ok.placed R.img (F.emitted hx ho) had hpc R.run (inp := inp)
+    (s' := (retTo (op1 s)).tick 10) rfl).1
   have hroom := R.room
   have hstk := ok.stack
   have hspv : s.sp.toNat = fr.sp.toNat := by rw [R.sp]
-  refine ⟨_, Steps.one hst, ⟨?_, ?_, ?_, ?_, ?_, ?_, R.isz, ?_, ?_, ?_, ?_⟩⟩
+  refine ⟨_, Steps.one hst rfl, ⟨?_, ?_, ?_, ?_, ?_, ?_, R.isz, ?_, ?_, ?_, ?_⟩⟩
   · have h1 : ((retTo (op1 s)).tick 10).pc = s.rd16 s.sp := by simp only [retTo, zsim]
     rw [h1, cpu_rd16 _ _ (by omega), hspv]
     exact rd_congr _ _ _ _ (by omega) (fun x h1 h2 => R.stk x h1 (by omega))
@@ -89,7 +89,7 @@ theorem ret_ok (ok : Z.OK) (F : GFinal Z base sF) (v : Option (Nat × Opd))
     wpg (genInstr (.ret v)) E (fun _ s1 => GExt s0 s1 ∧
       (GExt s1 sF → (∀ n o, v = some (n, o) → Rd Z E dt n o) →
         ∀ fr ist tmps s, Rel Z E fr dt s0.regs ist tmps s → At Z.addrs (base + s0.out.size) s →
-        ∃ s', Steps Z.inp s s' ∧
+        ∃ s', Steps s s' ∧
           RetSt Z E.fn fr ist (v.map (·.1)) (v.map fun a => IR.Sem.opd Z.c ist tmps a.1 a.2) s')) s0 := by
   cases v with
   | none =>
@@ -135,7 +135,7 @@ theorem trap_ok (ok : Z.OK) (F : GFinal Z base sF) (s0 : GS) :
     wpg (genInstr .trap) E (fun _ s1 => GExt s0 s1 ∧
       (GExt s1 sF → ∀ j : Nat, Z.items[j]? = some (Item.label "rt_trap") →
         ∀ fr ist tmps s, Rel Z E fr dt s0.regs ist tmps s → At Z.addrs (base + s0.out.size) s →
-        ∃ s', Steps Z.inp s s' ∧ Trapped Z ist s')) s0 := by
+        ∃ s', Steps s s' ∧ Trapped Z ist s')) s0 := by
   simp only [genInstr, wpg_bind, wpg_ins, wpg_modify]
   refine ⟨GExt.of_out (by simp) rfl rfl, fun hx j hlab fr ist tmps s R hat => ?_⟩
   have hk : Z.items[base + s0.out.size]? = some (.ins ⟨.jp, [.imm (.sym "rt_trap")]⟩) :=

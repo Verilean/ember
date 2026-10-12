@@ -23,7 +23,7 @@ open Ember.Z80.IR (Opd Dst Slot Area)
 def Routine (Z : ZCtx) (entry K : Nat) (P : Cpu → Prop) (Q : Cpu → Cpu → Prop) : Prop :=
   ∀ s, s.pc.toNat = entry → Img Z.a 0 s → s.halted = false → s.ramStart.toNat = Z.ramStart →
     s.mem.size = 65536 → Z.stackLo + K ≤ s.sp.toNat → s.sp.toNat + 2 ≤ Z.stackHi → P s →
-    ∃ s', Steps Z.inp s s' ∧ s'.pc = s.rd16 s.sp ∧ s'.sp = s.sp + 2 ∧ s'.halted = false ∧
+    ∃ s', Steps s s' ∧ s'.pc = s.rd16 s.sp ∧ s'.sp = s.sp + 2 ∧ s'.halted = false ∧
       s'.ramStart = s.ramStart ∧ s'.mem.size = 65536 ∧ Q s s'
 
 /-- The state a `call` leaves: the registers as they were, the return
@@ -107,7 +107,7 @@ theorem call_step (ok : Z.OK) {k : Nat} {name : String} {entry : Nat}
     {s : Cpu} (hat : At Z.addrs k s) (I : Img Z.a 0 s) (hh : s.halted = false)
     (hrs : s.ramStart.toNat = Z.ramStart) (hsz : s.mem.size = 65536)
     (hroom : Z.stackLo + 2 ≤ s.sp.toNat) (htop : s.sp.toNat ≤ Z.stackHi) :
-    ∃ s1, Steps Z.inp s s1 ∧ CallSt s s1 ∧ s1.pc.toNat = entry ∧ Img Z.a 0 s1 ∧ s1.halted = false ∧
+    ∃ s1, Steps s s1 ∧ CallSt s s1 ∧ s1.pc.toNat = entry ∧ Img Z.a 0 s1 ∧ s1.halted = false ∧
       s1.ramStart = s.ramStart ∧
       ∀ s' : Cpu, s'.pc.toNat = IR.Sem.rd s1.mem (s.sp.toNat - 2) 2 → At Z.addrs (k + 1) s' := by
   obtain ⟨ad, had, hpc⟩ := hat
@@ -115,8 +115,8 @@ theorem call_step (ok : Z.OK) {k : Nat} {name : String} {entry : Nat}
   have hspl := s.sp.toNat_lt
   have hnn : (Instr.immW (Z.a.env ad) ⟨.call, [.imm (.sym name)]⟩).toNat = entry :=
     immW_toNat _ _ _ _ rfl (sym_val ad hsym) hent
-  obtain ⟨hst, _⟩ := step_item ok.placed I hk had hpc hh (inp := Z.inp)
-    (s' := (callTo (skip (op1 s) 2) (Instr.immW (Z.a.env ad) ⟨.call, [.imm (.sym name)]⟩)).tick 17) rfl
+  have hst := fun inp => (step_item ok.placed I hk had hpc hh (inp := inp)
+    (s' := (callTo (skip (op1 s) 2) (Instr.immW (Z.a.env ad) ⟨.call, [.imm (.sym name)]⟩)).tick 17) rfl).1
   have hpm := push_mem (skip (op1 s) 2) (skip (op1 s) 2).pc (by simp only [zsim]; omega)
     (by simp only [zsim]; omega)
   simp only [zsim] at hpm
@@ -132,7 +132,7 @@ theorem call_step (ok : Z.OK) {k : Nat} {name : String} {entry : Nat}
     all_goals try (simp only [callTo, zsim]; done)
     · rw [hmem1, wr_get_far _ _ _ _ _ (by omega) (by omega)]
     · rw [hmem1, wr_size]
-  refine ⟨_, Steps.one hst, cs, by simp only [callTo, zsim]; exact hnn,
+  refine ⟨_, Steps.one hst (by simp only [callTo, zsim]), cs, by simp only [callTo, zsim]; exact hnn,
     Img.of_wr I (by simp only [callTo, zsim]) hmem1 (by omega) (by omega),
     by simp only [callTo, zsim]; exact hh, by simp only [callTo, zsim], fun s' hpc' => ?_⟩
   obtain ⟨bs, hbs, hnext, hlt⟩ := ok.placed.next I hk had
@@ -155,7 +155,7 @@ theorem call_rule (ok : Z.OK) {k : Nat} {name : String} {entry K : Nat} {P : Cpu
     (hrs : s.ramStart.toNat = Z.ramStart) (hsz : s.mem.size = 65536)
     (hroom : Z.stackLo + K + 2 ≤ s.sp.toNat) (htop : s.sp.toNat ≤ Z.stackHi)
     (hP : ∀ s1, CallSt s s1 → P s1) :
-    ∃ s1 s', CallSt s s1 ∧ Steps Z.inp s s' ∧ At Z.addrs (k + 1) s' ∧ s'.sp = s.sp ∧ s'.halted = false ∧
+    ∃ s1 s', CallSt s s1 ∧ Steps s s' ∧ At Z.addrs (k + 1) s' ∧ s'.sp = s.sp ∧ s'.halted = false ∧
       s'.ramStart = s.ramStart ∧ s'.mem.size = 65536 ∧ Q s1 s' := by
   obtain ⟨ad, had, hpc⟩ := hat
   have hstk := ok.stack
@@ -163,8 +163,8 @@ theorem call_rule (ok : Z.OK) {k : Nat} {name : String} {entry K : Nat} {P : Cpu
   -- the call
   have hnn : (Instr.immW (Z.a.env ad) ⟨.call, [.imm (.sym name)]⟩).toNat = entry :=
     immW_toNat _ _ _ _ rfl (sym_val ad hsym) hent
-  obtain ⟨hst, _⟩ := step_item ok.placed I hk had hpc hh (inp := Z.inp)
-    (s' := (callTo (skip (op1 s) 2) (Instr.immW (Z.a.env ad) ⟨.call, [.imm (.sym name)]⟩)).tick 17) rfl
+  have hst := fun inp => (step_item ok.placed I hk had hpc hh (inp := inp)
+    (s' := (callTo (skip (op1 s) 2) (Instr.immW (Z.a.env ad) ⟨.call, [.imm (.sym name)]⟩)).tick 17) rfl).1
   have hpm := push_mem (skip (op1 s) 2) (skip (op1 s) 2).pc (by simp only [zsim]; omega)
     (by simp only [zsim]; omega)
   simp only [zsim] at hpm
@@ -187,7 +187,7 @@ theorem call_rule (ok : Z.OK) {k : Nat} {name : String} {entry K : Nat} {P : Cpu
     (Img.of_wr I (by simp only [callTo, zsim]) hmem1 (by omega) (by omega))
     (by simp only [callTo, zsim]; exact hh) (by simp only [callTo, zsim]; exact hrs)
     (by rw [hmem1, wr_size]; exact hsz) (by rw [hsp1, hsp1n]; omega) (by rw [hsp1, hsp1n]; omega) (hP _ cs)
-  refine ⟨_, s', cs, (Steps.one hst).trans hst', ?_, ?_, hh', ?_, hsz', hQ⟩
+  refine ⟨_, s', cs, (Steps.one hst (by simp only [callTo, zsim])).trans hst', ?_, ?_, hh', ?_, hsz', hQ⟩
   · -- back at the item after the call
     obtain ⟨bs, hbs, hnext, hlt⟩ := ok.placed.next I hk had
     have hlen := call_len hbs
@@ -285,7 +285,7 @@ theorem rt_call {base : Nat} {sF : GS} (ok : Z.OK) (hT : FnLay Z E) (F : GFinal 
     (ho : s1.out = s0.out.push (.ins ⟨.call, [.imm (.sym name)]⟩)) (hrt : RtPure Z name rel)
     (hdep : Z.rtK + 2 ≤ Z.depth E.fn.name) {regs : Regs} {ist : IR.Sem.St} {tmps : Array Nat} {s : Cpu}
     (R : Rel Z E fr dt regs ist tmps s) (hat : At Z.addrs (base + s0.out.size) s) :
-    ∃ c1 s', CallSt s c1 ∧ Steps Z.inp s s' ∧ At Z.addrs (base + s1.out.size) s' ∧ rel c1 s' ∧
+    ∃ c1 s', CallSt s c1 ∧ Steps s s' ∧ At Z.addrs (base + s1.out.size) s' ∧ rel c1 s' ∧
       ∀ regs' : Regs,
         (∀ o, o ∈ regs'.a → Own E o → s'.a.toNat = IR.Sem.opd Z.c ist tmps 1 o) →
         (∀ o, o ∈ regs'.hl → Own E o → s'.hl.toNat = IR.Sem.opd Z.c ist tmps 2 o) →

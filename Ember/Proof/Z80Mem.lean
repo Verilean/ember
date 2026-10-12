@@ -23,11 +23,11 @@ def ldAM (s : Cpu) : Cpu := ((op1 s).setReg .hl 7 ((op1 s).rd (op1 s).hl)).tick 
 def ldHM (s : Cpu) : Cpu := ((op1 s).setReg .hl 4 ((op1 s).rd (op1 s).hl)).tick 7
 
 theorem does_ld_a_m : Does ⟨.ld, [.a, .mhl]⟩ ldAM :=
-  ⟨fun _ _ _ => rfl, rfl, fun s => by simp only [Sys, ldAM, zsim, and_self]⟩
+  ⟨fun _ _ _ => rfl, rfl, fun s => by simp only [Sys, ldAM, zsim, and_self], fun s => by simp only [ldAM, zsim]⟩
 theorem does_ld_h_m : Does ⟨.ld, [.h, .mhl]⟩ ldHM :=
-  ⟨fun _ _ _ => rfl, rfl, fun s => by simp only [Sys, ldHM, zsim, and_self]⟩
+  ⟨fun _ _ _ => rfl, rfl, fun s => by simp only [Sys, ldHM, zsim, and_self], fun s => by simp only [ldHM, zsim]⟩
 theorem does_inc_hl : Does ⟨.inc, [.hl]⟩ incHL :=
-  ⟨fun _ _ _ => rfl, rfl, fun s => (incHL_keep s).1⟩
+  ⟨fun _ _ _ => rfl, rfl, fun s => (incHL_keep s).1, fun _ => rfl⟩
 
 section
 variable {Z : ZCtx} {E : GEnv} {base : Nat} {sF : GS} {dt : Nat → Prop}
@@ -323,9 +323,9 @@ theorem after_store {fr : Fr} {n : Nat} (p : IR.Addr) (src : Opd) (s1 : GS) {ist
     {s : Cpu} (P : Nat → Cpu → Prop)
     (h1 : match IR.Sem.addr Z.c ist tmps p with
       | some a => ∃ s', P a s'
-      | none => ∃ s', Steps Z.inp s s' ∧ Trapped Z ist s')
+      | none => ∃ s', Steps s s' ∧ Trapped Z ist s')
     (hok : ∀ a s', IR.Sem.addr Z.c ist tmps p = some a → IR.Sem.inBound Z.c ist tmps p = true → P a s' →
-      ∃ s'', Steps Z.inp s s'' ∧ At Z.addrs (base + s1.out.size) s'' ∧
+      ∃ s'', Steps s s'' ∧ At Z.addrs (base + s1.out.size) s'' ∧
         Rel Z E fr dt s1.regs { ist with mem := IR.Sem.wr ist.mem a n (IR.Sem.opd Z.c ist tmps n src) } tmps s'') :
     After Z E base fr dt (.store n p src) s1 ist tmps s (IR.Sem.step Z.c ist tmps (.store n p src)) := by
   simp only [IR.Sem.step]
@@ -374,7 +374,7 @@ theorem store1_ok (ok : Z.OK) (hT : FnLay Z E) (F : GFinal Z base sF) (hrt : RtO
       simp only [wpg_ins, wpg_killSlots]
       refine ⟨hx1.trans ((GExt.push _ _).trans (GExt.regs _ _)), fun hxF ⟨hN, hD, hrd⟩ fr ist tmps s R hat => ?_⟩
       have hxm : GExt { s1 with out := s1.out.push (.ins ⟨.ld, [.mhl, .a]⟩) } sF := (GExt.regs _ _).trans hxF
-      refine after_store p o _ (fun a s' => Steps Z.inp s s' ∧ At Z.addrs (base + s1.out.size) s' ∧
+      refine after_store p o _ (fun a s' => Steps s s' ∧ At Z.addrs (base + s1.out.size) s' ∧
         Rel Z E fr dt s1.regs ist tmps s' ∧ s'.a = s.a ∧ s'.de = s.de ∧ s'.hl.toNat = a % 65536)
         (ha ((GExt.push _ _).trans hxm) hN fr ist tmps s R hat) (fun a s' haddr hb ⟨st, at', R', ha', _, hv⟩ => ?_)
       have hS := hD ist tmps a haddr hb
@@ -407,7 +407,7 @@ theorem store1_ok (ok : Z.OK) (hT : FnLay Z E) (F : GFinal Z base sF) (hrt : RtO
         · exact List.prefix_refl _
         · exact List.suffix_refl _
         · exact List.suffix_refl _
-      refine after_store p o _ (fun a s' => Steps Z.inp s s' ∧ At Z.addrs (base + s1.out.size) s' ∧
+      refine after_store p o _ (fun a s' => Steps s s' ∧ At Z.addrs (base + s1.out.size) s' ∧
         Rel Z E fr dt s1.regs ist tmps s' ∧ s'.a = s.a ∧ s'.de = s.de ∧ s'.hl.toNat = a % 65536)
         (ha (hx12.trans (hxp.trans hxm)) hN fr ist tmps s R hat) (fun a s' haddr hb ⟨st, at', R', _, _, hv⟩ => ?_)
       have hS := hD ist tmps a haddr hb
@@ -428,8 +428,9 @@ theorem store1_ok (ok : Z.OK) (hT : FnLay Z E) (F : GFinal Z base sF) (hrt : RtO
         (fun ad' had' => by
           rw [ho2, had] at had'
           cases had'
+          intro _
           rw [hc2]
-          rfl) rfl
+          rfl) rfl (by rw [hc2]; rfl)
       have hA : c2.a.toNat = IR.Sem.opd Z.c ist tmps 1 o := by
         rw [hc2]
         simp only [zsim]
@@ -482,7 +483,7 @@ theorem store1_ok (ok : Z.OK) (hT : FnLay Z E) (F : GFinal Z base sF) (hrt : RtO
     simp only [wpg_ins, wpg_killSlots]
     refine ⟨hx1.trans ((GExt.push _ _).trans (GExt.regs _ _)), fun hxF ⟨hN, hD, hrd⟩ fr ist tmps s R hat => ?_⟩
     have hxm : GExt { s1 with out := s1.out.push (.ins ⟨.ld, [.mhl, n8 v]⟩) } sF := (GExt.regs _ _).trans hxF
-    refine after_store p (.const v) _ (fun a s' => Steps Z.inp s s' ∧ At Z.addrs (base + s1.out.size) s' ∧
+    refine after_store p (.const v) _ (fun a s' => Steps s s' ∧ At Z.addrs (base + s1.out.size) s' ∧
       Rel Z E fr dt s1.regs ist tmps s' ∧ s'.a = s.a ∧ s'.de = s.de ∧ s'.hl.toNat = a % 65536)
       (ha ((GExt.push _ _).trans hxm) hN fr ist tmps s R hat) (fun a s' haddr hb ⟨st, at', R', _, _, hv⟩ => ?_)
     have hS := hD ist tmps a haddr hb
@@ -522,7 +523,7 @@ theorem wr2_tail (ok : Z.OK) (hT : FnLay Z E) (F : GFinal Z base sF) (s1 : GS) :
         At Z.addrs (base + s1.out.size) c → c.hl.toNat = a → c.de.toNat = v % 65536 →
         (a + 2 ≤ 65536 ∧ (∀ j, j < 2 → Z.data (a + j)) ∧ (∀ j, j < 2 → Z.wr E.fn.name (a + j)) ∧
           (a + 2 ≤ Z.acc ∨ Z.acc + 8 ≤ a)) →
-        ∃ s'', Steps Z.inp c s'' ∧ At Z.addrs (base + s2.out.size) s'' ∧
+        ∃ s'', Steps c s'' ∧ At Z.addrs (base + s2.out.size) s'' ∧
           Rel Z E fr dt s2.regs { ist with mem := IR.Sem.wr ist.mem a 2 v } tmps s'')) s1 := by
   simp only [wpg_bind, wpg_ins, wpg_killSlots]
   have hxp : GExt s1 (pushL [⟨.ld, [.mhl, .e]⟩, ⟨.inc, [.hl]⟩, ⟨.ld, [.mhl, .d]⟩] s1) := pushL_ext _ _
@@ -533,7 +534,7 @@ theorem wr2_tail (ok : Z.OK) (hT : FnLay Z E) (F : GFinal Z base sF) (s1 : GS) :
   -- the low byte
   obtain ⟨st1, at1⟩ := run_ins ok F (s0 := s1) (s1 := { s1 with out := s1.out.push (.ins ⟨.ld, [.mhl, .e]⟩) })
     (i := ⟨.ld, [.mhl, .e]⟩) ((pushL_ext [⟨.inc, [.hl]⟩, ⟨.ld, [.mhl, .d]⟩] _).trans hxm) rfl R.img R.run hat
-    (s' := wrMR 3 c) (fun _ _ => rfl) rfl
+    (s' := wrMR 3 c) (fun _ _ => rfl) rfl (by simp only [wrMR, zsim])
   have hm1 : (wrMR 3 c).mem = c.mem.set! a c.e := by
     simp only [wrMR, zsim]
     rw [cpu_wr_mem _ _ _ (by simp only [zsim]; rw [hhl, hrs]; exact hram)]
@@ -553,7 +554,7 @@ theorem wr2_tail (ok : Z.OK) (hT : FnLay Z E) (F : GFinal Z base sF) (s1 : GS) :
   -- the high byte
   obtain ⟨st3, at3⟩ := run_ins ok F (s0 := pushL [⟨.ld, [.mhl, .e]⟩, ⟨.inc, [.hl]⟩] s1)
     (s1 := pushL [⟨.ld, [.mhl, .e]⟩, ⟨.inc, [.hl]⟩, ⟨.ld, [.mhl, .d]⟩] s1)
-    (i := ⟨.ld, [.mhl, .d]⟩) hxm rfl M2.1 M2.2 at2 (s' := wrMR 2 (incHL (wrMR 3 c))) (fun _ _ => rfl) rfl
+    (i := ⟨.ld, [.mhl, .d]⟩) hxm rfl M2.1 M2.2 at2 (s' := wrMR 2 (incHL (wrMR 3 c))) (fun _ _ => rfl) rfl (by simp only [wrMR, zsim])
   have hrs2 : (incHL (wrMR 3 c)).ramStart = c.ramStart := by
     rw [(incHL_keep _).1.2.1]
     simp only [wrMR, zsim]
@@ -621,7 +622,7 @@ theorem store2_ok (ok : Z.OK) (hT : FnLay Z E) (F : GFinal Z base sF) (hrt : RtO
     obtain ⟨st0, at0, _⟩ := run_reg ok F (s0 := s0) hxe rfl R.mach hat (exDH s) (fun _ _ => rfl) rfl (exDH_sys s)
     have R0 : Rel Z E fr dt { s0.regs with hl := [] } ist tmps (exDH s) :=
       R.hl_gone (exDH_sys s) rfl (Or.inr ⟨rfl, exDH_a s⟩) (fun n o h => h)
-    refine after_store p src _ (fun a s' => Steps Z.inp (exDH s) s' ∧ At Z.addrs (base + s1.out.size) s' ∧
+    refine after_store p src _ (fun a s' => Steps (exDH s) s' ∧ At Z.addrs (base + s1.out.size) s' ∧
       Rel Z E fr dt s1.regs ist tmps s' ∧ s'.a = (exDH s).a ∧ s'.de = (exDH s).de ∧ s'.hl.toNat = a % 65536)
       (by
         have := ha (hx2.trans hxF) hN fr ist tmps (exDH s) R0 at0
@@ -656,7 +657,7 @@ theorem store2_ok (ok : Z.OK) (hT : FnLay Z E) (F : GFinal Z base sF) (hrt : RtO
     refine wpg_mono h3 ?_
     intro _ s2 ⟨hx2, hw⟩
     refine ⟨hx1.trans (hx1'.trans hx2), fun hxF ⟨hN, hD, hrd⟩ fr ist tmps s R hat => ?_⟩
-    refine after_store p src _ (fun a s' => Steps Z.inp s s' ∧ At Z.addrs (base + s1.out.size) s' ∧
+    refine after_store p src _ (fun a s' => Steps s s' ∧ At Z.addrs (base + s1.out.size) s' ∧
       Rel Z E fr dt s1.regs ist tmps s' ∧ s'.a = s.a ∧ s'.de = s.de ∧ s'.hl.toNat = a % 65536)
       (ha (hx1'.trans (hx2.trans hxF)) hN fr ist tmps s R hat) (fun a s' haddr hb ⟨st, at', R', _, _, hv⟩ => ?_)
     have hS := hD ist tmps a haddr hb
