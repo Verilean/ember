@@ -103,12 +103,15 @@ namespace Machine
   (if m.rdrf then 0x01 else 0) ||| (if m.cpu.cycles ≥ m.txBusyUntil then 0x02 else 0) |||
   (if m.ovrn then 0x20 else 0) ||| (if m.rdrf && m.rie then 0x80 else 0)
 
-/-- Skip exhausted chunks (as `normalize` in the host harness). -/
-def normalize (m : Machine) : Machine := Id.run do
-  let mut m := m
-  while m.ipos < m.inputs.size && (match m.inputs[m.ipos]! with | .rx b => m.ioff ≥ b.size | .tick => false) do
-    m := { m with ipos := m.ipos + 1, ioff := 0 }
-  return m
+/-- Skip exhausted chunks (as `normalize` in the host harness, and as
+`Ember.Lang.World.normalize`: a recursion, so that proofs can follow it). -/
+def normalize (m : Machine) : Machine :=
+  if h : m.ipos < m.inputs.size then
+    match m.inputs[m.ipos] with
+    | .rx b => if m.ioff ≥ b.size then normalize { m with ipos := m.ipos + 1, ioff := 0 } else m
+    | .tick => m
+  else m
+termination_by m.inputs.size - m.ipos
 
 /-- Kind of the next input item (0 byte, 1 tick, 2 nothing) and its byte. -/
 def peekInput (m : Machine) : UInt8 × UInt8 :=

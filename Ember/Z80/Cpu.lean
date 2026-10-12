@@ -655,12 +655,9 @@ def hole : Cpu := { mem := ByteArray.empty }
 /-- Would an interrupt be accepted now? -/
 def interruptible (s : Cpu) : Bool := s.iff1 && !s.eiDelay
 
-def load (s : Cpu) (addr : Nat) (bytes : ByteArray) : Cpu := Id.run do
-  let mut m := s.mem
-  let s := { s with mem := ByteArray.empty }
-  for k in [0:bytes.size] do
-    if addr + k < 65536 then m := m.set! (addr + k) bytes[k]!
-  return { s with mem := m }
+def load (s : Cpu) (addr : Nat) (bytes : ByteArray) : Cpu :=
+  let mem := (List.range bytes.size).foldl (fun m k => if addr + k < 65536 then m.set! (addr + k) bytes[k]! else m) s.mem
+  { s with mem := mem }
 
 end Cpu
 end Ember.Z80

@@ -745,6 +745,7 @@ footprint (`ZCtx.wr`) has changed.
 | `loop_iter`, `loop_run`, `boot_ok`, `rt_zero_ok`, `ldir_zero` (`Z80Boot.lean`) | the runtime's code around the functions, from its items: start-up from reset (`di`, `ld sp,0`, `rt_init` — the RAM in use cleared by `rt_zero`, an induction over `ldir`), and the harness's loop — from its head either the loop is left or the entry is called as `IR.Sem.callF` says and the CPU is back at the head; `loop_run`: any number of turns against `irIter` |
 | **`loopH_run`** (`Z80LoopH.lean`) | the loopback image for the harness **from reset**: for any input and any number `j` of calls of `main` that end in the IR's semantics from its initial state, the machine is at the head of the loop with the world those calls leave, or left the loop after `i ≤ j` of them with the world of those `i` — nothing taken of the program, the layout, the image or the runtime |
 | **`loopH_spec`** (`Z80LoopHSpec.lean`) | the same against the **Ember semantics**: `loop_safe` (the loopback never traps, M5.5) and `lower_iter` (M7.1) composed with `loopH_run` — from reset, for any input and any `j`, `j` calls of `main` end in the Ember semantics and the machine holds their world at the head of the loop, or it left the loop after `i ≤ j` calls and stopped (`di; halt`) with the world of those, the input used up or the loop's count of idle calls full.  `LoopSrc p`: what is taken of the Ember program (it is the checked loopback program, lowered to `Loop.ir`, accepted by the checkers of M7.1 for this layout) — each computable part a `#guard` |
+| `step_sim`, **`loopH_harness`** (`Z80Machine.lean`) | **the machine the tests run**: in harness mode, with nothing on the serial line and no interrupt pending, one `Ember.Z80.Machine.step` is one step of the proofs' machine and the relation `Sim` (input position, latch, frame, events — a drop by the name of its reason; notes and the trap are not followed) is kept, for every port.  So `loopH_spec` holds of `Machine.step` from the machine built as the tests build it: the image `assemble` gives, loaded at 0 (`Cpu.load`), RAM from `0x8000`, harness mode, any input.  For this `Machine.normalize` became a recursion (it was a `while`) and `Cpu.load` a fold |
 
 **Checked, not proved** (translation validation, on every function
 generated): `jumpsOk` — what the generator assumes the registers hold
@@ -798,8 +799,11 @@ board `loop_image_ok` — the same but for `RtOK`, and in a machine
 without interrupts, which is not the board's.  For the harness also from
 reset, through start-up and the loop that calls `main` (`loopH_run`).
 The machine there is the CPU model with the harness's ports written as
-a function of the world (`hbus`, `hdev`); that `Ember.Z80.Machine` — the
-machine the tests run — does the same is by reading, not proved.  Of the SLIP build, the checks of the
+a function of the world (`hbus`, `hdev`); `Ember.Z80.Machine` — the
+machine the tests run — steps as it does (`step_sim`), so the statement
+is also of `Machine.step` from the machine as the tests build it
+(`loopH_harness`).  What the tests add around it is not in the theorem:
+`Target.runHarness` (its loop until `halted`, the printing of the trace).  Of the SLIP build, the checks of the
 layout pass (`#guard`, not the kernel), and nothing is connected to its
 image yet (it has wide constants: the literal pool; and 1073
 instructions to run the checks on in the kernel).  Of the images as

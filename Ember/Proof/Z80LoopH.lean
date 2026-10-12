@@ -33,14 +33,12 @@ What the statements are about, and what they are not:
   What the kernel computes: the generator's environments, the checks of
   the plan, the assembly, where the routines are, the symbols;
 * the machine is the CPU model with `hbus`/`hdev`: the world behind the
-  harness's ports.  `Ember.Z80.Machine`, which the tests run, does the
-  same at these ports by reading it (it records a drop by its code where
-  the IR's world has the reason's name); that is not proved — its
-  `normalize` is a `while` loop, opaque to the kernel;
+  harness's ports.  That `Ember.Z80.Machine`, which the tests run, steps
+  as this machine does is `Z80Machine` (`step_sim`, `loopH_harness`);
 * when the loop is left is not said (the IR's own driver, `Sem.run`, is
-  a `partial` loop without a theorem); and that the calls of `main` do
-  end — the loopback never traps (`loop_safe`, M5) — is a theorem about
-  the Ember semantics not composed with this one yet;
+  a `partial` loop without a theorem); that the calls of `main` do end
+  — the loopback never traps (`loop_safe`, M5) — is composed with this
+  in `Z80LoopHSpec`;
 * not the image as built by default (with the passes on the assembly).
 -/
 
@@ -62,12 +60,15 @@ theorem img_check : img.check = true := by decide +kernel
 /-! ## The machine of the harness -/
 
 def hbus (w : World × UInt8) (p : UInt16) : UInt8 :=
-  if lo p = 0xD1 then kindOf w.1 else if lo p = 0xD2 then w.2
-  else if lo p = 0xD0 then (if kindOf w.1 = 2 then 0 else 1) else 0xFF
+  if lo p = 0xD0 then (if kindOf w.1 = 2 then 0 else 1)
+  else if lo p = 0xD1 then kindOf w.1
+  else if lo p = 0xD2 then w.2
+  else if lo p = 0xD8 then 0      -- which program of the image: the first
+  else 0xFF
 
 def hdev (c : IR.Ctx) (w : World × UInt8) : IoEvent → World × UInt8
   | .none => w
-  | .read p => if lo p = 0xD1 then (w.1.next.2, lo w.1.next.1) else w
+  | .read p => if lo p = 0xD1 then (w.1.next.2, if w.1.next.1.toNat < 256 then lo w.1.next.1 else w.2) else w
   | .write p v =>
     if lo p = 0xD3 then ((IR.Sem.effect c w.1 .outByte [v.toNat]).2, w.2)
     else if lo p = 0xD4 then ((IR.Sem.effect c w.1 .outEnd []).2, w.2)
@@ -83,7 +84,8 @@ def harness (a : Assembled) (addrs : List Nat) : Harness (Zof a addrs) where
   wrel := fun _ _ => Iff.rfl
   busKind := fun w p h => by show hbus w p = _; simp [hbus, h]
   busByte := fun w p h => by show hbus w p = _; simp [hbus, h]
-  rdNext := fun w p h => by show hdev img.ctx w (.read p) = _; simp [hdev, h]
+  rdNext := fun w p h => by show (hdev img.ctx w (.read p)).1 = _; simp [hdev, h]
+  rdLatch := fun w p h hn => by show (hdev img.ctx w (.read p)).2 = _; simp [hdev, h, hn]
   rdByte := fun w p h => by show (hdev img.ctx w (.read p)).1 = _; simp [hdev, h]
   rdMore := fun w p h => by show (hdev img.ctx w (.read p)).1 = _; simp [hdev, h]
   busMore := fun w p h => by show hbus w p = _; simp [hbus, h]

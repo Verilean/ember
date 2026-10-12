@@ -94,7 +94,9 @@ structure Harness (Z : ZCtx) where
   wrel : ∀ wd w, Z.wrel wd w ↔ (view w).1 = wd
   busKind : ∀ w p, lo p = 0xD1 → Z.bus w p = kindOf (view w).1
   busByte : ∀ w p, lo p = 0xD2 → Z.bus w p = (view w).2
-  rdNext : ∀ w p, lo p = 0xD1 → view (Z.dev w (.read p)) = ((view w).1.next.2, lo (view w).1.next.1)
+  rdNext : ∀ w p, lo p = 0xD1 → (view (Z.dev w (.read p))).1 = (view w).1.next.2
+  /-- A byte taken is latched (a tick, or nothing, leaves the latch). -/
+  rdLatch : ∀ w p, lo p = 0xD1 → (view w).1.next.1.toNat < 256 → (view (Z.dev w (.read p))).2 = lo (view w).1.next.1
   rdByte : ∀ w p, lo p = 0xD2 → (view (Z.dev w (.read p))).1 = (view w).1
   /-- `0xD0`: does input remain?  Asking changes nothing. -/
   rdMore : ∀ w p, lo p = 0xD0 → (view (Z.dev w (.read p))).1 = (view w).1
@@ -271,6 +273,7 @@ theorem harness_input_core (ok : Z.OK) (H : Harness Z) (hsz : Z.a.bytes.size < 6
   have hS1 : Sys c c1 := by rw [hc1]; simp only [Sys, skip, zsim, and_self]
   have ha1 : c1.a = kindOf (H.view w).1 := by rw [hc1]; simp only [zsim]; exact H.busKind w p hlo
   have hv1 := H.rdNext w p hlo
+  have hv1l := H.rdLatch w p hlo
   have M1 := M.sys hS1
   -- cp 2; jr z,rt_input_none
   obtain ⟨st2, at3, M2, hS2⟩ := does_raw ok (does_cp_n 2) (hhas.get 2 rfl) M1 (at2 rfl)
@@ -420,7 +423,7 @@ theorem harness_input_core (ok : Z.OK) (H : Harness Z) (hsz : Z.a.bytes.size < 6
     have ha8 : c8.a = lo (H.view w).1.next.1 := by
       rw [hc8]
       simp only [zsim]
-      rw [H.busByte _ p2 hlo2, hv1]
+      rw [H.busByte _ p2 hlo2, hv1l hn]
     have M8 := M7.sys hS8
     obtain ⟨st9, at10, M9, hS9⟩ := does_raw ok does_ld_l_a (hhas.get 9 rfl) M8 (at9 rfl)
     obtain ⟨st10, at11, M10, hS10⟩ := does_raw ok does_ld_h_0 (hhas.get 10 rfl) M9 at10

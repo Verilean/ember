@@ -114,6 +114,7 @@ import Ember.Proof.Z80Image
 import Ember.Proof.Z80LoopHItems
 import Ember.Proof.Z80LoopH
 import Ember.Proof.Z80LoopHSpec
+import Ember.Proof.Z80Machine
 
 /-!
 # Ember.Proof — proofs (plan M5): about the reference stack (P1), and that Ember code refines it (P2)
@@ -241,6 +242,9 @@ The Z80 back end (M7, begun) — `Ember.Z80.IR.Sem` is the semantics of its IR:
 * `Z80Boot`: start-up from reset and the harness's loop that calls the entry, from their items — so the
   loopback image for the harness from reset, any number of calls of `main` (`loopH_run`), and against the
   Ember semantics, where those calls end (`loopH_spec`: `loop_safe` and `lower_iter` composed with it).
+* `Z80Machine`: the machine the tests run (`Ember.Z80.Machine`, harness mode) steps as the machine of the
+  proofs does (`step_sim`), so the same of `Machine.step` from the image loaded as the tests load it
+  (`loopH_harness`).
 
 By-reference parameters and `inlineCalls` are outside M7.1; of `IR → Z80` (M7.3) not proved: the other
 routines of the runtime (`RtOK`, taken where the image calls them); interrupts and the board's start-up; the passes on the assembly (the images as built by
