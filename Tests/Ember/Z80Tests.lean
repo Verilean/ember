@@ -113,8 +113,40 @@ def ownExamples : IO Nat := do
   IO.println s!"z80 own back end: {cases.size} runs of the examples, regressions and index-check programs ({traps} of them trap): interpreter = IR = IR semantics = generated code; {bad} failures"
   return bad
 
+/-- The static bound on the stack answers only for images of the shape
+it models: the counter-examples of the review (a jump to a label plus an
+offset, a stack pointer set elsewhere than at the top, an interrupt
+routine that lets another interrupt in) are refused. -/
+def stackBoundTests : IO Nat := do
+  let asm (src : String) : List Asm.Item := match Asm.parse src with | .ok l => l | .error _ => []
+  let cases : List (String × String × Option (Nat × Nat)) := [
+    ("plain", "rt_start: ld sp,0\n call f\nstop: jp stop\nf: push af\n pop af\n ret\n", some (4, 0)),
+    ("di first", "rt_start: di\n ld sp,0\n call f\nstop: jp stop\nf: ret\n", some (2, 0)),
+    ("isr", "rt_start: ld sp,0\n jp rt_isr\nloop: ei\n nop\n jp loop\nrt_isr: push af\n pop af\n ei\n reti\n", some (2, 4)),
+    ("jump to a label plus an offset", "rt_start: ld sp,0\n jp target+1\ntarget: ret\ngrow: push af\n jp grow\n", none),
+    ("call to a label plus an offset", "rt_start: ld sp,0\n call f+1\nstop: jp stop\nf: nop\n ret\n", none),
+    ("stack pointer not at the top", "rt_start: ld sp,0x8002\n call f\nstop: jp stop\nf: push af\n pop af\n ret\n", none),
+    ("stack pointer from a register", "rt_start: ld sp,hl\n call f\nstop: jp stop\nf: ret\n", none),
+    ("code before the stack pointer is set", "rt_start: push af\n ld sp,0\nstop: jp stop\n", none),
+    ("interrupt routine that can be entered again", "rt_start: ld sp,0\n jp rt_isr\nloop: ei\n nop\n jp loop\nrt_isr: ei\n nop\n reti\n", none),
+    ("interrupts without a routine", "rt_start: ld sp,0\nloop: ei\n jp loop\n", none),
+    ("computed jump", "rt_start: ld sp,0\n jp (hl)\n", none),
+    ("unbalanced pop", "rt_start: ld sp,0\n call f\nstop: jp stop\nf: pop af\n ret\n", none),
+    ("stack that grows in a loop", "rt_start: ld sp,0\ngrow: push af\n jp grow\n", none),
+    ("running off the end", "rt_start: ld sp,0\n nop\n", none)]
+  let mut bad := 0
+  for (name, src, want) in cases do
+    let items := asm src
+    let got := (StackBound.ofItems items).map fun b => (b.main, b.interrupt)
+    if items.isEmpty || got != want then
+      bad := bad + 1
+      IO.println s!"FAIL stack bound: {name}: {got}, expected {want}"
+  IO.println s!"z80 stack bound: {cases.length} small images, the unsupported shapes refused; {bad} failures"
+  return bad
+
 def main : IO UInt32 := do
   let mut bad ← modelTests
+  bad := bad + (← stackBoundTests)
   bad := bad + (← ownExamples)
   for t in ["sdcc", "make"] do
     if !(← Ember.Tests.TargetTests.installed t) then

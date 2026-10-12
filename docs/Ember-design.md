@@ -244,8 +244,11 @@ configuration of the stack (the globals, the functions, the profile):
   program, the routines of the runtime, one interrupt — the interrupt
   routine does not let another in): 24 bytes for the SLIP build, against
   16 seen on the corpus and more than 31 KB of room.  `ember-z80
-  own-size` fails when the bound exceeds the room.  That bound is an
-  analysis, not a theorem; proved so far is only that the routines of the
+  own-size` fails when the bound exceeds the room, and when the image is
+  not of the shape the analysis models (the stack pointer set once to
+  the top of memory, jumps and calls to labels, an interrupt routine
+  that cannot be entered again) — it then gives no number rather than a
+  wrong one.  That bound is an analysis, not a theorem; proved so far is only that the routines of the
   loopback image for the test harness use no stack at all (§4, M7.3).
 - **Time is not fixed.**  How long a call of `main` takes depends on the
   input: the loops are bounded (`for`, `loop (max := n)`), so each call
