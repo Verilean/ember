@@ -37,7 +37,7 @@ are missing; inside `nix-shell` everything runs.
 | `lake exe ember-lockstep FILES… \| --gen [P] [N] [--c]` | Spec = Ember interpreter (lockstep) [= host C]; `P`: `icmp udp tcp` (SLIP), `eth`, `dhcp` (the Ethernet builds), `slip`, `all`; a fixture runs on the build its header names |
 | `tools/ember/record-corpus.sh` | re-record the Linux fixtures (user namespace + TUN/TAP, no root) |
 | `tools/ember/size-report.py [--update]` | code/RAM per function, ±3 % gate against `bench/ember-size.baseline` |
-| `lake exe ember-z80 asm-check\|rt-check\|ir-fuzz\|ir-replay\|own-fuzz\|own-build\|own-size …` | the own Z80 back end: its checks; `own-build net` writes the image (`.ihx`), a listing with the IR between the instructions (`.lst`) and symbols; `own-size` the bytes per function |
+| `lake exe ember-z80 asm-check\|rt-check\|ir-fuzz\|ir-replay\|own-fuzz\|own-build\|own-size …` | the own Z80 back end: its checks; `own-build net` writes the image (`.ihx`), a listing with the IR between the instructions (`.lst`) and symbols; `own-size` the bytes per function; `--plain`: without the passes on the assembly (the image the proofs of M7.3 speak of) |
 | `lake exe ember-z80 profile\|stack IMAGE …` | T-states per function for one ping; deepest stack over fixtures |
 | `lake exe ember-z80 check\|replay\|echo\|slip\|ping\|fuzz\|run …` | the Z80 model: against `z88dk-ticks`; fixtures, echo and SLIP on an SDCC image; T-states per ping; random programs (interpreter vs SDCC's code, `--u64` to see SDCC's 64-bit bugs); instruction trace with symbols |
 | `tools/ember/qemu-run.sh IMAGE [--gdb] [--log]`, `tools/ember/esp32.py TEST` | one ESP32-C3 image in QEMU; one test against it |

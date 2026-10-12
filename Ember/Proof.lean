@@ -106,6 +106,8 @@ import Ember.Proof.Z80PlanOf
 import Ember.Proof.Z80LoopIR
 import Ember.Proof.Z80Loop
 import Ember.Proof.Z80BoardPlan
+import Ember.Proof.Z80LoopItems
+import Ember.Proof.Z80LoopImage
 
 /-!
 # Ember.Proof — proofs (plan M5): about the reference stack (P1), and that Ember code refines it (P2)
@@ -221,13 +223,15 @@ The Z80 back end (M7, begun) — `Ember.Z80.IR.Sem` is the semantics of its IR:
 * `Z80Plan`, `Z80Check`, `Z80PlanOf`: **what the theorems assume of the layout, decided** — a `Plan`
   gives the shared bytes, the bytes a function may write and the slots it uses as data; `okB` decides
   `ZCtx.OK` of it (`plan_ok`) and `fnStaticB` decides `FnStatic` (`fnStaticB_sound`);
-* `Z80LoopIR`, `Z80Loop`: **the loopback program** — its IR written out, the environments of its four
-  functions and the checks of its plan computed by the kernel (`loop_static`, `loop_ok`).
+* `Z80BoardPlan`: the plans of the SLIP build and of the loopback program for the board pass (`#guard`);
+* `Z80LoopIR`, `Z80Loop`, `Z80LoopItems`, `Z80LoopImage`: **the loopback image** — the IR and the items of
+  the image without the passes on the assembly written out; the environments of its functions, the checks
+  of its plan, the assembly and the symbols computed by the kernel: every function of the image does what
+  the IR's does (`loop_static`, `loop_image_ok`).
 
 By-reference parameters and `inlineCalls` are outside M7.1; of `IR → Z80` (M7.3) not proved: the runtime
-routines (`RtOK`); the passes on the assembly; the whole image (that the items are placed, the symbols of
-the areas, start-up); the plan of the SLIP build does not pass yet (temporaries and left-out stores share
-bytes with the variables of other functions).
+routines (`RtOK`, taken where the image calls them); the passes on the assembly (the images as built by
+default); start-up, the interrupt routine and the main loop; the SLIP build's image.
 
 Every statement is about the definitions of `Ember.Spec` as they are;
 `Ember/Proof/README.md` lists the theorems, the hypotheses they need and

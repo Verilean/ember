@@ -18,7 +18,7 @@ namespace Ember.Z80.Asm
 inductive Val where
   | num (n : Int)
   | sym (s : String) (off : Int := 0)
-  deriving Inhabited, BEq, Repr
+  deriving Inhabited, BEq, Repr, DecidableEq
 
 instance : OfNat Val n := ⟨.num n⟩
 
@@ -36,7 +36,7 @@ inductive Arg where
   | mem (v : Val)
   | imm (v : Val)
   | nz | z | nc | po | pe | p | m
-  deriving Inhabited, BEq, Repr
+  deriving Inhabited, BEq, Repr, DecidableEq
 
 inductive Op where
   | nop | halt | di | ei | exx | daa | cpl | neg | ccf | scf
@@ -56,7 +56,7 @@ inductive Op where
 structure Instr where
   op : Op
   args : List Arg := []
-  deriving Inhabited, BEq, Repr
+  deriving Inhabited, BEq, Repr, DecidableEq
 
 /-! ## Text (z88dk-z80asm's syntax) -/
 
@@ -364,7 +364,7 @@ inductive Item where
   | equ (name : String) (value : Nat)
   /-- For listings only. -/
   | comment (text : String)
-  deriving Inhabited, BEq, Repr
+  deriving Inhabited, BEq, Repr, DecidableEq
 
 def Item.text : Item → String
   | .ins i => "  " ++ i.text

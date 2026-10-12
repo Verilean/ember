@@ -733,8 +733,12 @@ footprint (`ZCtx.wr`) has changed.
 | `genBody_ok`, `Chain.fns` (`Z80Fn.lean`) | the generator's states before and after every instruction of a body, each with the promise of `ins_ok` |
 | **`exec_ok`**, **`fn_ok`** | from an instruction of a body with the states agreeing — and so from a function's entry (`Entry`) — the code has the `Outcome` of `IR.Sem.exec`/`callF`: it returns with the result in `A`/`HL`, the shared bytes as the IR left them and only the footprint written, or it is at `rt_trap`; by induction on the fuel, the functions called included |
 | `genFn_ok` (`Z80FnGen.lean`) | the run of `genFnCode` whose items are in the image gives what `fn_ok` needs of a function (`FnGen`) |
-| **`prog_ok`** (`Z80Prog.lean`) | in an image that holds the items `Codegen.genProg` gives (at any offset), given `FnStatic` of every function and `RtOK`: every function with code, entered as `Entry` says, has the outcome of `IR.Sem.callF` |
+| **`prog_ok`** (`Z80Prog.lean`) | in an image that holds the items `Codegen.genProg` gives (at any offset), given `RtOK` and `FnStatic` of every function in the environment its second pass ran in (`progEnvs`: the temporaries with a slot, the stores left out): every function with code, entered as `Entry` says, has the outcome of `IR.Sem.callF` |
 | `shapeB_sound` (`Z80Shape.lean`) | a checker for the part of `FnStatic` that is about a body alone (covered instructions, the last one does not go on, labels unique); `#guard`: it accepts every function of the SLIP build and of the loopback program |
+| `plan_ok`, **`fnStaticB_sound`** (`Z80Plan.lean`, `Z80Check.lean`) | a `Plan` gives what `ZCtx` has as predicates as data (intervals of shared bytes, of bytes a function may write, the slots it uses); `okB` decides what `ZCtx.OK` asks of it and `fnStaticB` decides `FnStatic` of a function in its environment — given that the image has the plan's labels and wide constants (`Labels`, `Lits`) |
+| `#guard boardCheck` (`Z80PlanOf.lean`, `Z80BoardPlan.lean`) | the plan `mkPlan` makes of a build for the board passes `okB` and `fnStaticB` of every function: the SLIP build (35 functions) and the loopback program — evaluated at build time, not by the kernel |
+| **`loop_static`**, `loop_ok` (`Z80LoopIR.lean`, `Z80Loop.lean`) | the loopback program, by the kernel: the environments of its four functions, `okB` and `fnStaticB` of its plan, the labels in the generated items — on its IR written out as a term (that the term is what `IR.lower` returns, and the layout what `build` computes, are `#guard`s) |
+| **`loop_image_ok`** (`Z80LoopItems.lean`, `Z80LoopImage.lean`) | the loopback image for the board without the passes on the assembly (`build (passes := false)`, its 351 items written out; `#guard`): the kernel assembles it, finds the symbols of the areas, the generated items, `rt_trap`, and no instruction naming `rt_acc` — so every function of it does what the IR's function does, given `RtOK` and a machine that an instruction without I/O leaves alone |
 
 **Checked, not proved** (translation validation, on every function
 generated): `jumpsOk` — what the generator assumes the registers hold
@@ -748,31 +752,46 @@ it (`dev`), and `wrel` — the machine's state stands for the IR's world
 them but that an instruction without I/O leaves the machine as it is.
 
 **Assumed for now:** `RtOK` — the specifications of the runtime's
-routines used (`rt_mul8`, `rt_div8`, …, `rt_not16`, `rt_neg16`, the
-shifts, `rt_bound`, the routines on the accumulator `rt_ld32`,
-`rt_st32`, `rt_add32`, …, `rt_cmp32`, `rt_acc_a`, `rt_acc_hl`, and the
-routine of each covered effect: it returns having done to the machine
-what the effect does to the world);
-`FnStatic` — what a function needs of the program and the layout: its
-operands can be read and its destinations written where the layout puts
-them, a temporary is assigned before it is read with no label between
-(true of every build of the stack), the body ends with an instruction
-that does not go on, labels are unique, the stack has room.  Checkers
-for these are to come, as `irOkB` for the lowering.
+routines (`rt_mul8`, `rt_div8`, …, `rt_not16`, `rt_neg16`, the shifts,
+`rt_bound`, the routines on the accumulator `rt_ld32`, `rt_st32`,
+`rt_add32`, …, `rt_cmp32`, `rt_acc_a`, `rt_acc_hl`, and the routine of
+each covered effect: it returns having done to the machine what the
+effect does to the world).  Each is taken where the image calls the
+routine (`Uses`), and the accumulator's symbol where an instruction
+names it (`AccRef`): an image has the routines its code uses and no
+others, so the loopback image, without the wide routines and `rt_acc`,
+can meet them.
 
-**A hypothesis today's images do not meet.**  `FnLay.nodata` says the
-slots of a function's temporaries are not among the bytes the IR and the
-CPU share (`ZCtx.data`).  The layout (`IR.layout`) puts a function's
-temporaries on top of its frame and lets the frames of functions that
-never run at the same time share memory: in the SLIP build a
-temporary's slot of one function is a variable's byte of another (35
-functions, 33 bytes of temporaries).  That is sound only because a
-function writes its variables before it reads them, which the relation
-does not know.  Either the relation learns it (definite assignment of
-the frame, a dataflow of its own), or the temporaries get an area apart
-from the variables — 165 instead of 156 bytes of frames for the SLIP
-build, 177 instead of 168 with Ethernet and DHCP.  Not decided; the
-loopback program has no temporary in memory and is not concerned.
+**Two changes to the generator the proofs asked for** (the images
+changed; the tests and the size gate pass):
+
+* *The temporaries have an area of their own* (`Codegen.tmpArea`).  The
+  relation takes the slots of temporaries to be apart from every byte
+  the IR sees (`FnLay.nodata`); the layout used to put them on top of
+  the frame, where the frame of a function that never runs at the same
+  time may lie.  +9 bytes of RAM in the SLIP build.
+* *A store to a byte another function's frame shares is made*
+  (`keepShared`, `sharedBytes`).  A store the generator leaves out
+  (the value is always at hand in a register) leaves the CPU's memory
+  unlike the IR's at that byte; where the byte is also a variable of
+  another function the relation cannot say so.  +91 bytes of code in
+  the SLIP build (15 functions had such stores).  And in its second pass
+  the generator now refuses to read the frame from memory where the
+  first pass saw no read (`noteRead`) — it never did; the proofs rely on
+  it.
+
+**Where this stands for the images.**  Of the loopback image without
+the passes on the assembly, `loop_image_ok` — nothing assumed of the
+program, the layout or the image.  Of the SLIP build, the checks of the
+layout pass (`#guard`, not the kernel), and nothing is connected to its
+image yet (it has wide constants: the literal pool; and 1073
+instructions to run the checks on in the kernel).  Of the images as
+built by default nothing is proved: `build` runs `retThreading`,
+`sweep`, `peephole`, `packHigh` and `relax` over the items, 303 bytes
+of 7159 in the SLIP build; `ember-z80 own-build --plain` is the image
+without them, tested like the other (random programs, the loopback, the
+corpus).  Not proved of any image: start-up, the interrupt routine and
+the loop that calls `main`; the routines of the runtime.
 
 **Covered** (`Covered`): all 1073 instructions of the SLIP build's IR,
 all 79 of the loopback program's, 1559 of the 1562 of the Ethernet
