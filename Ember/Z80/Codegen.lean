@@ -48,6 +48,10 @@ structure Regs where
   acc : Option (Nat × Opd) := none
   deriving Inhabited, BEq
 
+/-- Everything `x` claims, `y` claims. -/
+def Regs.le (x y : Regs) : Bool :=
+  x.a.all y.a.contains && x.hl.all y.hl.contains && (x.acc.isNone || x.acc == y.acc)
+
 /-- What two paths agree on. -/
 def Regs.meet (x y : Regs) : Regs :=
   { a := x.a.filter y.a.contains, hl := x.hl.filter y.hl.contains,
@@ -69,6 +73,11 @@ structure GS where
   starts, and whether the address of anything in that frame is formed. -/
   reads : Array Bool := #[]
   addrTaken : Bool := false
+  /-- A record of the jumps (the label and what the registers held) and of
+  what the generator took the registers to hold after each label: checked
+  against each other once the function is generated (`jumpsOk`). -/
+  jumps : List (Nat × Regs) := []
+  labelRegs : List (Nat × Regs) := []
 
 structure GEnv where
   fn : IR.Fn
@@ -704,7 +713,14 @@ def jumpTo (l : Nat) : GM Unit :=
     let r := match s.atLabel.lookup l with
       | some old => old.meet s.regs
       | none => s.regs
-    { s with atLabel := (l, r) :: s.atLabel.filter (·.1 != l) }
+    { s with atLabel := (l, r) :: s.atLabel.filter (·.1 != l), jumps := (l, s.regs) :: s.jumps }
+
+/-- At every jump the registers held what was assumed of them after its label. -/
+def jumpsOk (s : GS) : Bool :=
+  s.jumps.all fun (l, r) =>
+    match s.labelRegs.lookup l with
+    | some rl => rl.le r
+    | none => false
 
 def effectRoutine : Effect → String
   | .inputNext | .ringPop => "rt_input"
@@ -713,6 +729,39 @@ def effectRoutine : Effect → String
   | .outByte => "rt_out_byte" | .outEnd => "rt_out_end"
   | .drop => "rt_drop" | .note => "rt_note"
   | .mmioRead32 => "rt_mmio_read" | .mmioWrite32 => "rt_mmio_write"
+
+/-- Can control go on from this instruction to the one after it? -/
+def canFall : IR.Instr → Bool
+  | .jmp _ | .ret _ | .trap => false
+  | _ => true
+
+/-- What the registers are taken to hold after a label: what every way
+there agrees on; a jump from further down is not known yet, and then
+nothing is. -/
+def labelRegsOf (st : GS) (backward : Bool) (l : Nat) : Regs :=
+  if backward then {}
+  else
+    match st.atLabel.lookup l, st.dead with
+    | some r, true => r
+    | some r, false => r.meet st.regs
+    | none, false => st.regs
+    | none, true => {}
+
+def genLabel (l : Nat) : GM Unit := do
+  let name ← localLabel l
+  modify fun s => { s with out := s.out.push (.label name) }
+  let st ← get
+  let body := (← read).fn.body
+  let here := (body.findIdx? (· == .label l)).getD 0
+  let backward := (List.range body.size).any fun k => k > here && (match body[k]! with
+    | .jmp m | .br _ _ _ _ m => m == l
+    | _ => false)
+  -- falling into the label from the instruction before it is a way there too
+  let prevFalls := here == 0 || ((body[here - 1]?).map canFall).getD true
+  modify fun s =>
+    { s with regs := labelRegsOf st backward l, dead := false,
+             labelRegs := (l, labelRegsOf st backward l) :: s.labelRegs,
+             jumps := if prevFalls then (l, st.regs) :: s.jumps else s.jumps }
 
 def genInstr (i : IR.Instr) : GM Unit := do
   match i with
@@ -824,26 +873,7 @@ def genInstr (i : IR.Instr) : GM Unit := do
     ins .jp [.imm (.sym (← localLabel l))]
     jumpTo l
     modify fun s => { s with dead := true }
-  | .label l =>
-    let name ← localLabel l
-    modify fun s => { s with out := s.out.push (.label name) }
-    -- what every way here agrees on; a jump from further down is not
-    -- known yet, and then nothing is
-    let st ← get
-    let body := (← read).fn.body
-    let here := (body.findIdx? (· == i)).getD 0
-    let backward := (List.range body.size).any fun k => k > here && (match body[k]! with
-      | .jmp m | .br _ _ _ _ m => m == l
-      | _ => false)
-    let incoming := st.atLabel.lookup l
-    let regs : Regs :=
-      if backward then {}
-      else match incoming, st.dead with
-        | some r, true => r
-        | some r, false => r.meet st.regs
-        | none, false => st.regs
-        | none, true => {}
-    modify fun s => { s with regs, dead := false }
+  | .label l => genLabel l
   | .load n d p =>
     genAddr p
     if n == 1 then
@@ -936,33 +966,49 @@ def genInstr (i : IR.Instr) : GM Unit := do
     ins .jp [.imm (.sym "rt_trap")]
     modify fun s => { s with dead := true }
 
+/-- The slots of the temporaries, above the locals: the offset of each
+(whether it has a slot or not), and the size of the frame with them. -/
+def tmpLayout (f : IR.Fn) (spilled : Array Bool) : Array Nat × Nat :=
+  (List.range f.tmps.size).foldl
+    (fun (acc : Array Nat × Nat) t => (acc.1.push acc.2, if spilled[t]! then acc.2 + f.tmps[t]! else acc.2))
+    (#[], f.frame)
+
+/-- The instruction a branch leads to, after its label. -/
+def targetOf (f : IR.Fn) (i : IR.Instr) : Option IR.Instr :=
+  match i with
+  | .br _ _ _ _ l => (f.body.findIdx? (· == .label l)).bind fun j => f.body[j + 1]?
+  | _ => none
+
+/-- The instructions from the `k`-th on. -/
+def genBody (f : IR.Fn) (annotate : Bool) : Nat → List IR.Instr → GM Unit
+  | _, [] => pure ()
+  | k, i :: r => do
+    if annotate then modify fun s => { s with out := s.out.push (.comment i.text.trimAscii.toString) }
+    withReader (fun e => { e with next := f.body[k + 1]?, atTarget := targetOf f i }) (genInstr i)
+    genBody f annotate (k + 1) r
+
+/-- A function: its labels, the register parameter to its slot (and at hand), its body. -/
+def genFnCode (f : IR.Fn) (isEntry annotate : Bool) : GM Unit := do
+  if isEntry then modify fun s => { s with out := s.out.push (.label "f_entry") }
+  modify fun s => { s with out := s.out.push (.label (fnLabel f.name)) }
+  match f.regParam with
+  | some (n, sl) => store n (.slot sl)
+  | none => pure ()
+  genBody f annotate 0 f.body.toList
+
 /-- One function with the given temporaries in slots: its items, and the
 temporaries read from their slot. -/
 def genFn (f : IR.Fn) (spilled : Array Bool) (lits : Array (Nat × Nat)) (isEntry := false)
     (live : Option (Array Bool) := none) (annotate := false) :
-    Except String (Array Item × Array Bool × Array (Nat × Nat) × Nat × Option (Array Bool)) := do
-  -- slots of the temporaries, above the locals
-  let mut off := f.frame
-  let mut tmpOff := #[]
-  for t in [0:f.tmps.size] do
-    tmpOff := tmpOff.push off
-    if spilled[t]! then off := off + f.tmps[t]!
-  let act : GM Unit := do
-    if isEntry then modify fun s => { s with out := s.out.push (.label "f_entry") }
-    modify fun s => { s with out := s.out.push (.label (fnLabel f.name)) }
-    -- the register parameter goes to its slot, and is at hand
-    if let some (n, sl) := f.regParam then store n (.slot sl)
-    let labelAt (l : Nat) : Option Nat := f.body.findIdx? (· == .label l)
-    for k in [0:f.body.size] do
-      let i := f.body[k]!
-      let atTarget := match i with
-        | .br _ _ _ _ l => (labelAt l).bind fun j => f.body[j + 1]?
-        | _ => none
-      if annotate then modify fun s => { s with out := s.out.push (.comment i.text.trimAscii.toString) }
-      withReader (fun e => { e with next := f.body[k + 1]?, atTarget }) (genInstr i)
-  let ((), st) ← (act.run { fn := f, spilled, tmpOff, live }).run
-    { missed := Array.replicate f.tmps.size false, lits, reads := Array.replicate f.frame false }
-  return (st.out, st.missed, st.lits, off, if st.addrTaken then none else some st.reads)
+    Except String (Array Item × Array Bool × Array (Nat × Nat) × Nat × Option (Array Bool)) :=
+  match ((genFnCode f isEntry annotate).run
+      { fn := f, spilled, tmpOff := (tmpLayout f spilled).1, live }).run
+      { missed := Array.replicate f.tmps.size false, lits, reads := Array.replicate f.frame false } with
+  | .ok ((), st) =>
+    if jumpsOk st then
+      .ok (st.out, st.missed, st.lits, (tmpLayout f spilled).2, if st.addrTaken then none else some st.reads)
+    else .error s!"{f.name}: the registers assumed after a label are not those at a jump to it"
+  | .error e => .error e
 
 structure Compiled where
   items : List Item
