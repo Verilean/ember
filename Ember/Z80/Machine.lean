@@ -40,6 +40,7 @@ harness do — an input oracle and an event recorder, no interrupts:
 | `0xD6` out | note, with its code |
 | `0xD7` out | trap |
 | `0xD8` in | which program of the image to run |
+| `0xD9` in | 1 when the position in the input has moved since this port was last read |
 -/
 
 namespace Ember.Z80
@@ -87,6 +88,8 @@ structure Machine where
   ioff : Nat := 0
   cur : Nat := 0
   latch : UInt8 := 0
+  /-- The position in the input (item, byte) when port `0xD9` was last read. -/
+  mark : Nat × Nat := (0, 0)
   program : UInt8 := 0
   frame : ByteArray := ByteArray.empty
   events : Array (Nat × HEvent) := #[]
@@ -137,6 +140,7 @@ def applyIo (m : Machine) : Machine :=
     | 0x81 => { m with rdrf := false, ovrn := false }
     | 0xC1 => { m with tickPending := false }
     | 0xD1 => m.takeInput
+    | 0xD9 => { m with mark := (m.ipos, m.ioff) }
     | _ => m
   | .write port v =>
     match port.toUInt8 with
@@ -189,6 +193,7 @@ def step (m : Machine) : Machine :=
       let (kind, _) := m.peekInput
       let latch := m.latch
       let prog := m.program
+      let moved : UInt8 := if (m.ipos, m.ioff) != m.mark then 1 else 0
       (m.modifyCpu fun c => c.step fun p =>
         match p.toUInt8 with
         | 0xD0 => if kind == 2 then 0 else 1
@@ -196,6 +201,7 @@ def step (m : Machine) : Machine :=
         -- the byte taken by the read of 0xD1 that came before
         | 0xD2 => latch
         | 0xD8 => prog
+        | 0xD9 => moved
         | _ => 0xFF).applyIo
     else
       (m.modifyCpu fun c => c.step fun p =>

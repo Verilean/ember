@@ -19,15 +19,6 @@ open Ember.Proof.Refine (callN)
 open Ember.Lang (World)
 open Ember.Trace (Input)
 
-/-- Where the next item of input is: exhausted chunks skipped. -/
-def normPos (inputs : Array Input) (pos off : Nat) : Nat × Nat :=
-  if h : pos < inputs.size then
-    match inputs[pos] with
-    | .rx b => if off ≥ b.size then normPos inputs (pos + 1) 0 else (pos, off)
-    | .tick => (pos, off)
-  else (pos, off)
-termination_by inputs.size - pos
-
 theorem mnorm : ∀ (n : Nat) (m : Machine), n = m.inputs.size - m.ipos →
     m.normalize = { m with ipos := (normPos m.inputs m.ipos m.ioff).1, ioff := (normPos m.inputs m.ipos m.ioff).2 } := by
   intro n
@@ -47,29 +38,6 @@ theorem mnorm : ∀ (n : Nat) (m : Machine), n = m.inputs.size - m.ipos →
         · simp only [ho, if_false]
     · simp only [h, dite_false]
 
-theorem wnorm : ∀ (n : Nat) (w : World), n = w.inputs.size - w.pos → w.framed = false →
-    w.normalize = { w with pos := (normPos w.inputs w.pos w.off).1, off := (normPos w.inputs w.pos w.off).2 } := by
-  intro n
-  induction n using Nat.strongRecOn with
-  | _ n ih =>
-    intro w hn hf
-    obtain ⟨inputs, pos, off, cur, events, frame, mmio, framed⟩ := w
-    simp only at hf hn
-    subst hf
-    rw [World.normalize, normPos]
-    simp only [Bool.false_eq_true, if_false]
-    by_cases h : pos < inputs.size
-    · simp only [h, dite_true]
-      cases hx : inputs[pos] with
-      | tick => rfl
-      | rx b =>
-        simp only
-        by_cases ho : off ≥ b.size
-        · simp only [ho, if_true]
-          rw [ih (inputs.size - (pos + 1)) (by omega) _ rfl rfl]
-        · simp only [ho, if_false]
-    · simp only [h, dite_false]
-
 /-- An event the harness recorded, as the IR's world has it: a drop by
 the name of its reason.  (Notes and the trap are not followed.) -/
 def evOf (c : IR.Ctx) : HEvent → Option Trace.Event
@@ -83,7 +51,7 @@ def evsOf (c : IR.Ctx) (es : Array (Nat × HEvent)) : Array (Nat × Trace.Event)
 /-- **The relation**: a `Machine` in harness mode with nothing on the
 serial line and no interrupt pending, and the world and latch it stands
 for. -/
-structure Sim (c : IR.Ctx) (m : Machine) (w : World × UInt8) : Prop where
+structure Sim (c : IR.Ctx) (m : Machine) (w : HW) : Prop where
   harness : m.harness = true
   noRx : m.rxQueue.size ≤ m.rxPos
   rdrf : m.rdrf = false
@@ -93,41 +61,11 @@ structure Sim (c : IR.Ctx) (m : Machine) (w : World × UInt8) : Prop where
   pos : m.ipos = w.1.pos
   off : m.ioff = w.1.off
   cur : m.cur = w.1.cur
-  latch : m.latch = w.2
+  latch : m.latch = w.2.1
+  mark : m.mark = w.2.2
   frame : m.frame = w.1.frame
   framed : w.1.framed = false
   events : evsOf c m.events = w.1.events
-
-/-- The world with its position moved, an item taken. -/
-def wTook (w : World) (x : Nat) (p : Nat × Nat) : World := { w with cur := x, pos := p.1, off := p.2 }
-def wAt (w : World) (p : Nat × Nat) : World := { w with pos := p.1, off := p.2 }
-
-/-- `World.next`, by where the next item is. -/
-theorem next_eq (w : World) (hf : w.framed = false) :
-    w.next =
-      (if h : (normPos w.inputs w.pos w.off).1 < w.inputs.size then
-        match w.inputs[(normPos w.inputs w.pos w.off).1] with
-        | .tick => (0x0100, wTook w (normPos w.inputs w.pos w.off).1
-            (normPos w.inputs ((normPos w.inputs w.pos w.off).1 + 1) 0))
-        | .rx b => ((b.get! (normPos w.inputs w.pos w.off).2).toUInt16, wTook w (normPos w.inputs w.pos w.off).1
-            (normPos w.inputs (normPos w.inputs w.pos w.off).1 ((normPos w.inputs w.pos w.off).2 + 1)))
-      else (0xFFFF, wAt w (normPos w.inputs w.pos w.off))) := by
-  unfold World.next wTook wAt
-  simp only
-  rw [wnorm _ w rfl hf]
-  simp only
-  by_cases h : (normPos w.inputs w.pos w.off).1 < w.inputs.size
-  · simp only [h, dite_true]
-    cases hx : w.inputs[(normPos w.inputs w.pos w.off).1] with
-    | tick =>
-      simp only
-      congr 1
-      exact wnorm _ _ rfl hf
-    | rx b =>
-      simp only
-      congr 1
-      exact wnorm _ _ rfl hf
-  · simp only [h, dite_false]
 
 def mTook (m : Machine) (x : Nat) (l : UInt8) (p : Nat × Nat) : Machine := { m with cur := x, latch := l, ipos := p.1, ioff := p.2 }
 def mAt (m : Machine) (p : Nat × Nat) : Machine := { m with ipos := p.1, ioff := p.2 }
@@ -188,7 +126,7 @@ theorem u8_to16_lt (b : UInt8) : b.toUInt16.toNat < 256 := by
   exact b.toNat_lt
 
 /-- What the machine answers at `0xD1` is what the proofs' machine answers. -/
-theorem kind_sim {c : IR.Ctx} {m : Machine} {w : World × UInt8} (S : Sim c m w) : m.peekInput.1 = kindOf w.1 := by
+theorem kind_sim {c : IR.Ctx} {m : Machine} {w : HW} (S : Sim c m w) : m.peekInput.1 = kindOf w.1 := by
   rw [peek_eq]
   unfold kindOf
   rw [next_eq _ S.framed]
@@ -213,8 +151,8 @@ theorem kind_sim {c : IR.Ctx} {m : Machine} {w : World × UInt8} (S : Sim c m w)
     rfl
 
 /-- A read of `0xD1`: the machine takes the next item as the proofs' machine does. -/
-theorem take_sim {c : IR.Ctx} {m : Machine} {w : World × UInt8} (S : Sim c m w) :
-    Sim c m.takeInput (w.1.next.2, if w.1.next.1.toNat < 256 then lo w.1.next.1 else w.2) := by
+theorem take_sim {c : IR.Ctx} {m : Machine} {w : HW} (S : Sim c m w) :
+    Sim c m.takeInput (w.1.next.2, if w.1.next.1.toNat < 256 then lo w.1.next.1 else w.2.1, w.2.2) := by
   rw [take_eq, next_eq _ S.framed]
   simp only [S.inputs, S.pos, S.off]
   by_cases h : (normPos w.1.inputs w.1.pos w.1.off).1 < w.1.inputs.size
@@ -222,10 +160,10 @@ theorem take_sim {c : IR.Ctx} {m : Machine} {w : World × UInt8} (S : Sim c m w)
     cases hx : w.1.inputs[(normPos w.1.inputs w.1.pos w.1.off).1] with
     | tick =>
       simp only
-      exact ⟨S.harness, S.noRx, S.rdrf, S.tick, S.prog, S.inputs, rfl, rfl, rfl, S.latch, S.frame, S.framed, S.events⟩
+      exact ⟨S.harness, S.noRx, S.rdrf, S.tick, S.prog, S.inputs, rfl, rfl, rfl, S.latch, S.mark, S.frame, S.framed, S.events⟩
     | rx b =>
       simp only
-      refine ⟨S.harness, S.noRx, S.rdrf, S.tick, S.prog, S.inputs, rfl, rfl, rfl, ?_, S.frame, S.framed, S.events⟩
+      refine ⟨S.harness, S.noRx, S.rdrf, S.tick, S.prog, S.inputs, rfl, rfl, rfl, ?_, S.mark, S.frame, S.framed, S.events⟩
       simp only [u8_to16_lt, if_true]
       show b[(normPos w.1.inputs w.1.pos w.1.off).2]! = lo (b.get! _).toUInt16
       apply UInt8.toNat_inj.mp
@@ -234,32 +172,19 @@ theorem take_sim {c : IR.Ctx} {m : Machine} {w : World × UInt8} (S : Sim c m w)
       have := (b.get! (normPos w.1.inputs w.1.pos w.1.off).2).toNat_lt
       rw [Nat.mod_eq_of_lt (by omega), ba_getElem!]
   · simp only [h, dite_false]
-    exact ⟨S.harness, S.noRx, S.rdrf, S.tick, S.prog, S.inputs, rfl, rfl, S.cur, S.latch, S.frame, S.framed, S.events⟩
+    exact ⟨S.harness, S.noRx, S.rdrf, S.tick, S.prog, S.inputs, rfl, rfl, S.cur, S.latch, S.mark, S.frame, S.framed, S.events⟩
 
 /-- The relation does not look at the CPU, the ACIA's registers or the debug port. -/
-theorem Sim.of_eq {c : IR.Ctx} {m m' : Machine} {w : World × UInt8} (S : Sim c m w) (h1 : m'.harness = m.harness)
+theorem Sim.of_eq {c : IR.Ctx} {m m' : Machine} {w : HW} (S : Sim c m w) (h1 : m'.harness = m.harness)
     (h2 : m'.rxQueue = m.rxQueue) (h3 : m'.rxPos = m.rxPos) (h4 : m'.rdrf = false) (h5 : m'.tickPending = false)
     (h6 : m'.program = m.program) (h7 : m'.inputs = m.inputs) (h8 : m'.ipos = m.ipos) (h9 : m'.ioff = m.ioff)
-    (h10 : m'.cur = m.cur) (h11 : m'.latch = m.latch) (h12 : m'.frame = m.frame) (h13 : m'.events = m.events) :
+    (h10 : m'.cur = m.cur) (h11 : m'.latch = m.latch) (h12 : m'.frame = m.frame) (h13 : m'.events = m.events)
+    (h14 : m'.mark = m.mark) :
     Sim c m' w :=
   ⟨by rw [h1]; exact S.harness, by rw [h2, h3]; exact S.noRx, h4, h5, by rw [h6]; exact S.prog,
     by rw [h7]; exact S.inputs, by rw [h8]; exact S.pos, by rw [h9]; exact S.off, by rw [h10]; exact S.cur,
-    by rw [h11]; exact S.latch, by rw [h12]; exact S.frame, S.framed, by rw [h13]; exact S.events⟩
-
-theorem bus_sim {c : IR.Ctx} {m : Machine} {w : World × UInt8} (S : Sim c m w) :
-    (fun p : UInt16 =>
-      match p.toUInt8 with
-      | 0xD0 => if m.peekInput.1 == 2 then 0 else 1
-      | 0xD1 => m.peekInput.1
-      | 0xD2 => m.latch
-      | 0xD8 => m.program
-      | _ => 0xFF) = hbus w := by
-  funext p
-  rw [kind_sim S, S.latch, S.prog]
-  unfold hbus
-  show _ = (if p.toUInt8 = 0xD0 then _ else if p.toUInt8 = 0xD1 then _ else if p.toUInt8 = 0xD2 then _
-    else if p.toUInt8 = 0xD8 then _ else _)
-  split <;> simp_all
+    by rw [h11]; exact S.latch, by rw [h14]; exact S.mark, by rw [h12]; exact S.frame, S.framed,
+    by rw [h13]; exact S.events⟩
 
 theorem evsOf_push (c : IR.Ctx) (es : Array (Nat × HEvent)) (i : Nat) (e : HEvent) :
     evsOf c (es.push (i, e)) = match evOf c e with
@@ -275,9 +200,9 @@ theorem ofNat_toNat_mod (v : UInt8) : UInt8.ofNat (v.toNat % 256) = v := by
   omega
 
 /-- The machine after the CPU's step, before what the step did on the bus is applied. -/
-def afterCpu (m : Machine) (w : World × UInt8) : Machine := { m with cpu := m.cpu.step (hbus w) }
+def afterCpu (m : Machine) (w : HW) : Machine := { m with cpu := m.cpu.step (hbus w) }
 
-theorem step_eq {c : IR.Ctx} {m : Machine} {w : World × UInt8} (S : Sim c m w) :
+theorem step_eq {c : IR.Ctx} {m : Machine} {w : HW} (S : Sim c m w) :
     m.step = (afterCpu m w).applyIo := by
   have hrx : m.rxDue = false := by
     simp [Machine.rxDue, Nat.not_lt.mpr S.noRx]
@@ -289,16 +214,16 @@ theorem step_eq {c : IR.Ctx} {m : Machine} {w : World × UInt8} (S : Sim c m w) 
   simp only
   congr 3
   funext p
-  rw [kind_sim S, S.latch, S.prog]
+  rw [kind_sim S, S.latch, S.prog, S.pos, S.off, S.mark]
   unfold hbus
   have hl : lo p = p.toUInt8 := rfl
   rw [hl]
   split <;> simp_all
 
 /-- What the CPU did on the bus does to the machine what it does to the proofs' machine. -/
-theorem io_sim {c : IR.Ctx} {m : Machine} {w : World × UInt8} (S : Sim c m w) (c' : Cpu) :
+theorem io_sim {c : IR.Ctx} {m : Machine} {w : HW} (S : Sim c m w) (c' : Cpu) :
     Sim c ({ m with cpu := c' } : Machine).applyIo (hdev c w c'.io) := by
-  have S' : Sim c ({ m with cpu := c' } : Machine) w := S.of_eq rfl rfl rfl S.rdrf S.tick rfl rfl rfl rfl rfl rfl rfl rfl
+  have S' : Sim c ({ m with cpu := c' } : Machine) w := S.of_eq rfl rfl rfl S.rdrf S.tick rfl rfl rfl rfl rfl rfl rfl rfl rfl
   unfold Machine.applyIo
   simp only
   cases hio : c'.io with
@@ -310,20 +235,28 @@ theorem io_sim {c : IR.Ctx} {m : Machine} {w : World × UInt8} (S : Sim c m w) (
     · rename_i h
       have : hdev c w (.read port) = w := by simp [hdev, hl, h]
       rw [this]
-      exact S'.of_eq rfl rfl rfl rfl S.tick rfl rfl rfl rfl rfl rfl rfl rfl
+      exact S'.of_eq rfl rfl rfl rfl S.tick rfl rfl rfl rfl rfl rfl rfl rfl rfl
     · rename_i h
       have : hdev c w (.read port) = w := by simp [hdev, hl, h]
       rw [this]
-      exact S'.of_eq rfl rfl rfl S.rdrf rfl rfl rfl rfl rfl rfl rfl rfl rfl
+      exact S'.of_eq rfl rfl rfl S.rdrf rfl rfl rfl rfl rfl rfl rfl rfl rfl rfl
     · rename_i h
-      have : hdev c w (.read port) = (w.1.next.2, if w.1.next.1.toNat < 256 then lo w.1.next.1 else w.2) := by
+      have : hdev c w (.read port) =
+          (w.1.next.2, if w.1.next.1.toNat < 256 then lo w.1.next.1 else w.2.1, w.2.2) := by
         simp [hdev, hl, h]
       rw [this]
       exact take_sim S'
-    · rename_i h1 h2 h3
+    · -- 0xD9: the mark
+      rename_i h
+      have : hdev c w (.read port) = (w.1, w.2.1, (w.1.pos, w.1.off)) := by simp [hdev, hl, h]
+      rw [this]
+      exact ⟨S.harness, S.noRx, S.rdrf, S.tick, S.prog, S.inputs, S.pos, S.off, S.cur, S.latch, by
+        show (m.ipos, m.ioff) = (w.1.pos, w.1.off)
+        rw [S.pos, S.off], S.frame, S.framed, S.events⟩
+    · rename_i h1 h2 h3 h4
       have : hdev c w (.read port) = w := by
         simp only [hdev, hl]
-        rw [if_neg (fun e => h3 e)]
+        rw [if_neg (fun e => h3 e), if_neg (fun e => h4 e)]
       rw [this]
       exact S'
   | write port v =>
@@ -334,14 +267,14 @@ theorem io_sim {c : IR.Ctx} {m : Machine} {w : World × UInt8} (S : Sim c m w) (
       rename_i h
       have : hdev c w (.write port v) = ((IR.Sem.effect c w.1 .outByte [v.toNat]).2, w.2) := by simp [hdev, hl, h]
       rw [this]
-      exact ⟨S.harness, S.noRx, S.rdrf, S.tick, S.prog, S.inputs, S.pos, S.off, S.cur, S.latch, by
+      exact ⟨S.harness, S.noRx, S.rdrf, S.tick, S.prog, S.inputs, S.pos, S.off, S.cur, S.latch, S.mark, by
         show m.frame.push v = w.1.frame.push (UInt8.ofNat (v.toNat % 256))
         rw [ofNat_toNat_mod, S.frame], S.framed, S.events⟩
     · -- 0xD4: the end of the frame
       rename_i h
       have : hdev c w (.write port v) = ((IR.Sem.effect c w.1 .outEnd []).2, w.2) := by simp [hdev, hl, h]
       rw [this]
-      exact ⟨S.harness, S.noRx, S.rdrf, S.tick, S.prog, S.inputs, S.pos, S.off, S.cur, S.latch, rfl, S.framed, by
+      exact ⟨S.harness, S.noRx, S.rdrf, S.tick, S.prog, S.inputs, S.pos, S.off, S.cur, S.latch, S.mark, rfl, S.framed, by
         show evsOf c (m.events.push (m.cur, .tx m.frame)) = w.1.events.push (w.1.cur, .tx w.1.frame)
         rw [evsOf_push]
         show (evsOf c m.events).push (m.cur, .tx m.frame) = _
@@ -350,7 +283,7 @@ theorem io_sim {c : IR.Ctx} {m : Machine} {w : World × UInt8} (S : Sim c m w) (
       rename_i h
       have : hdev c w (.write port v) = ((IR.Sem.effect c w.1 .drop [v.toNat]).2, w.2) := by simp [hdev, hl, h]
       rw [this]
-      exact ⟨S.harness, S.noRx, S.rdrf, S.tick, S.prog, S.inputs, S.pos, S.off, S.cur, S.latch, S.frame, S.framed, by
+      exact ⟨S.harness, S.noRx, S.rdrf, S.tick, S.prog, S.inputs, S.pos, S.off, S.cur, S.latch, S.mark, S.frame, S.framed, by
         show evsOf c (m.events.push (m.cur, .drop v)) =
           w.1.events.push (w.1.cur, .drop (c.dropReasons.getD v.toNat s!"code-{v.toNat}"))
         rw [evsOf_push]
@@ -360,7 +293,7 @@ theorem io_sim {c : IR.Ctx} {m : Machine} {w : World × UInt8} (S : Sim c m w) (
       rename_i h
       have : hdev c w (.write port v) = w := by simp [hdev, hl, h]
       rw [this]
-      exact ⟨S.harness, S.noRx, S.rdrf, S.tick, S.prog, S.inputs, S.pos, S.off, S.cur, S.latch, S.frame, S.framed, by
+      exact ⟨S.harness, S.noRx, S.rdrf, S.tick, S.prog, S.inputs, S.pos, S.off, S.cur, S.latch, S.mark, S.frame, S.framed, by
         show evsOf c (m.events.push (m.cur, .note v)) = _
         rw [evsOf_push]
         exact S.events⟩
@@ -368,7 +301,7 @@ theorem io_sim {c : IR.Ctx} {m : Machine} {w : World × UInt8} (S : Sim c m w) (
       rename_i h
       have : hdev c w (.write port v) = w := by simp [hdev, hl, h]
       rw [this]
-      exact ⟨S.harness, S.noRx, S.rdrf, S.tick, S.prog, S.inputs, S.pos, S.off, S.cur, S.latch, S.frame, S.framed, by
+      exact ⟨S.harness, S.noRx, S.rdrf, S.tick, S.prog, S.inputs, S.pos, S.off, S.cur, S.latch, S.mark, S.frame, S.framed, by
         show evsOf c (m.events.push (m.cur, .trap)) = _
         rw [evsOf_push]
         exact S.events⟩
@@ -377,18 +310,18 @@ theorem io_sim {c : IR.Ctx} {m : Machine} {w : World × UInt8} (S : Sim c m w) (
       have : hdev c w (.write port v) = w := by simp [hdev, hl, h]
       rw [this]
       split
-      · exact S'.of_eq rfl rfl rfl rfl S.tick rfl rfl rfl rfl rfl rfl rfl rfl
-      · exact S'.of_eq rfl rfl rfl S.rdrf S.tick rfl rfl rfl rfl rfl rfl rfl rfl
+      · exact S'.of_eq rfl rfl rfl rfl S.tick rfl rfl rfl rfl rfl rfl rfl rfl rfl
+      · exact S'.of_eq rfl rfl rfl S.rdrf S.tick rfl rfl rfl rfl rfl rfl rfl rfl rfl
     · -- the ACIA's data register
       rename_i h
       have : hdev c w (.write port v) = w := by simp [hdev, hl, h]
       rw [this]
-      exact S'.of_eq rfl rfl rfl S.rdrf S.tick rfl rfl rfl rfl rfl rfl rfl rfl
+      exact S'.of_eq rfl rfl rfl S.rdrf S.tick rfl rfl rfl rfl rfl rfl rfl rfl rfl
     · -- the debug port
       rename_i h
       have : hdev c w (.write port v) = w := by simp [hdev, hl, h]
       rw [this]
-      exact S'.of_eq rfl rfl rfl S.rdrf S.tick rfl rfl rfl rfl rfl rfl rfl rfl
+      exact S'.of_eq rfl rfl rfl S.rdrf S.tick rfl rfl rfl rfl rfl rfl rfl rfl rfl
     · rename_i h1 h2 h3 h4 h5 h6 h7 h8
       have : hdev c w (.write port v) = w := by
         simp only [hdev, hl]
@@ -399,7 +332,7 @@ theorem io_sim {c : IR.Ctx} {m : Machine} {w : World × UInt8} (S : Sim c m w) (
 /-- **One step of the machine the tests run is one step of the proofs'
 machine**, the relation kept: the CPU steps with the same answers on the
 bus, and what it did on the bus does the same to both. -/
-theorem step_sim {c : IR.Ctx} {m : Machine} {w : World × UInt8} (S : Sim c m w) :
+theorem step_sim {c : IR.Ctx} {m : Machine} {w : HW} (S : Sim c m w) :
     m.step.cpu = m.cpu.step (hbus w) ∧ Sim c m.step (hdev c w (m.cpu.step (hbus w)).io) := by
   rw [step_eq S]
   refine ⟨?_, io_sim S _⟩
@@ -419,18 +352,18 @@ def mrun : Nat → Machine → Machine
   | n + 1, m => mrun n m.step
 
 /-- **A run of the machine the tests run is a run of the proofs' machine.** -/
-theorem run_sim (a : Assembled) (addrs : List Nat) : ∀ (n : Nat) (m : Machine) (w : World × UInt8), Sim img.ctx m w →
-    (mrun n m).cpu = (wrun (Zof a addrs) n (m.cpu, w)).1 ∧
-      Sim img.ctx (mrun n m) (wrun (Zof a addrs) n (m.cpu, w)).2
+theorem run_sim (a : Assembled) (addrs : List Nat) : ∀ (n : Nat) (m : Machine) (w : HW), Sim img.ctx m w →
+    (mrun n m).cpu = (wrun (Zof a addrs (0, 0)) n (m.cpu, w)).1 ∧
+      Sim img.ctx (mrun n m) (wrun (Zof a addrs (0, 0)) n (m.cpu, w)).2
   | 0, _, _, S => ⟨rfl, S⟩
   | n + 1, m, w, S => by
     obtain ⟨hc, S1⟩ := step_sim S
     obtain ⟨h1, h2⟩ := run_sim a addrs n m.step _ S1
-    have e : wstep (Zof a addrs) (m.cpu, w) = (m.step.cpu, hdev img.ctx w (m.cpu.step (hbus w)).io) := by
+    have e : wstep (Zof a addrs (0, 0)) (m.cpu, w) = (m.step.cpu, hdev img.ctx w (m.cpu.step (hbus w)).io) := by
       show (m.cpu.step (hbus w), hdev img.ctx w (m.cpu.step (hbus w)).io) = _
       rw [hc]
-    show (mrun n m.step).cpu = (wrun (Zof a addrs) n (wstep (Zof a addrs) (m.cpu, w))).1 ∧
-      Sim img.ctx (mrun n m.step) (wrun (Zof a addrs) n (wstep (Zof a addrs) (m.cpu, w))).2
+    show (mrun n m.step).cpu = (wrun (Zof a addrs (0, 0)) n (wstep (Zof a addrs (0, 0)) (m.cpu, w))).1 ∧
+      Sim img.ctx (mrun n m.step) (wrun (Zof a addrs (0, 0)) n (wstep (Zof a addrs (0, 0)) (m.cpu, w))).2
     rw [e]
     exact ⟨h1, h2⟩
 
@@ -453,6 +386,7 @@ structure Reset (a : Assembled) (inputs : Array Input) (m : Machine) : Prop wher
   off : m.ioff = 0
   cur : m.cur = 0
   latch : m.latch = 0
+  mark : m.mark = (0, 0)
   frame : m.frame = ByteArray.empty
   events : m.events = #[]
 
@@ -462,20 +396,20 @@ semantics, and after some number of steps the machine stands for their
 world (`Sim`: the input position, the frame, the events recorded — a
 drop by the name of its reason) with the CPU at the head of the loop;
 or it stopped (`di; halt`) after `i ≤ j` calls, standing for the world
-of those, the input used up or the loop's count of idle calls full. -/
+of those, the input used up. -/
 theorem loopH_machine (p : Lang.Prog) (S : LoopSrc p) :
     ∃ (a : Assembled) (addrs : List Nat), assemble items = .ok a ∧
       ∀ (inputs : Array Input) (m : Machine), Reset a inputs m →
-        ∀ j : Nat, ∃ (st' : Lang.Sem.St) (n : Nat) (w' : World × UInt8),
+        ∀ j : Nat, ∃ (st' : Lang.Sem.St) (n : Nat) (w' : HW),
           callN 366 p "main" j (Lang.Sem.initial p inputs) = some st' ∧ Sim img.ctx (mrun n m) w' ∧
-          ((At addrs 176 (mrun n m).cpu ∧ (mrun n m).cpu.sp = 0 ∧ w'.1 = st'.world) ∨
+          ((At addrs 174 (mrun n m).cpu ∧ (mrun n m).cpu.sp = 0 ∧ w'.1 = st'.world) ∨
            (∃ i sti, i ≤ j ∧ callN 366 p "main" i (Lang.Sem.initial p inputs) = some sti ∧
               (mrun n m).cpu.halted = true ∧ (mrun n m).cpu.iff1 = false ∧ w'.1 = sti.world ∧
-              (sti.world.next.1 = 0xFFFF ∨ Idle sti.world))) := by
+              sti.world.next.1 = 0xFFFF)) := by
   obtain ⟨a, addrs, ha, hspec⟩ := loopH_spec p S
   refine ⟨a, addrs, ha, fun inputs m R j => ?_⟩
-  have S0 : Sim img.ctx m ((st0 inputs).world, 0) :=
-    ⟨R.harness, R.noRx, R.rdrf, R.tick, R.prog, R.inputs, R.pos, R.off, R.cur, R.latch, R.frame, rfl, by
+  have S0 : Sim img.ctx m ((st0 inputs).world, 0, (0, 0)) :=
+    ⟨R.harness, R.noRx, R.rdrf, R.tick, R.prog, R.inputs, R.pos, R.off, R.cur, R.latch, R.mark, R.frame, rfl, by
       rw [R.events]
       rfl⟩
   obtain ⟨st', hj, hcase⟩ := hspec inputs m.cpu R.pc R.img R.run R.rs R.msz j
@@ -520,7 +454,7 @@ theorem harness_reset (a : Assembled) (inputs : Array Input) (hsz : a.bytes.size
   have hm0 : (ByteArray.mk (Array.replicate 65536 (0 : UInt8))).size = 65536 := by simp [ByteArray.size]
   obtain ⟨hs, hg⟩ := load_fold a.bytes _ hm0 a.bytes.size (Nat.le_refl _) (by omega)
   refine ⟨rfl, ⟨by show 0 + a.bytes.size ≤ (0x8000 : UInt16).toNat; simpa using hsz, fun x b hx => ?_⟩, rfl, rfl, hs,
-    rfl, Nat.le_refl _, rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl⟩
+    rfl, Nat.le_refl _, rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl⟩
   have hlt : x < a.bytes.size := by
     rcases Nat.lt_or_ge x a.bytes.data.size with h' | h'
     · exact h'
@@ -542,13 +476,13 @@ RAM from `0x8000`, in `Ember.Z80.Machine` in harness mode with any
 input: what `loopH_machine` says of `Machine.step` from there. -/
 theorem loopH_harness (p : Lang.Prog) (S : LoopSrc p) :
     ∃ (a : Assembled) (addrs : List Nat), assemble items = .ok a ∧
-      ∀ (inputs : Array Input) (j : Nat), ∃ (st' : Lang.Sem.St) (n : Nat) (w' : World × UInt8),
+      ∀ (inputs : Array Input) (j : Nat), ∃ (st' : Lang.Sem.St) (n : Nat) (w' : HW),
         callN 366 p "main" j (Lang.Sem.initial p inputs) = some st' ∧
         Sim img.ctx (mrun n (harnessMachine a inputs)) w' ∧
-        ((At addrs 176 (mrun n (harnessMachine a inputs)).cpu ∧ w'.1 = st'.world) ∨
+        ((At addrs 174 (mrun n (harnessMachine a inputs)).cpu ∧ w'.1 = st'.world) ∨
          (∃ i sti, i ≤ j ∧ callN 366 p "main" i (Lang.Sem.initial p inputs) = some sti ∧
             (mrun n (harnessMachine a inputs)).cpu.halted = true ∧ w'.1 = sti.world ∧
-            (sti.world.next.1 = 0xFFFF ∨ Idle sti.world))) := by
+            sti.world.next.1 = 0xFFFF)) := by
   obtain ⟨a, addrs, ha, hm⟩ := loopH_machine p S
   have hsz : a.bytes.size ≤ 0x8000 := by
     have h : (match assemble items with | .ok a => decide (a.bytes.size ≤ 0x8000) | .error _ => false) = true := by
@@ -565,5 +499,38 @@ theorem loopH_harness (p : Lang.Prog) (S : LoopSrc p) :
 
 /-- info: 'Ember.Proof.Z80Gen.LoopH.loopH_harness' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in #print axioms loopH_harness
+
+/-- **The loopback image, loaded and run as the tests do, processes all
+its input and stops.**  For any input: after some number of
+`Machine.step`s the CPU is halted (`di; halt`), and the machine stands
+for the world that some number of calls of `main` leave in the Ember
+semantics — the input position, the frame, the events recorded — with no
+input left. -/
+theorem loopH_halts (p : Lang.Prog) (S : LoopSrc p) :
+    ∃ a : Assembled, assemble items = .ok a ∧
+      ∀ inputs : Array Input, ∃ (i : Nat) (sti : Lang.Sem.St) (n : Nat) (w' : HW),
+        callN 366 p "main" i (Lang.Sem.initial p inputs) = some sti ∧ sti.world.next.1 = 0xFFFF ∧
+        (mrun n (harnessMachine a inputs)).cpu.halted = true ∧
+        Sim img.ctx (mrun n (harnessMachine a inputs)) w' ∧ w'.1 = sti.world := by
+  obtain ⟨a, addrs, ha, hspec⟩ := loopH_spec_halt p S
+  have hsz : a.bytes.size ≤ 0x8000 := by
+    have h : (match assemble items with | .ok a => decide (a.bytes.size ≤ 0x8000) | .error _ => false) = true := by
+      decide +kernel
+    have ha' : assemble items = .ok a := ha
+    rw [ha'] at h
+    simpa using h
+  refine ⟨a, ha, fun inputs => ?_⟩
+  have R := harness_reset a inputs hsz
+  have S0 : Sim img.ctx (harnessMachine a inputs) ((st0 inputs).world, 0, (0, 0)) :=
+    ⟨R.harness, R.noRx, R.rdrf, R.tick, R.prog, R.inputs, R.pos, R.off, R.cur, R.latch, R.mark, R.frame, rfl, by
+      rw [R.events]
+      rfl⟩
+  obtain ⟨i, sti, s', w', hi, hex, ⟨n, hn⟩, hh, _, hw⟩ := hspec inputs _ R.pc R.img R.run R.rs R.msz
+  obtain ⟨hc, Sn⟩ := run_sim a addrs n _ _ S0
+  rw [hn] at hc Sn
+  exact ⟨i, sti, n, w', hi, hex, by rw [hc]; exact hh, Sn, hw⟩
+
+/-- info: 'Ember.Proof.Z80Gen.LoopH.loopH_halts' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in #print axioms loopH_halts
 
 end Ember.Proof.Z80Gen.LoopH

@@ -590,7 +590,9 @@ rt_mmio_write: call rt_mmio_find
 
 /-- The test harness (as `runtime/z80/harness.c`): effects are ports of
 the model, the entry is called while input remains and until three calls
-in a row consume nothing. -/
+in a row consume nothing — whether a call consumed anything is asked of
+the model (port `0xD9`: has the position in the input moved?), as the
+interpreter's driver compares the position before and after. -/
 def harness : List Piece := [
   ⟨"
 rt_start: di
@@ -602,12 +604,9 @@ rt_main: in a,(0xD0)
   ld a,(rt_idle)
   cp 3
   jr nc,rt_done
-  ld a,(rt_consumed)
-  ld (rt_before),a
   call f_entry
-  ld a,(rt_consumed)
-  ld hl,rt_before
-  cp (hl)
+  in a,(0xD9)
+  or a
   jr nz,rt_main_r
   ld hl,rt_idle
   inc (hl)
@@ -623,8 +622,6 @@ rt_done: di
 rt_input: in a,(0xD1)
   cp 2
   jr z,rt_input_none
-  ld hl,rt_consumed
-  inc (hl)
   cp 1
   jr z,rt_input_tick
   in a,(0xD2)

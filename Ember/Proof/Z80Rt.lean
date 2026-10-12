@@ -17,7 +17,7 @@ proved against what the theorems about generated code take of them
   `rt_out_byte`, `rt_out_end`, `rt_drop` and `rt_input` then do to the
   machine what the effects do to the world (`RtEff`).
 
-None of these routines uses the stack: they hold for any `rtK`.
+None of these routines uses the stack or writes memory: they hold for any `rtK`.
 -/
 
 namespace Ember.Proof.Z80Gen
@@ -84,26 +84,28 @@ def kindOf (w : World) : UInt8 :=
   if w.next.1 = 0xFFFF then 2 else if w.next.1 = 0x0100 then 1 else 0
 
 /-- **The machine of the test harness**, as a view of its state: the
-world, and the byte latched by the last read of the port `0xD1`.  The
-bus answers the kind of the next input at `0xD1` and the latch at
-`0xD2`; a read of `0xD1` takes the next input; writes to `0xD3`, `0xD4`
-and `0xD5` are a byte of the frame, its end, a drop.  (This is what
-`Ember.Z80.Machine` does at these ports.) -/
+world, and the byte latched by the last read of the port `0xD1` that
+took one.  The bus answers the kind of the next input at `0xD1` and the
+latch at `0xD2`; a read of `0xD1` takes the next input; writes to
+`0xD3`, `0xD4` and `0xD5` are a byte of the frame, its end, a drop.
+What a port does is said of `Z.wrel` — the machine stands for the world
+before, and for the world after — so that a relation that says more of
+the machine than its world can be used.  (This is what
+`Ember.Z80.Machine` does at these ports: `Z80Machine`.) -/
 structure Harness (Z : ZCtx) where
   view : Z.W → World × UInt8
-  wrel : ∀ wd w, Z.wrel wd w ↔ (view w).1 = wd
+  wrelView : ∀ wd w, Z.wrel wd w → (view w).1 = wd
   busKind : ∀ w p, lo p = 0xD1 → Z.bus w p = kindOf (view w).1
   busByte : ∀ w p, lo p = 0xD2 → Z.bus w p = (view w).2
-  rdNext : ∀ w p, lo p = 0xD1 → (view (Z.dev w (.read p))).1 = (view w).1.next.2
+  rdNext : ∀ wd w p, lo p = 0xD1 → Z.wrel wd w → Z.wrel wd.next.2 (Z.dev w (.read p))
   /-- A byte taken is latched (a tick, or nothing, leaves the latch). -/
   rdLatch : ∀ w p, lo p = 0xD1 → (view w).1.next.1.toNat < 256 → (view (Z.dev w (.read p))).2 = lo (view w).1.next.1
-  rdByte : ∀ w p, lo p = 0xD2 → (view (Z.dev w (.read p))).1 = (view w).1
-  /-- `0xD0`: does input remain?  Asking changes nothing. -/
-  rdMore : ∀ w p, lo p = 0xD0 → (view (Z.dev w (.read p))).1 = (view w).1
-  busMore : ∀ w p, lo p = 0xD0 → Z.bus w p = if kindOf (view w).1 = 2 then 0 else 1
-  wrByte : ∀ w p v, lo p = 0xD3 → (view (Z.dev w (.write p v))).1 = (IR.Sem.effect Z.c (view w).1 .outByte [v.toNat]).2
-  wrEnd : ∀ w p v, lo p = 0xD4 → (view (Z.dev w (.write p v))).1 = (IR.Sem.effect Z.c (view w).1 .outEnd []).2
-  wrDrop : ∀ w p v, lo p = 0xD5 → (view (Z.dev w (.write p v))).1 = (IR.Sem.effect Z.c (view w).1 .drop [v.toNat]).2
+  rdByte : ∀ wd w p, lo p = 0xD2 → Z.wrel wd w → Z.wrel wd (Z.dev w (.read p))
+  wrByte : ∀ wd w p v, lo p = 0xD3 → Z.wrel wd w →
+    Z.wrel (IR.Sem.effect Z.c wd .outByte [v.toNat]).2 (Z.dev w (.write p v))
+  wrEnd : ∀ wd w p v, lo p = 0xD4 → Z.wrel wd w → Z.wrel (IR.Sem.effect Z.c wd .outEnd []).2 (Z.dev w (.write p v))
+  wrDrop : ∀ wd w p v, lo p = 0xD5 → Z.wrel wd w →
+    Z.wrel (IR.Sem.effect Z.c wd .drop [v.toNat]).2 (Z.dev w (.write p v))
 
 /-- `out (n),a; ret` under a label: the routine of an effect that is one write to a port. -/
 theorem out_routine (ok : Z.OK) (hsz : Z.a.bytes.size < 65536) {k : Nat} {name : String} {port : Nat}
@@ -145,48 +147,48 @@ theorem out_routine (ok : Z.OK) (hsz : Z.a.bytes.size < 65536) {k : Nat} {name :
     simp only [skip, zsim]
 
 /-- The effects that are one write to a port of the harness. -/
-theorem harness_out (ok : Z.OK) (H : Harness Z) (hsz : Z.a.bytes.size < 65536) {k : Nat} {port : Nat}
+theorem harness_out (ok : Z.OK) (hsz : Z.a.bytes.size < 65536) {k : Nat} {port : Nat}
     (hport : port < 256) (e : Effect)
     (hhas : Has Z k [.label (effectRoutine e), .ins ⟨.out, [.mem (.num (Int.ofNat port)), .a]⟩, .ins ⟨.ret, []⟩])
-    (hdev : ∀ (w : Z.W) (p : UInt16) (c : Cpu) (vs : List Nat), lo p = UInt8.ofNat port → EffArgs Z e vs c →
-      (H.view (Z.dev w (.write p c.a))).1 = (IR.Sem.effect Z.c (H.view w).1 e vs).2)
+    (hdev : ∀ (wd : World) (w : Z.W) (p : UInt16) (c : Cpu) (vs : List Nat), lo p = UInt8.ofNat port →
+      EffArgs Z e vs c → Z.wrel wd w → Z.wrel (IR.Sem.effect Z.c wd e vs).2 (Z.dev w (.write p c.a)))
     (hnone : ∀ wd vs, (IR.Sem.effect Z.c wd e vs).1 = none) : RtEff Z e := by
   intro _
   obtain ⟨entry, hsym, hent, hrun⟩ := out_routine ok hsz hport hhas
   refine ⟨entry, hsym, hent, fun c w wd vs hpc I hh hrs hmsz _ _ hw hargs => ?_⟩
   obtain ⟨c', p, hp, st, hpc', hsp', hh', hrs', hmem'⟩ := hrun c w hpc I hh
-  refine ⟨c', _, st, hpc', hsp', hh', hrs', by rw [hmem']; exact hmsz, fun x _ _ => by rw [hmem'], ?_, ?_⟩
-  · rw [H.wrel, hdev w p c vs hp hargs, (H.wrel wd w).mp hw]
-  · intro r hr
-    rw [hnone] at hr
-    cases hr
+  refine ⟨c', _, st, hpc', hsp', hh', hrs', by rw [hmem']; exact hmsz, fun x _ _ => by rw [hmem'],
+    hdev wd w p c vs hp hargs hw, ?_⟩
+  intro r hr
+  rw [hnone] at hr
+  cases hr
 
 theorem harness_out_byte (ok : Z.OK) (H : Harness Z) (hsz : Z.a.bytes.size < 65536) {k : Nat}
     (hhas : Has Z k [.label "rt_out_byte", .ins ⟨.out, [.mem (.num 0xD3), .a]⟩, .ins ⟨.ret, []⟩]) :
     RtEff Z .outByte :=
-  harness_out ok H hsz (port := 0xD3) (by decide) .outByte hhas
-    (fun w p c vs hp hargs => by
+  harness_out ok hsz (port := 0xD3) (by decide) .outByte hhas
+    (fun wd w p c vs hp hargs hw => by
       have hv : vs = [c.a.toNat] := hargs
       rw [hv]
-      exact H.wrByte w p c.a hp) (fun _ _ => rfl)
+      exact H.wrByte wd w p c.a hp hw) (fun _ _ => rfl)
 
 theorem harness_out_end (ok : Z.OK) (H : Harness Z) (hsz : Z.a.bytes.size < 65536) {k : Nat}
     (hhas : Has Z k [.label "rt_out_end", .ins ⟨.out, [.mem (.num 0xD4), .a]⟩, .ins ⟨.ret, []⟩]) :
     RtEff Z .outEnd :=
-  harness_out ok H hsz (port := 0xD4) (by decide) .outEnd hhas
-    (fun w p c vs hp hargs => by
+  harness_out ok hsz (port := 0xD4) (by decide) .outEnd hhas
+    (fun wd w p c vs hp hargs hw => by
       have hv : vs = [] := hargs
       rw [hv]
-      exact H.wrEnd w p c.a hp) (fun _ _ => rfl)
+      exact H.wrEnd wd w p c.a hp hw) (fun _ _ => rfl)
 
 theorem harness_drop (ok : Z.OK) (H : Harness Z) (hsz : Z.a.bytes.size < 65536) {k : Nat}
     (hhas : Has Z k [.label "rt_drop", .ins ⟨.out, [.mem (.num 0xD5), .a]⟩, .ins ⟨.ret, []⟩]) :
     RtEff Z .drop :=
-  harness_out ok H hsz (port := 0xD5) (by decide) .drop hhas
-    (fun w p c vs hp hargs => by
+  harness_out ok hsz (port := 0xD5) (by decide) .drop hhas
+    (fun wd w p c vs hp hargs hw => by
       have hv : vs = [c.a.toNat] := hargs
       rw [hv]
-      exact H.wrDrop w p c.a hp) (fun _ _ => rfl)
+      exact H.wrDrop wd w p c.a hp hw) (fun _ _ => rfl)
 
 theorem next_cases (w : World) : w.next.1 = 0xFFFF ∨ w.next.1 = 0x0100 ∨ w.next.1.toNat < 256 := by
   unfold World.next
@@ -203,8 +205,7 @@ theorem next_cases (w : World) : w.next.1 = 0xFFFF ∨ w.next.1 = 0x0100 ∨ w.n
 def inputItems : List Item :=
   [.label "rt_input",
    .ins ⟨.in, [.a, .mem (.num 0xD1)]⟩, .ins ⟨.cp, [.imm (.num 2)]⟩, .ins ⟨.jr, [.z, .imm (.sym "rt_input_none")]⟩,
-   .ins ⟨.ld, [.hl, .imm (.sym "rt_consumed")]⟩, .ins ⟨.inc, [.mhl]⟩, .ins ⟨.cp, [.imm (.num 1)]⟩,
-   .ins ⟨.jr, [.z, .imm (.sym "rt_input_tick")]⟩,
+   .ins ⟨.cp, [.imm (.num 1)]⟩, .ins ⟨.jr, [.z, .imm (.sym "rt_input_tick")]⟩,
    .ins ⟨.in, [.a, .mem (.num 0xD2)]⟩, .ins ⟨.ld, [.l, .a]⟩, .ins ⟨.ld, [.h, .imm (.num 0)]⟩, .ins ⟨.ret, []⟩,
    .label "rt_input_tick", .ins ⟨.ld, [.hl, .imm (.num 0x0100)]⟩, .ins ⟨.ret, []⟩,
    .label "rt_input_none", .ins ⟨.ld, [.hl, .imm (.num 0xFFFF)]⟩, .ins ⟨.ret, []⟩]
@@ -249,17 +250,16 @@ theorem cpN_z (v : Nat) (hv : v < 256) (s : Cpu) : (cpN v s).flag FZ = (s.a.toNa
 theorem cpN_a (v : Nat) (s : Cpu) : (cpN v s).a = s.a := by
   simp only [cpN, skip, zsim]
 
-/-- **The harness's `rt_input`**: it takes the next item of input. -/
-theorem harness_input_core (ok : Z.OK) (H : Harness Z) (hsz : Z.a.bytes.size < 65536) {k A : Nat}
-    (hhas : Has Z k inputItems) (hcons : Z.sym "rt_consumed" A) (hrt : Z.rt A) (hA : A < 65536) :
+/-- **The harness's `rt_input`**: it takes the next item of input.  It writes no memory. -/
+theorem harness_input_core (ok : Z.OK) (H : Harness Z) (hsz : Z.a.bytes.size < 65536) {k : Nat}
+    (hhas : Has Z k inputItems) :
     ∃ entry, Z.sym "rt_input" entry ∧ entry < 65536 ∧
-      ∀ (c : Cpu) (w : Z.W), c.pc.toNat = entry → Img Z.a 0 c → c.halted = false → c.ramStart.toNat = Z.ramStart →
-        c.mem.size = 65536 → Z.stackLo ≤ c.sp.toNat → c.sp.toNat + 2 ≤ Z.stackHi →
+      ∀ (c : Cpu) (w : Z.W) (wd : World), c.pc.toNat = entry → Img Z.a 0 c → c.halted = false → Z.wrel wd w →
         ∃ c' w', WSteps Z (c, w) (c', w') ∧ c'.pc = c.rd16 c.sp ∧ c'.sp = c.sp + 2 ∧ c'.halted = false ∧
-          c'.ramStart = c.ramStart ∧ c'.mem.size = 65536 ∧ FreeStack Z c c' ∧
-          (H.view w').1 = (H.view w).1.next.2 ∧ c'.hl.toNat = (H.view w).1.next.1.toNat := by
+          c'.ramStart = c.ramStart ∧ c'.mem = c.mem ∧ Z.wrel wd.next.2 w' ∧ c'.hl.toNat = wd.next.1.toNat := by
   obtain ⟨T, hT, hsym, hTle⟩ := label_sym ok (hhas.get 0 rfl)
-  refine ⟨T, hsym, by omega, fun c w hpc I hh hrs hmsz hlo' htop => ?_⟩
+  refine ⟨T, hsym, by omega, fun c w wd hpc I hh hw => ?_⟩
+  have hwd : (H.view w).1 = wd := H.wrelView wd w hw
   have M : Mach Z c := ⟨I, hh⟩
   have at1 : At Z.addrs (k + 1) c := at_label ok (hhas.get 0 rfl) ⟨T, hT, hpc⟩
   -- in a,(0xD1)
@@ -271,196 +271,127 @@ theorem harness_input_core (ok : Z.OK) (H : Harness Z) (hsz : Z.a.bytes.size < 6
   have hio1 : c1.io = .read p := by rw [hc1]; rfl
   rw [hio1] at st1
   have hS1 : Sys c c1 := by rw [hc1]; simp only [Sys, skip, zsim, and_self]
-  have ha1 : c1.a = kindOf (H.view w).1 := by rw [hc1]; simp only [zsim]; exact H.busKind w p hlo
-  have hv1 := H.rdNext w p hlo
+  have ha1 : c1.a = kindOf wd := by rw [hc1]; simp only [zsim]; rw [H.busKind w p hlo, hwd]
+  have hw1 : Z.wrel wd.next.2 (Z.dev w (.read p)) := H.rdNext wd w p hlo hw
   have hv1l := H.rdLatch w p hlo
+  rw [hwd] at hv1l
   have M1 := M.sys hS1
   -- cp 2; jr z,rt_input_none
   obtain ⟨st2, at3, M2, hS2⟩ := does_raw ok (does_cp_n 2) (hhas.get 2 rfl) M1 (at2 rfl)
   obtain ⟨c3, st3, M3, hS3, hK3, hbr3⟩ := jr_cc_step ok true (l := "rt_input_none") (hhas.get 3 rfl)
-    (hhas.get 15 rfl) M2 at3
+    (hhas.get 13 rfl) M2 at3
   rw [cpN_z 2 (by decide), ha1] at hbr3
   have hS03 : Sys c c3 := (hS1.trans hS2).trans hS3
-  have ha3 : c3.a = kindOf (H.view w).1 := by rw [hK3.1, cpN_a, ha1]
+  have ha3 : c3.a = kindOf wd := by rw [hK3.1, cpN_a, ha1]
   have st03 : WSteps Z (c, w) (c3, Z.dev w (.read p)) :=
     st1.trans (Steps.lift ok (st2.trans st3) _)
-  have hfree0 : ∀ c' : Cpu, c'.mem = c3.mem → FreeStack Z c c' := fun c' h x _ _ => by rw [h, hS03.1]
-  by_cases hk2 : kindOf (H.view w).1 = 2
+  by_cases hk2 : kindOf wd = 2
   · -- nothing
-    have hn : (H.view w).1.next.1 = 0xFFFF := by
+    have hn : wd.next.1 = 0xFFFF := by
       unfold kindOf at hk2
       split at hk2
       · assumption
       · split at hk2 <;> cases hk2
     rw [hk2] at hbr3
     simp only [show ((2 : UInt8).toNat == 2) = true from rfl, if_true] at hbr3
-    obtain ⟨c', st4, hpc', hsp', hmem', hh', hrs', hhl'⟩ := ld_hl_ret ok 0xFFFF (by decide) (hhas.get 16 rfl)
-      (hhas.get 17 rfl) M3 (at_label ok (hhas.get 15 rfl) hbr3)
+    obtain ⟨c', st4, hpc', hsp', hmem', hh', hrs', hhl'⟩ := ld_hl_ret ok 0xFFFF (by decide) (hhas.get 14 rfl)
+      (hhas.get 15 rfl) M3 (at_label ok (hhas.get 13 rfl) hbr3)
     refine ⟨c', _, st03.trans (Steps.lift ok st4 _), ?_, by rw [hsp', hS03.2.2.2], by rw [hh', hS03.2.2.1]; exact hh,
-      by rw [hrs', hS03.2.1], by rw [hmem', hS03.1]; exact hmsz, hfree0 c' hmem', by rw [hv1], ?_⟩
+      by rw [hrs', hS03.2.1], by rw [hmem', hS03.1], hw1, ?_⟩
     · rw [hpc', hS03.2.2.2]
       simp only [Cpu.rd16, Cpu.rd, hS03.1]
     · rw [hhl', hn]
       rfl
-  -- something: count it, then tell a tick from a byte
-  have hne2 : ((kindOf (H.view w).1).toNat == 2) = false := by
+  -- something: a tick or a byte
+  have hne2 : ((kindOf wd).toNat == 2) = false := by
     simpa using fun h => hk2 (UInt8.toNat_inj.mp h)
   rw [hne2] at hbr3
   simp only [Bool.false_eq_true, if_false] at hbr3
-  have hramA : Z.ramStart ≤ A := ok.rtRam A hrt
-  -- ld hl,rt_consumed
-  obtain ⟨ad4, had4, hpc4⟩ := hbr3
-  obtain ⟨c4, hc4⟩ : ∃ c4 : Cpu, c4 = ((skip (op1 c3) 2).setHL
-      (Instr.immW (Z.a.env ad4) ⟨.ld, [.hl, .imm (.sym "rt_consumed")]⟩)).tick 10 := ⟨_, rfl⟩
-  have hnn : (Instr.immW (Z.a.env ad4) ⟨.ld, [.hl, .imm (.sym "rt_consumed")]⟩).toNat = A :=
-    immW_toNat _ _ _ _ rfl (sym_val ad4 hcons) hA
-  obtain ⟨st4, at5⟩ := step_raw ok (hhas.get 4 rfl) M3 ⟨ad4, had4, hpc4⟩ c4 (fun ad' had' inp => by
-    rw [had4] at had'
-    cases had'
-    rw [hc4]
-    rfl) (by rw [hc4]; simp only [zsim])
-  have hS4 : Sys c3 c4 := by rw [hc4]; simp only [Sys, skip, zsim, and_self]
-  have hhl4 : c4.hl.toNat = A := by rw [hc4]; simp only [zsim]; exact hnn
-  have ha4 : c4.a = c3.a := by rw [hc4]; simp only [skip, zsim]
-  have M4 := M3.sys hS4
-  -- inc (hl)
-  obtain ⟨c5, hc5⟩ : ∃ c5 : Cpu, c5 = (((op1 c4).inc8 ((op1 c4).rd (op1 c4).hl)).2.wr (op1 c4).hl
-      ((op1 c4).inc8 ((op1 c4).rd (op1 c4).hl)).1).tick 11 := ⟨_, rfl⟩
-  obtain ⟨st5, at6⟩ := step_raw ok (hhas.get 5 rfl) M4 (at5 rfl) c5 (fun _ _ _ => by rw [hc5]; rfl)
-    (by rw [hc5]; simp only [zsim])
-  have hrs4 : c4.ramStart.toNat = Z.ramStart := by rw [hS4.2.1, hS03.2.1]; exact hrs
-  have hmem5 : ∃ v, c5.mem = c4.mem.set! A v := by
-    refine ⟨((op1 c4).inc8 ((op1 c4).rd (op1 c4).hl)).1, ?_⟩
-    rw [hc5]
-    simp only [zsim]
-    rw [cpu_wr_mem _ _ _ (by simp only [zsim]; rw [hrs4, hhl4]; exact hramA)]
-    simp only [zsim, hhl4]
-  obtain ⟨v5, hmem5⟩ := hmem5
-  have ha5 : c5.a = c4.a := by rw [hc5]; simp only [zsim]
-  have hsp5 : c5.sp = c4.sp := by rw [hc5]; simp only [zsim]
-  have hh5 : c5.halted = c4.halted := by rw [hc5]; simp only [zsim]
-  have hr5 : c5.ramStart = c4.ramStart := by rw [hc5]; simp only [zsim]
-  have M5 : Mach Z c5 := by
-    refine ⟨⟨by rw [hr5]; exact M4.1.rom, fun x b hx => ?_⟩, by rw [hh5]; exact M4.2⟩
-    have hlt : x < Z.a.bytes.size := by
-      rcases Nat.lt_or_ge x Z.a.bytes.data.size with h' | h'
-      · exact h'
-      · rw [Array.getElem?_eq_none h'] at hx; cases hx
-    have hrom := M4.1.rom
-    rw [hmem5, getBang_set _ _ _ _ (by omega)]
-    exact M4.1.bytes x b hx
-  have hfree5 : ∀ c' : Cpu, c'.mem = c5.mem → FreeStack Z c c' := fun c' h x _ hnrt => by
-    rw [h, hmem5, getBang_set _ _ _ _ (fun e : A = x => hnrt (e ▸ hrt)), hS4.1, hS03.1]
-  have hsz5 : c5.mem.size = 65536 := by
-    rw [hmem5]
-    have : (c4.mem.set! A v5).size = c4.mem.size := by
-      obtain ⟨bs⟩ := c4.mem
-      simp [ByteArray.set!, ByteArray.size]
-    rw [this, hS4.1, hS03.1]
-    exact hmsz
-  -- cp 1; jr z,rt_input_tick
-  obtain ⟨st6, at7, M6, hS6⟩ := does_raw ok (does_cp_n 1) (hhas.get 6 rfl) M5 (at6 rfl)
-  obtain ⟨c7, st7, M7, hS7, hK7, hbr7⟩ := jr_cc_step ok true (l := "rt_input_tick") (hhas.get 7 rfl)
-    (hhas.get 12 rfl) M6 at7
-  rw [cpN_z 1 (by decide), ha5, ha4, ha3] at hbr7
-  have hS57 : Sys c5 c7 := hS6.trans hS7
-  have st07 : WSteps Z (c, w) (c7, Z.dev w (.read p)) :=
-    st03.trans (Steps.lift ok (((st4.trans st5).trans st6).trans st7) _)
-  have hsp7 : c7.sp = c.sp := by rw [hS57.2.2.2, hsp5, hS4.2.2.2, hS03.2.2.2]
-  have hh7 : c7.halted = false := by rw [hS57.2.2.1, hh5, hS4.2.2.1, hS03.2.2.1]; exact hh
-  have hr7 : c7.ramStart = c.ramStart := by rw [hS57.2.1, hr5, hS4.2.1, hS03.2.1]
-  have hmem7 : ∀ x, x ≠ A → c7.mem.get! x = c.mem.get! x := fun x hx => by
-    rw [hS57.1, hmem5, getBang_set _ _ _ _ (fun e => hx e.symm), hS4.1, hS03.1]
-  have hstk := ok.stack
-  have hrd : ∀ c' : Cpu, c'.mem = c7.mem → c'.rd16 c.sp = c.rd16 c.sp := fun c' h => by
-    have hA' := ok.rtStack A hrt
-    have h1 : (c.sp + 1).toNat = c.sp.toNat + 1 := by
-      rw [UInt16.toNat_add]
-      show (c.sp.toNat + 1) % 65536 = _
-      omega
-    simp only [Cpu.rd16, Cpu.rd, h, h1]
-    rw [hmem7 _ (by omega), hmem7 _ (by omega)]
-  have hfree7 : ∀ c' : Cpu, c'.mem = c7.mem → FreeStack Z c c' := fun c' h => hfree5 c' (by rw [h, hS57.1])
-  have hsz7 : c7.mem.size = 65536 := by rw [hS57.1]; exact hsz5
-  by_cases hk1 : kindOf (H.view w).1 = 1
+  obtain ⟨st4, at5, M4, hS4⟩ := does_raw ok (does_cp_n 1) (hhas.get 4 rfl) M3 hbr3
+  obtain ⟨c5, st5, M5, hS5, hK5, hbr5⟩ := jr_cc_step ok true (l := "rt_input_tick") (hhas.get 5 rfl)
+    (hhas.get 10 rfl) M4 at5
+  rw [cpN_z 1 (by decide), ha3] at hbr5
+  have hS05 : Sys c c5 := (hS03.trans hS4).trans hS5
+  have st05 : WSteps Z (c, w) (c5, Z.dev w (.read p)) := st03.trans (Steps.lift ok (st4.trans st5) _)
+  by_cases hk1 : kindOf wd = 1
   · -- a tick
-    have hn : (H.view w).1.next.1 = 0x0100 := by
+    have hn : wd.next.1 = 0x0100 := by
       unfold kindOf at hk1
       split at hk1
       · cases hk1
       · split at hk1
         · assumption
         · cases hk1
-    rw [hk1] at hbr7
-    simp only [show ((1 : UInt8).toNat == 1) = true from rfl, if_true] at hbr7
-    obtain ⟨c', st8, hpc', hsp', hmem', hh', hrs', hhl'⟩ := ld_hl_ret ok 0x0100 (by decide) (hhas.get 13 rfl)
-      (hhas.get 14 rfl) M7 (at_label ok (hhas.get 12 rfl) hbr7)
-    refine ⟨c', _, st07.trans (Steps.lift ok st8 _), ?_, by rw [hsp', hsp7], by rw [hh', hh7], by rw [hrs', hr7],
-      by rw [hmem']; exact hsz7, hfree7 c' hmem', by rw [hv1], ?_⟩
-    · rw [hpc', hsp7, ← hrd c7 rfl]
+    rw [hk1] at hbr5
+    simp only [show ((1 : UInt8).toNat == 1) = true from rfl, if_true] at hbr5
+    obtain ⟨c', st6, hpc', hsp', hmem', hh', hrs', hhl'⟩ := ld_hl_ret ok 0x0100 (by decide) (hhas.get 11 rfl)
+      (hhas.get 12 rfl) M5 (at_label ok (hhas.get 10 rfl) hbr5)
+    refine ⟨c', _, st05.trans (Steps.lift ok st6 _), ?_, by rw [hsp', hS05.2.2.2], by rw [hh', hS05.2.2.1]; exact hh,
+      by rw [hrs', hS05.2.1], by rw [hmem', hS05.1], hw1, ?_⟩
+    · rw [hpc', hS05.2.2.2]
+      simp only [Cpu.rd16, Cpu.rd, hS05.1]
     · rw [hhl', hn]
       rfl
   · -- a byte
-    have hn : (H.view w).1.next.1.toNat < 256 := by
-      rcases next_cases (H.view w).1 with h | h | h
+    have hn : wd.next.1.toNat < 256 := by
+      rcases next_cases wd with h | h | h
       · exact absurd (by simp [kindOf, h]) hk2
       · exact absurd (by simp [kindOf, h]) hk1
       · exact h
-    have hne1 : ((kindOf (H.view w).1).toNat == 1) = false := by
+    have hne1 : ((kindOf wd).toNat == 1) = false := by
       simpa using fun h => hk1 (UInt8.toNat_inj.mp h)
-    rw [hne1] at hbr7
-    simp only [Bool.false_eq_true, if_false] at hbr7
+    rw [hne1] at hbr5
+    simp only [Bool.false_eq_true, if_false] at hbr5
     -- in a,(0xD2)
-    obtain ⟨p2, hp2⟩ : ∃ p2 : UInt16, p2 = mk16 (op1 c7).a (byteOf (Int.ofNat 0xD2)) := ⟨_, rfl⟩
+    obtain ⟨p2, hp2⟩ : ∃ p2 : UInt16, p2 = mk16 (op1 c5).a (byteOf (Int.ofNat 0xD2)) := ⟨_, rfl⟩
     have hlo2 : lo p2 = 0xD2 := by rw [hp2, lo_mk16]; rfl
-    obtain ⟨c8, hc8⟩ : ∃ c8 : Cpu, c8 = (({ (skip (op1 c7) 1) with
+    obtain ⟨c6, hc6⟩ : ∃ c6 : Cpu, c6 = (({ (skip (op1 c5) 1) with
         a := Z.bus (Z.dev w (.read p)) p2, io := .read p2 } : Cpu).tick 11) := ⟨_, rfl⟩
-    obtain ⟨st8, at9⟩ := wstep_item ok (hhas.get 8 rfl) M7 hbr7 (Z.dev w (.read p)) (s' := c8)
-      (fun ad _ => by rw [hc8, hp2]; rfl)
-    have hio8 : c8.io = .read p2 := by rw [hc8]; rfl
-    rw [hio8] at st8
-    have hS8 : Sys c7 c8 := by rw [hc8]; simp only [Sys, skip, zsim, and_self]
-    have ha8 : c8.a = lo (H.view w).1.next.1 := by
-      rw [hc8]
+    obtain ⟨st6, at7⟩ := wstep_item ok (hhas.get 6 rfl) M5 hbr5 (Z.dev w (.read p)) (s' := c6)
+      (fun ad _ => by rw [hc6, hp2]; rfl)
+    have hio6 : c6.io = .read p2 := by rw [hc6]; rfl
+    rw [hio6] at st6
+    have hS6 : Sys c5 c6 := by rw [hc6]; simp only [Sys, skip, zsim, and_self]
+    have ha6 : c6.a = lo wd.next.1 := by
+      rw [hc6]
       simp only [zsim]
       rw [H.busByte _ p2 hlo2, hv1l hn]
-    have M8 := M7.sys hS8
-    obtain ⟨st9, at10, M9, hS9⟩ := does_raw ok does_ld_l_a (hhas.get 9 rfl) M8 (at9 rfl)
-    obtain ⟨st10, at11, M10, hS10⟩ := does_raw ok does_ld_h_0 (hhas.get 10 rfl) M9 at10
-    obtain ⟨c', st11, hpc', hsp', hmem', hh', hrs', hh2, hl2, _⟩ := ret_raw ok (hhas.get 11 rfl) M10 at11
-    have hS : Sys c7 (ldH0 (ldRA 5 c8)) := (hS8.trans hS9).trans hS10
-    refine ⟨c', _, (st07.trans st8).trans (Steps.lift ok ((st9.trans st10).trans st11) _), ?_, by rw [hsp', hS.2.2.2, hsp7],
-      by rw [hh', hS.2.2.1, hh7], by rw [hrs', hS.2.1, hr7], by rw [hmem', hS.1]; exact hsz7,
-      hfree7 c' (by rw [hmem', hS.1]), ?_, ?_⟩
-    · rw [hpc', hS.2.2.2, hsp7, ← hrd (ldH0 (ldRA 5 c8)) hS.1]
-    · rw [H.rdByte _ p2 hlo2, hv1]
-    · rw [show c'.hl = (ldH0 (ldRA 5 c8)).hl from by simp only [Cpu.hl, hh2, hl2]]
-      have : (ldH0 (ldRA 5 c8)).hl = mk16 0 c8.a := by
+    have M6 := M5.sys hS6
+    obtain ⟨st7, at8, M7, hS7⟩ := does_raw ok does_ld_l_a (hhas.get 7 rfl) M6 (at7 rfl)
+    obtain ⟨st8, at9, M8, hS8⟩ := does_raw ok does_ld_h_0 (hhas.get 8 rfl) M7 at8
+    obtain ⟨c', st9, hpc', hsp', hmem', hh', hrs', hh2, hl2, _⟩ := ret_raw ok (hhas.get 9 rfl) M8 at9
+    have hS : Sys c (ldH0 (ldRA 5 c6)) := ((hS05.trans hS6).trans hS7).trans hS8
+    refine ⟨c', _, (st05.trans st6).trans (Steps.lift ok ((st7.trans st8).trans st9) _), ?_, by rw [hsp', hS.2.2.2],
+      by rw [hh', hS.2.2.1]; exact hh, by rw [hrs', hS.2.1], by rw [hmem', hS.1],
+      H.rdByte _ _ p2 hlo2 hw1, ?_⟩
+    · rw [hpc', hS.2.2.2]
+      simp only [Cpu.rd16, Cpu.rd, hS.1]
+    · rw [show c'.hl = (ldH0 (ldRA 5 c6)).hl from by simp only [Cpu.hl, hh2, hl2]]
+      have : (ldH0 (ldRA 5 c6)).hl = mk16 0 c6.a := by
         simp only [ldH0, ldRA, skip, zsim]
         rfl
-      rw [this, mk16_toNat, ha8]
-      show 0 * 256 + (H.view w).1.next.1.toUInt8.toNat = _
+      rw [this, mk16_toNat, ha6]
+      show 0 * 256 + wd.next.1.toUInt8.toNat = _
       rw [UInt16.toNat_toUInt8]
       omega
 
-theorem harness_input (ok : Z.OK) (H : Harness Z) (hsz : Z.a.bytes.size < 65536) {k A : Nat}
-    (hhas : Has Z k inputItems) (hcons : Z.sym "rt_consumed" A) (hrt : Z.rt A) (hA : A < 65536) (e : Effect)
-    (he : e = .inputNext ∨ e = .ringPop) : RtEff Z e := by
+theorem harness_input (ok : Z.OK) (H : Harness Z) (hsz : Z.a.bytes.size < 65536) {k : Nat}
+    (hhas : Has Z k inputItems) (e : Effect) (he : e = .inputNext ∨ e = .ringPop) : RtEff Z e := by
   intro _
-  obtain ⟨entry, hsym, hent, hrun⟩ := harness_input_core ok H hsz hhas hcons hrt hA
+  obtain ⟨entry, hsym, hent, hrun⟩ := harness_input_core ok H hsz hhas
   have hname : effectRoutine e = "rt_input" := by rcases he with rfl | rfl <;> rfl
   have heff : ∀ wd vs, IR.Sem.effect Z.c wd e vs = (some wd.next.1.toNat, wd.next.2) := by
     intro wd vs
     rcases he with rfl | rfl <;> rfl
   refine ⟨entry, by rw [hname]; exact hsym, hent, fun c w wd vs hpc I hh hrs hmsz hroom htop hw _ => ?_⟩
-  obtain ⟨c', w', st, hpc', hsp', hh', hrs', hsz', hfree, hview, hhl⟩ := hrun c w hpc I hh hrs hmsz (by omega) htop
-  have hwd := (H.wrel wd w).mp hw
-  refine ⟨c', w', st, hpc', hsp', hh', hrs', hsz', hfree, ?_, ?_⟩
-  · rw [heff, H.wrel, hview, hwd]
+  obtain ⟨c', w', st, hpc', hsp', hh', hrs', hmem', hw', hhl⟩ := hrun c w wd hpc I hh hw
+  refine ⟨c', w', st, hpc', hsp', hh', hrs', by rw [hmem']; exact hmsz, fun x _ _ => by rw [hmem'], ?_, ?_⟩
+  · rw [heff]
+    exact hw'
   · intro r hr
     rw [heff] at hr
     cases hr
-    rw [hhl, hwd]
+    exact hhl
 
 /-! ## `rt_bound` -/
 

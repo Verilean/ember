@@ -18,23 +18,21 @@ namespace Ember.Proof.Z80Gen.LoopH
 open Ember.Z80 Ember.Z80.Asm
 
 def items : List Item := [
-  .equ "rt_consumed" 32768,
-  .equ "rt_before" 32769,
-  .equ "rt_idle" 32770,
-  .equ "g_buf" 32771,
-  .equ "g_len" 33067,
-  .equ "g_esc" 33069,
-  .equ "g_over" 33070,
-  .equ "fr_slip_send" 33074,
-  .equ "fr_slip_store" 33074,
-  .equ "fr_loop_rx" 33073,
-  .equ "fr_main" 33071,
-  .equ "fr_slip_send_46_t" 33081,
-  .equ "fr_slip_store_46_t" 33081,
-  .equ "fr_loop_rx_46_t" 33081,
-  .equ "fr_main_46_t" 33081,
+  .equ "rt_idle" 32768,
+  .equ "g_buf" 32769,
+  .equ "g_len" 33065,
+  .equ "g_esc" 33067,
+  .equ "g_over" 33068,
+  .equ "fr_slip_send" 33072,
+  .equ "fr_slip_store" 33072,
+  .equ "fr_loop_rx" 33071,
+  .equ "fr_main" 33069,
+  .equ "fr_slip_send_46_t" 33079,
+  .equ "fr_slip_store_46_t" 33079,
+  .equ "fr_loop_rx_46_t" 33079,
+  .equ "fr_main_46_t" 33079,
   .equ "rt_ram" 32768,
-  .equ "rt_ram_size" 313,
+  .equ "rt_ram_size" 311,
   .ins { op := .jp, args := [.imm (.sym "rt_start" 0)] },
   .label "f_slip_send",
   .ins { op := .ld, args := [.mem (.sym "fr_slip_send" 0), .hl] },
@@ -201,12 +199,9 @@ def items : List Item := [
   .ins { op := .ld, args := [.a, .mem (.sym "rt_idle" 0)] },
   .ins { op := .cp, args := [.imm (.num 3)] },
   .ins { op := .jr, args := [.nc, .imm (.sym "rt_done" 0)] },
-  .ins { op := .ld, args := [.a, .mem (.sym "rt_consumed" 0)] },
-  .ins { op := .ld, args := [.mem (.sym "rt_before" 0), .a] },
   .ins { op := .call, args := [.imm (.sym "f_entry" 0)] },
-  .ins { op := .ld, args := [.a, .mem (.sym "rt_consumed" 0)] },
-  .ins { op := .ld, args := [.hl, .imm (.sym "rt_before" 0)] },
-  .ins { op := .cp, args := [.mhl] },
+  .ins { op := .in, args := [.a, .mem (.num 217)] },
+  .ins { op := .or, args := [.a] },
   .ins { op := .jr, args := [.nz, .imm (.sym "rt_main_r" 0)] },
   .ins { op := .ld, args := [.hl, .imm (.sym "rt_idle" 0)] },
   .ins { op := .inc, args := [.mhl] },
@@ -238,8 +233,6 @@ def items : List Item := [
   .ins { op := .in, args := [.a, .mem (.num 209)] },
   .ins { op := .cp, args := [.imm (.num 2)] },
   .ins { op := .jr, args := [.z, .imm (.sym "rt_input_none" 0)] },
-  .ins { op := .ld, args := [.hl, .imm (.sym "rt_consumed" 0)] },
-  .ins { op := .inc, args := [.mhl] },
   .ins { op := .cp, args := [.imm (.num 1)] },
   .ins { op := .jr, args := [.z, .imm (.sym "rt_input_tick" 0)] },
   .ins { op := .in, args := [.a, .mem (.num 210)] },
@@ -269,10 +262,10 @@ def items : List Item := [
   .db [.num 0]]
 
 def layout : IR.Layout :=
-  { globals := [("buf", 32771), ("len", 33067), ("esc", 33069), ("over", 33070), ("MTU", 412), ("D_OVERSIZE", 414)],
-    frames := [("slip_send", 33074), ("slip_store", 33074), ("loop_rx", 33073), ("main", 33071),
-      ("slip_send.t", 33081), ("slip_store.t", 33081), ("loop_rx.t", 33081), ("main.t", 33081)],
-    top := 33081 }
+  { globals := [("buf", 32769), ("len", 33065), ("esc", 33067), ("over", 33068), ("MTU", 398), ("D_OVERSIZE", 400)],
+    frames := [("slip_send", 33072), ("slip_store", 33072), ("loop_rx", 33071), ("main", 33069),
+      ("slip_send.t", 33079), ("slip_store.t", 33079), ("loop_rx.t", 33079), ("main.t", 33079)],
+    top := 33079 }
 
 /-- The items and the layout are those of the image `build` gives without the passes. -/
 def isBuilt : Bool :=
