@@ -21,8 +21,8 @@ def TmpByte (Z : ZCtx) (E : GEnv) (x : Nat) : Prop :=
 /-- A slot can be written, `n` bytes of it. -/
 structure WrSlot (Z : ZCtx) (E : GEnv) (n : Nat) (sl : Slot) : Prop where
   area : ∃ ad, Z.c.layout.areaAddr sl.area = some ad
-  dst : Z.dst (sl, n)
-  use : Own E (.slot sl) → Z.use (sl, n)
+  dst : Z.dst E.fn.name (sl, n)
+  use : Own E (.slot sl) → Z.use E.fn.name (sl, n)
   ram : Z.ramStart ≤ Z.c.layout.addr sl
   notmp : ∀ j, j < n → ¬ TmpByte Z E (Z.c.layout.addr sl + j)
   nostack : Z.c.layout.addr sl + n ≤ Z.stackLo ∨ Z.stackHi ≤ Z.c.layout.addr sl
@@ -64,8 +64,8 @@ variable {Z : ZCtx} {E : GEnv} {dt : Nat → Prop} {fr : Fr}
 
 /-! ## Operands a write leaves alone -/
 
-theorem opd_wr_keep (ok : Z.OK) {o : Opd} {m n : Nat} {sl : Slot} (huse : ∀ a, o = .slot a → Z.use (a, m))
-    (hdst : Z.dst (sl, n)) (hno : overlaps o m sl n = false) (ist : IR.Sem.St) (tmps : Array Nat) (v : Nat) :
+theorem opd_wr_keep (ok : Z.OK) {o : Opd} {m n : Nat} {sl : Slot} (huse : ∀ a, o = .slot a → Z.use E.fn.name (a, m))
+    (hdst : Z.dst E.fn.name (sl, n)) (hno : overlaps o m sl n = false) (ist : IR.Sem.St) (tmps : Array Nat) (v : Nat) :
     IR.Sem.opd Z.c { ist with mem := IR.Sem.wr ist.mem (Z.c.layout.addr sl) n v } tmps m o =
       IR.Sem.opd Z.c ist tmps m o := by
   cases o with
@@ -73,11 +73,11 @@ theorem opd_wr_keep (ok : Z.OK) {o : Opd} {m n : Nat} {sl : Slot} (huse : ∀ a,
   | tmp t => rfl
   | slot a =>
     have hu := huse a rfl
-    rcases ok.apart a m sl n hu hdst with h | h
+    rcases ok.apart E.fn.name a m sl n hu hdst with h | h
     · have : overlaps (.slot a) m sl n = IR.slotsOverlap a m sl n := rfl
       rw [this, h] at hno
       cases hno
-    · exact rd_wr_far _ _ _ _ _ _ (ok.ubound a m hu) (ok.dbound sl n hdst) h
+    · exact rd_wr_far _ _ _ _ _ _ (ok.ubound E.fn.name a m hu) (ok.dbound E.fn.name sl n hdst) h
 
 theorem opd_tmp_keep (c : IR.Ctx) (ist : IR.Sem.St) (tmps : Array Nat) (t x m : Nat) {o : Opd}
     (hne : o ≠ .tmp t) : IR.Sem.opd c ist (tmps.setIfInBounds t x) m o = IR.Sem.opd c ist tmps m o := by
@@ -99,14 +99,14 @@ theorem Rel.wr_slot (ok : Z.OK) (hT : FnLay Z E) {regs regs' : Regs} {ist : IR.S
       IR.Sem.opd Z.c { ist with mem := IR.Sem.wr ist.mem (Z.c.layout.addr sl) n v } tmps 1 o)
     (hhl : ∀ o, o ∈ regs'.hl → Own E o → s'.hl.toNat =
       IR.Sem.opd Z.c { ist with mem := IR.Sem.wr ist.mem (Z.c.layout.addr sl) n v } tmps 2 o)
-    (hina : ∀ a, Opd.slot a ∈ regs'.a → Own E (.slot a) → Z.use (a, 1))
-    (hinhl : ∀ a, Opd.slot a ∈ regs'.hl → Own E (.slot a) → Z.use (a, 2))
+    (hina : ∀ a, Opd.slot a ∈ regs'.a → Own E (.slot a) → Z.use E.fn.name (a, 1))
+    (hinhl : ∀ a, Opd.slot a ∈ regs'.hl → Own E (.slot a) → Z.use E.fn.name (a, 2))
     (hacc : ∀ m o, regs'.acc = some (m, o) → Own E o → IR.Sem.rd s'.mem Z.acc m =
       IR.Sem.opd Z.c { ist with mem := IR.Sem.wr ist.mem (Z.c.layout.addr sl) n v } tmps m o)
-    (hinacc : ∀ m a, regs'.acc = some (m, .slot a) → Own E (.slot a) → Z.use (a, m))
+    (hinacc : ∀ m a, regs'.acc = some (m, .slot a) → Own E (.slot a) → Z.use E.fn.name (a, m))
     (hnacc : ∀ m o, regs'.acc = some (m, o) → m ≤ 8) :
     Rel Z E fr dt regs' { ist with mem := IR.Sem.wr ist.mem (Z.c.layout.addr sl) n v } tmps s' := by
-  have hb := ok.dbound sl n W.dst
+  have hb := ok.dbound E.fn.name sl n W.dst
   refine ⟨⟨by rw [hr]; exact R.img.rom, fun x b hx => ?_⟩, by rw [hh]; exact R.run, fun x hx => ?_,
     fun t h1 h2 => ?_, by rw [hr]; exact R.rs, by rw [hm, wr_size]; exact R.msz, by
       show (IR.Sem.wr ist.mem _ n v).size = 65536
@@ -164,14 +164,14 @@ theorem Rel.wr_dead (ok : Z.OK) {regs regs' : Regs} {ist : IR.Sem.St} {tmps : Ar
       IR.Sem.opd Z.c { ist with mem := IR.Sem.wr ist.mem (Z.c.layout.addr sl) n v } tmps 1 o)
     (hhl : ∀ o, o ∈ regs'.hl → Own E o → s.hl.toNat =
       IR.Sem.opd Z.c { ist with mem := IR.Sem.wr ist.mem (Z.c.layout.addr sl) n v } tmps 2 o)
-    (hina : ∀ a, Opd.slot a ∈ regs'.a → Own E (.slot a) → Z.use (a, 1))
-    (hinhl : ∀ a, Opd.slot a ∈ regs'.hl → Own E (.slot a) → Z.use (a, 2))
+    (hina : ∀ a, Opd.slot a ∈ regs'.a → Own E (.slot a) → Z.use E.fn.name (a, 1))
+    (hinhl : ∀ a, Opd.slot a ∈ regs'.hl → Own E (.slot a) → Z.use E.fn.name (a, 2))
     (hacc : ∀ m o, regs'.acc = some (m, o) → Own E o → IR.Sem.rd s.mem Z.acc m =
       IR.Sem.opd Z.c { ist with mem := IR.Sem.wr ist.mem (Z.c.layout.addr sl) n v } tmps m o)
-    (hinacc : ∀ m a, regs'.acc = some (m, .slot a) → Own E (.slot a) → Z.use (a, m))
+    (hinacc : ∀ m a, regs'.acc = some (m, .slot a) → Own E (.slot a) → Z.use E.fn.name (a, m))
     (hnacc : ∀ m o, regs'.acc = some (m, o) → m ≤ 8) :
     Rel Z E fr dt regs' { ist with mem := IR.Sem.wr ist.mem (Z.c.layout.addr sl) n v } tmps s := by
-  have hb := ok.dbound sl n W.dst
+  have hb := ok.dbound E.fn.name sl n W.dst
   refine ⟨R.img, R.run, fun x hx => ?_, R.tmp, R.rs, R.msz, by
     show (IR.Sem.wr ist.mem _ n v).size = 65536
     rw [wr_size]; exact R.isz, R.tsz, R.sp, R.room, R.stk, R.out, ha, hhl, hacc, hina, hinhl, hinacc, hnacc⟩
@@ -195,11 +195,11 @@ theorem Rel.wr_tmp (ok : Z.OK) (hT : FnLay Z E) {regs regs' : Regs} {ist : IR.Se
       IR.Sem.opd Z.c ist (tmps.setIfInBounds t (IR.modN n v)) 1 o)
     (hhl : ∀ o, o ∈ regs'.hl → Own E o → s'.hl.toNat =
       IR.Sem.opd Z.c ist (tmps.setIfInBounds t (IR.modN n v)) 2 o)
-    (hina : ∀ a, Opd.slot a ∈ regs'.a → Own E (.slot a) → Z.use (a, 1))
-    (hinhl : ∀ a, Opd.slot a ∈ regs'.hl → Own E (.slot a) → Z.use (a, 2))
+    (hina : ∀ a, Opd.slot a ∈ regs'.a → Own E (.slot a) → Z.use E.fn.name (a, 1))
+    (hinhl : ∀ a, Opd.slot a ∈ regs'.hl → Own E (.slot a) → Z.use E.fn.name (a, 2))
     (hacc : ∀ m o, regs'.acc = some (m, o) → Own E o → IR.Sem.rd s'.mem Z.acc m =
       IR.Sem.opd Z.c ist (tmps.setIfInBounds t (IR.modN n v)) m o)
-    (hinacc : ∀ m a, regs'.acc = some (m, .slot a) → Own E (.slot a) → Z.use (a, m))
+    (hinacc : ∀ m a, regs'.acc = some (m, .slot a) → Own E (.slot a) → Z.use E.fn.name (a, m))
     (hnacc : ∀ m o, regs'.acc = some (m, o) → m ≤ 8) :
     Rel Z E fr (dtAfter dt (.tmp t)) regs' ist (tmps.setIfInBounds t (IR.modN n v)) s' := by
   by_cases hsp : E.spilled[t]! = true
@@ -347,7 +347,7 @@ def StoreA (Z : ZCtx) (E : GEnv) (base : Nat) (sF : GS) (dt : Nat → Prop) (d :
 
 /-- What the tracker keeps across a write of `n` bytes at `sl` still holds. -/
 theorem kill_keep (ok : Z.OK) {regs : Regs} {ist : IR.Sem.St} {tmps : Array Nat} {s : Cpu}
-    (R : Rel Z E fr dt regs ist tmps s) {n : Nat} {sl : Slot} (hdst : Z.dst (sl, n)) (v : Nat) :
+    (R : Rel Z E fr dt regs ist tmps s) {n : Nat} {sl : Slot} (hdst : Z.dst E.fn.name (sl, n)) (v : Nat) :
     (∀ o, o ∈ regs.a.filter (fun o => !overlaps o 1 sl n) → Own E o → s.a.toNat =
       IR.Sem.opd Z.c { ist with mem := IR.Sem.wr ist.mem (Z.c.layout.addr sl) n v } tmps 1 o) ∧
     (∀ o, o ∈ regs.hl.filter (fun o => !overlaps o 2 sl n) → Own E o → s.hl.toNat =
@@ -368,7 +368,7 @@ theorem kill_acc (ok : Z.OK) {regs : Regs} {ist : IR.Sem.St} {tmps : Array Nat} 
       IR.Sem.rd s'.mem Z.acc m =
         IR.Sem.opd Z.c { ist with mem := IR.Sem.wr ist.mem (Z.c.layout.addr sl) n v } tmps m o) ∧
     (∀ m a, regs.acc.filter (fun x => !overlaps x.2 x.1 sl n) = some (m, .slot a) → Own E (.slot a) →
-      Z.use (a, m)) ∧
+      Z.use E.fn.name (a, m)) ∧
     (∀ m o, regs.acc.filter (fun x => !overlaps x.2 x.1 sl n) = some (m, o) → m ≤ 8) := by
   have key : ∀ m o, regs.acc.filter (fun x => !overlaps x.2 x.1 sl n) = some (m, o) →
       regs.acc = some (m, o) ∧ overlaps o m sl n = false := by
@@ -382,7 +382,7 @@ theorem kill_acc (ok : Z.OK) {regs : Regs} {ist : IR.Sem.St} {tmps : Array Nat} 
   rw [opd_wr_keep ok (fun a ha => R.inacc m a (ha ▸ h1) (ha ▸ hown)) W.dst h2, ← R.racc m o h1 hown]
   rcases hm with hm | hm
   · rw [hm]
-    exact rd_wr_far _ _ _ _ _ _ (by omega) (ok.dbound sl n W.dst) (by have := W.noacc; omega)
+    exact rd_wr_far _ _ _ _ _ _ (by omega) (ok.dbound E.fn.name sl n W.dst) (by have := W.noacc; omega)
   · rw [hm]
 
 /-- … and when a temporary is assigned. -/
@@ -392,7 +392,7 @@ theorem forget_acc (hT : FnLay Z E) (ok : Z.OK) {regs : Regs} {ist : IR.Sem.St} 
       s'.mem = s.mem) :
     (∀ m o, regs.acc.filter (fun y => y.2 != .tmp t) = some (m, o) → Own E o →
       IR.Sem.rd s'.mem Z.acc m = IR.Sem.opd Z.c ist (tmps.setIfInBounds t x) m o) ∧
-    (∀ m a, regs.acc.filter (fun y => y.2 != .tmp t) = some (m, .slot a) → Own E (.slot a) → Z.use (a, m)) ∧
+    (∀ m a, regs.acc.filter (fun y => y.2 != .tmp t) = some (m, .slot a) → Own E (.slot a) → Z.use E.fn.name (a, m)) ∧
     (∀ m o, regs.acc.filter (fun y => y.2 != .tmp t) = some (m, o) → m ≤ 8) := by
   have key : ∀ m o, regs.acc.filter (fun y => y.2 != .tmp t) = some (m, o) →
       regs.acc = some (m, o) ∧ o ≠ .tmp t := by
@@ -456,7 +456,7 @@ theorem storeA_ok {base : Nat} {sF : GS} (ok : Z.OK) (hT : FnLay Z E) (F : GFina
         fun hx fr ist tmps s v W R hat hA => ?_⟩
       obtain ⟨ad, had, hpc⟩ := hat
       obtain ⟨ad0, harea⟩ := W.area
-      have hb := ok.dbound sl 1 W.dst
+      have hb := ok.dbound E.fn.name sl 1 W.dst
       obtain ⟨hst, hat'⟩ := run_ins ok F (s0 := { s0 with regs := _ }) (i := ⟨.ld, [.mem (slotVal sl), .a]⟩) hx rfl
         R.img R.run ⟨ad, had, hpc⟩
         (s' := ((skip (op1 s) 2).wr (Instr.immW (Z.a.env ad) ⟨.ld, [.mem (slotVal sl), .a]⟩) (op1 s).a).tick 13)
@@ -491,7 +491,7 @@ theorem storeA_ok {base : Nat} {sF : GS} (ok : Z.OK) (hT : FnLay Z E) (F : GFina
       obtain ⟨harea', lv, hlv, hdeadk⟩ := hb rfl
       refine ⟨GExt.of_out (List.prefix_refl _) rfl rfl, by simp [Dst.opd], fun o ho => (List.mem_filter.mp ho).1,
         fun hx fr ist tmps s v W R hat hA => ?_⟩
-      have hb := ok.dbound sl 1 W.dst
+      have hb := ok.dbound E.fn.name sl 1 W.dst
       obtain ⟨ka, khl⟩ := kill_keep ok R W.dst v
       refine ⟨s, Steps.refl _, hat, ?_, KeepR.refl s⟩
       refine Rel.dt_mono (Rel.wr_dead ok R W v (W.dead harea' lv hlv hdeadk)
@@ -642,7 +642,7 @@ theorem storeHL_ok {base : Nat} {sF : GS} (ok : Z.OK) (hT : FnLay Z E) (F : GFin
         fun hx fr ist tmps s v W R hat hHL => ?_⟩
       obtain ⟨ad, had, hpc⟩ := hat
       obtain ⟨ad0, harea⟩ := W.area
-      have hb := ok.dbound sl 2 W.dst
+      have hb := ok.dbound E.fn.name sl 2 W.dst
       obtain ⟨hst, hat'⟩ := run_ins ok F (s0 := { s0 with regs := _ }) (i := ⟨.ld, [.mem (slotVal sl), .hl]⟩) hx rfl
         R.img R.run ⟨ad, had, hpc⟩
         (s' := ((skip (op1 s) 2).wr16 (Instr.immW (Z.a.env ad) ⟨.ld, [.mem (slotVal sl), .hl]⟩) (op1 s).hl).tick 16)
@@ -676,7 +676,7 @@ theorem storeHL_ok {base : Nat} {sF : GS} (ok : Z.OK) (hT : FnLay Z E) (F : GFin
       obtain ⟨harea', lv, hlv, hdeadk⟩ := hb rfl
       refine ⟨GExt.of_out (List.prefix_refl _) rfl rfl, by simp [Dst.opd], fun o ho => (List.mem_filter.mp ho).1,
         fun hx fr ist tmps s v W R hat hHL => ?_⟩
-      have hb := ok.dbound sl 2 W.dst
+      have hb := ok.dbound E.fn.name sl 2 W.dst
       obtain ⟨ka, khl⟩ := kill_keep ok R W.dst v
       refine ⟨s, Steps.refl _, hat, ?_, KeepR.refl s⟩
       refine Rel.dt_mono (Rel.wr_dead ok R W v (W.dead harea' lv hlv hdeadk)

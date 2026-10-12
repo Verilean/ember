@@ -17,7 +17,7 @@ open Ember.Z80.IR (Opd Dst Slot Area)
 def Rd (Z : ZCtx) (E : GEnv) (dt : Nat → Prop) (n : Nat) : Opd → Prop
   | .const _ => True
   | .slot sl => (∃ ad, Z.c.layout.areaAddr sl.area = some ad) ∧ Z.c.layout.addr sl + n ≤ 65536 ∧
-      (∀ j, j < n → Z.data (Z.c.layout.addr sl + j)) ∧ Own E (.slot sl) ∧ Z.use (sl, n)
+      (∀ j, j < n → Z.data (Z.c.layout.addr sl + j)) ∧ Own E (.slot sl) ∧ Z.use E.fn.name (sl, n)
   | .tmp t => E.spilled[t]! = true →
       dt t ∧ (∃ ad, Z.c.layout.areaAddr (.frame E.fn.name) = some ad) ∧
         tmpAddr Z E t + E.fn.tmps[t]! ≤ 65536 ∧ n ≤ E.fn.tmps[t]!
@@ -29,7 +29,7 @@ theorem Rd.own {Z : ZCtx} {E : GEnv} {dt : Nat → Prop} {n : Nat} {o : Opd} (h 
   | slot sl => exact h.2.2.2.1
 
 theorem Rd.use {Z : ZCtx} {E : GEnv} {dt : Nat → Prop} {n : Nat} {sl : Slot} (h : Rd Z E dt n (.slot sl)) :
-    Z.use (sl, n) := h.2.2.2.2
+    Z.use E.fn.name (sl, n) := h.2.2.2.2
 
 /-- Where an operand is, as the generator names it. -/
 def opdVal (E : GEnv) : Opd → Val

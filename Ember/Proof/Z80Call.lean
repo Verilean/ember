@@ -219,8 +219,8 @@ theorem Rel.free_stack (ok : Z.OK) (hT : FnLay Z E) {regs regs' : Regs} {ist : I
     (hr : s'.ramStart = s.ramStart) (hh : s'.halted = s.halted) (hsp : s'.sp = s.sp)
     (ha : ∀ o, o ∈ regs'.a → Own E o → s'.a.toNat = IR.Sem.opd Z.c ist tmps 1 o)
     (hhl : ∀ o, o ∈ regs'.hl → Own E o → s'.hl.toNat = IR.Sem.opd Z.c ist tmps 2 o)
-    (hina : ∀ sl, Opd.slot sl ∈ regs'.a → Own E (.slot sl) → Z.use (sl, 1))
-    (hinhl : ∀ sl, Opd.slot sl ∈ regs'.hl → Own E (.slot sl) → Z.use (sl, 2))
+    (hina : ∀ sl, Opd.slot sl ∈ regs'.a → Own E (.slot sl) → Z.use E.fn.name (sl, 1))
+    (hinhl : ∀ sl, Opd.slot sl ∈ regs'.hl → Own E (.slot sl) → Z.use E.fn.name (sl, 2))
     (hacc : ∀ n o, regs'.acc = some (n, o) → regs.acc = some (n, o)) :
     Rel Z E fr dt regs' ist tmps s' := by
   have hstk := ok.stack
@@ -288,10 +288,10 @@ theorem Rel.acc_free (ok : Z.OK) (hT : FnLay Z E) {regs regs' : Regs} {ist : IR.
     (hr : s'.ramStart = s.ramStart) (hh : s'.halted = s.halted) (hsp : s'.sp = s.sp)
     (ha : ∀ o, o ∈ regs'.a → Own E o → s'.a.toNat = IR.Sem.opd Z.c ist tmps 1 o)
     (hhl : ∀ o, o ∈ regs'.hl → Own E o → s'.hl.toNat = IR.Sem.opd Z.c ist tmps 2 o)
-    (hina : ∀ sl, Opd.slot sl ∈ regs'.a → Own E (.slot sl) → Z.use (sl, 1))
-    (hinhl : ∀ sl, Opd.slot sl ∈ regs'.hl → Own E (.slot sl) → Z.use (sl, 2))
+    (hina : ∀ sl, Opd.slot sl ∈ regs'.a → Own E (.slot sl) → Z.use E.fn.name (sl, 1))
+    (hinhl : ∀ sl, Opd.slot sl ∈ regs'.hl → Own E (.slot sl) → Z.use E.fn.name (sl, 2))
     (hacc : ∀ n o, regs'.acc = some (n, o) → Own E o → IR.Sem.rd s'.mem Z.acc n = IR.Sem.opd Z.c ist tmps n o)
-    (hinacc : ∀ n sl, regs'.acc = some (n, .slot sl) → Own E (.slot sl) → Z.use (sl, n))
+    (hinacc : ∀ n sl, regs'.acc = some (n, .slot sl) → Own E (.slot sl) → Z.use E.fn.name (sl, n))
     (hnacc : ∀ n o, regs'.acc = some (n, o) → n ≤ 8) :
     Rel Z E fr dt regs' ist tmps s' := by
   have hstk := ok.stack
@@ -357,8 +357,8 @@ theorem rt_call {base : Nat} {sF : GS} (ok : Z.OK) (hT : FnLay Z E) (F : GFinal 
       ∀ regs' : Regs,
         (∀ o, o ∈ regs'.a → Own E o → s'.a.toNat = IR.Sem.opd Z.c ist tmps 1 o) →
         (∀ o, o ∈ regs'.hl → Own E o → s'.hl.toNat = IR.Sem.opd Z.c ist tmps 2 o) →
-        (∀ sl, Opd.slot sl ∈ regs'.a → Own E (.slot sl) → Z.use (sl, 1)) →
-        (∀ sl, Opd.slot sl ∈ regs'.hl → Own E (.slot sl) → Z.use (sl, 2)) →
+        (∀ sl, Opd.slot sl ∈ regs'.a → Own E (.slot sl) → Z.use E.fn.name (sl, 1)) →
+        (∀ sl, Opd.slot sl ∈ regs'.hl → Own E (.slot sl) → Z.use E.fn.name (sl, 2)) →
         (∀ n o, regs'.acc = some (n, o) → regs.acc = some (n, o)) →
         Rel Z E fr dt regs' ist tmps s' := by
   obtain ⟨entry, hsym, hent, hR⟩ := hrt

@@ -758,6 +758,20 @@ them, a temporary is assigned before it is read with no label between
 that does not go on, labels are unique, the stack has room.  Checkers
 for these are to come, as `irOkB` for the lowering.
 
+**A hypothesis today's images do not meet.**  `FnLay.nodata` says the
+slots of a function's temporaries are not among the bytes the IR and the
+CPU share (`ZCtx.data`).  The layout (`IR.layout`) puts a function's
+temporaries on top of its frame and lets the frames of functions that
+never run at the same time share memory: in the SLIP build a
+temporary's slot of one function is a variable's byte of another (35
+functions, 33 bytes of temporaries).  That is sound only because a
+function writes its variables before it reads them, which the relation
+does not know.  Either the relation learns it (definite assignment of
+the frame, a dataflow of its own), or the temporaries get an area apart
+from the variables — 165 instead of 156 bytes of frames for the SLIP
+build, 177 instead of 168 with Ethernet and DHCP.  Not decided; the
+loopback program has no temporary in memory and is not concerned.
+
 **Covered** (`Covered`): all 1073 instructions of the SLIP build's IR,
 all 79 of the loopback program's, 1559 of the 1562 of the Ethernet
 builds'.  **Not covered:** shifts by a variable, `zero`, `not`/`neg`

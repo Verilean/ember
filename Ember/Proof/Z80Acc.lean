@@ -246,10 +246,10 @@ theorem storeAcc_ok (ok : Z.OK) (hT : FnLay Z E) (F : GFinal Z base sF) {n : Nat
           IR.Sem.rd m Z.acc k =
             IR.Sem.opd Z.c { ist with mem := IR.Sem.wr ist.mem (Z.c.layout.addr sl) n v } tmps k o) ∧
         (∀ k a, ({ acc := some (n, Dst.opd (.slot sl)) } : Regs).acc = some (k, .slot a) → Own E (.slot a) →
-          Z.use (a, k)) ∧
+          Z.use E.fn.name (a, k)) ∧
         (∀ k o, ({ acc := some (n, Dst.opd (.slot sl)) } : Regs).acc = some (k, o) → k ≤ 8) := by
       intro ist tmps m v W hisz hv
-      have hb' := ok.dbound sl n W.dst
+      have hb' := ok.dbound E.fn.name sl n W.dst
       refine ⟨fun k o h hown => ?_, fun k a h hown => ?_, fun k o h => ?_⟩
       · cases h
         show _ = IR.Sem.rd (IR.Sem.wr ist.mem _ n v) _ n
@@ -264,7 +264,7 @@ theorem storeAcc_ok (ok : Z.OK) (hT : FnLay Z E) (F : GFinal Z base sF) {n : Nat
       simp only [if_true, wpg_bind, wpg_ins, wpg_call, wpg_setRegs]
       refine ⟨⟨by simp, List.suffix_refl _, List.suffix_refl _⟩, fun hx fr ist tmps s v W R hat hv => ?_⟩
       obtain ⟨ad0, harea⟩ := W.area
-      have hb' := ok.dbound sl n W.dst
+      have hb' := ok.dbound E.fn.name sl n W.dst
       obtain ⟨s', st, at', hsp', hh', hrs', hsz', hfree⟩ := st_run ok F hn hrt hdep
         (s1 := s0) (p := slotVal sl) ⟨hx.out, hx.jumps, hx.labels⟩ R hat
         (fun pc => slot_val ok sl ad0 pc harea) W.ram hb'
@@ -299,7 +299,7 @@ theorem storeAcc_ok (ok : Z.OK) (hT : FnLay Z E) (F : GFinal Z base sF) {n : Nat
         (∀ k o, ({ acc := some (n, Dst.opd (.tmp t)) } : Regs).acc = some (k, o) → Own E o →
           IR.Sem.rd m Z.acc k = IR.Sem.opd Z.c ist (tmps.setIfInBounds t (IR.modN n v)) k o) ∧
         (∀ k a, ({ acc := some (n, Dst.opd (.tmp t)) } : Regs).acc = some (k, .slot a) → Own E (.slot a) →
-          Z.use (a, k)) ∧
+          Z.use E.fn.name (a, k)) ∧
         (∀ k o, ({ acc := some (n, Dst.opd (.tmp t)) } : Regs).acc = some (k, o) → k ≤ 8) := by
       intro ist tmps m v W htsz hv
       have hlt : t < tmps.size := by rw [htsz]; exact W.lt

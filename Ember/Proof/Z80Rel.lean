@@ -32,11 +32,11 @@ structure ZCtx where
   data : Nat → Prop
   /-- Where RAM starts. -/
   ramStart : Nat
-  /-- The slots a function reads and writes in its own frame and in the
-  globals (with their sizes): what the tracker of registers may rely on. -/
-  use : Slot × Nat → Prop
-  /-- The slots written, wherever they are. -/
-  dst : Slot × Nat → Prop
+  /-- The slots a function (by its name) reads and writes in its own frame
+  and in the globals (with their sizes): what the tracker of registers may rely on. -/
+  use : String → Slot × Nat → Prop
+  /-- The slots the function writes, wherever they are (the frames of the functions it calls included). -/
+  dst : String → Slot × Nat → Prop
   /-- The stack is between these two addresses. -/
   stackLo : Nat
   stackHi : Nat
@@ -89,10 +89,10 @@ structure ZCtx.OK (Z : ZCtx) : Prop where
   rtStack : ∀ x, Z.rt x → x < Z.stackLo ∨ Z.stackHi ≤ x
   rtAcc : ∀ x, Z.rt x → x < Z.acc ∨ Z.acc + 8 ≤ x
   rtWr : ∀ f x, Z.rt x → Z.wr f x
-  ubound : ∀ a an, Z.use (a, an) → Z.c.layout.addr a + an ≤ 65536
-  dbound : ∀ b bn, Z.dst (b, bn) → Z.c.layout.addr b + bn ≤ 65536
-  /-- A slot that is used and one that is written are apart in memory unless their offsets overlap. -/
-  apart : ∀ a an b bn, Z.use (a, an) → Z.dst (b, bn) →
+  ubound : ∀ f a an, Z.use f (a, an) → Z.c.layout.addr a + an ≤ 65536
+  dbound : ∀ f b bn, Z.dst f (b, bn) → Z.c.layout.addr b + bn ≤ 65536
+  /-- A slot a function uses and one it writes are apart in memory unless their offsets overlap. -/
+  apart : ∀ f a an b bn, Z.use f (a, an) → Z.dst f (b, bn) →
     IR.slotsOverlap a an b bn = true ∨ Z.c.layout.addr a + an ≤ Z.c.layout.addr b ∨
       Z.c.layout.addr b + bn ≤ Z.c.layout.addr a
 
@@ -177,9 +177,9 @@ structure Rel (Z : ZCtx) (E : GEnv) (fr : Fr) (dt : Nat → Prop) (regs : Regs) 
   ra : ∀ o, o ∈ regs.a → Own E o → s.a.toNat = IR.Sem.opd Z.c ist tmps 1 o
   rhl : ∀ o, o ∈ regs.hl → Own E o → s.hl.toNat = IR.Sem.opd Z.c ist tmps 2 o
   racc : ∀ n o, regs.acc = some (n, o) → Own E o → IR.Sem.rd s.mem Z.acc n = IR.Sem.opd Z.c ist tmps n o
-  ina : ∀ sl, Opd.slot sl ∈ regs.a → Own E (.slot sl) → Z.use (sl, 1)
-  inhl : ∀ sl, Opd.slot sl ∈ regs.hl → Own E (.slot sl) → Z.use (sl, 2)
-  inacc : ∀ n sl, regs.acc = some (n, .slot sl) → Own E (.slot sl) → Z.use (sl, n)
+  ina : ∀ sl, Opd.slot sl ∈ regs.a → Own E (.slot sl) → Z.use E.fn.name (sl, 1)
+  inhl : ∀ sl, Opd.slot sl ∈ regs.hl → Own E (.slot sl) → Z.use E.fn.name (sl, 2)
+  inacc : ∀ n sl, regs.acc = some (n, .slot sl) → Own E (.slot sl) → Z.use E.fn.name (sl, n)
   nacc : ∀ n o, regs.acc = some (n, o) → n ≤ 8
 
 /-- A step that changes registers only. -/
@@ -188,8 +188,8 @@ theorem Rel.regs_only {Z : ZCtx} {E : GEnv} {fr : Fr} {dt : Nat → Prop} {regs 
     (hr : s'.ramStart = s.ramStart) (hh : s'.halted = s.halted) (hsp : s'.sp = s.sp)
     (ha : ∀ o, o ∈ regs'.a → Own E o → s'.a.toNat = IR.Sem.opd Z.c ist tmps 1 o)
     (hhl : ∀ o, o ∈ regs'.hl → Own E o → s'.hl.toNat = IR.Sem.opd Z.c ist tmps 2 o)
-    (hina : ∀ sl, Opd.slot sl ∈ regs'.a → Own E (.slot sl) → Z.use (sl, 1))
-    (hinhl : ∀ sl, Opd.slot sl ∈ regs'.hl → Own E (.slot sl) → Z.use (sl, 2))
+    (hina : ∀ sl, Opd.slot sl ∈ regs'.a → Own E (.slot sl) → Z.use E.fn.name (sl, 1))
+    (hinhl : ∀ sl, Opd.slot sl ∈ regs'.hl → Own E (.slot sl) → Z.use E.fn.name (sl, 2))
     (hacc : ∀ n o, regs'.acc = some (n, o) → regs.acc = some (n, o)) :
     Rel Z E fr dt regs' ist tmps s' :=
   ⟨R.img.congr hr hm, by rw [hh]; exact R.run, fun x hx => by rw [hm]; exact R.mem x hx,
