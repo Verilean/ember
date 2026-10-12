@@ -145,7 +145,7 @@ theorem emit_spec (res : String → Option Int) : ∀ (items : List Item) (as : 
     emit res items as = .ok out → ∀ k it, items[k]? = some it →
     ∃ ad bs a0, as[k]? = some ad ∧ it.encode { resolve := res, pc := (ad : Int) } = .ok bs ∧
       as[k + 1]? = some (ad + bs.length) ∧ as[0]? = some a0 ∧ a0 ≤ ad ∧
-      ∀ j b, bs[j]? = some b → out[ad - a0 + j]? = some b
+      (∀ j b, bs[j]? = some b → out[ad - a0 + j]? = some b) ∧ ad - a0 + bs.length ≤ out.length
   | [], _, _, _, k, it, hk => by simp at hk
   | it0 :: r, as, out, h, k, it, hk => by
     rcases as with _ | ⟨a, _ | ⟨a', rest⟩⟩
@@ -163,7 +163,7 @@ theorem emit_spec (res : String → Option Int) : ∀ (items : List Item) (as : 
           | zero =>
             simp only [List.getElem?_cons_zero, Option.some.injEq] at hk
             subst hk
-            refine ⟨a, bs0, a, rfl, by simpa using he, by simp [ha'], rfl, Nat.le_refl _, fun j b hj => ?_⟩
+            refine ⟨a, bs0, a, rfl, by simpa using he, by simp [ha'], rfl, Nat.le_refl _, fun j b hj => ?_, by simp⟩
             have hj' : j < bs0.length := by
               rcases Nat.lt_or_ge j bs0.length with h' | h'
               · exact h'
@@ -171,10 +171,11 @@ theorem emit_spec (res : String → Option Int) : ∀ (items : List Item) (as : 
             rw [Nat.sub_self, Nat.zero_add, List.getElem?_append_left hj']
             exact hj
           | succ k =>
-            obtain ⟨ad, bs, a0, h1, h2, h3, h4, h5, h6⟩ := emit_spec res r (a' :: rest) out' hr k it (by simpa using hk)
+            obtain ⟨ad, bs, a0, h1, h2, h3, h4, h5, h6, h7⟩ := emit_spec res r (a' :: rest) out' hr k it (by simpa using hk)
             simp only [List.getElem?_cons_zero, Option.some.injEq] at h4
             subst h4
-            refine ⟨ad, bs, a, by simpa using h1, h2, by simpa using h3, rfl, by omega, fun j b hj => ?_⟩
+            refine ⟨ad, bs, a, by simpa using h1, h2, by simpa using h3, rfl, by omega, fun j b hj => ?_, by
+              rw [List.length_append]; omega⟩
             rw [List.getElem?_append_right (by omega), show ad - a + j - bs0.length = ad - a' + j by omega]
             exact h6 j b hj
       · cases h
@@ -185,6 +186,7 @@ theorem assemble_ok {items : List Item} {origin : Nat} {a : Assembled} (h : asse
       ∀ k it, items[k]? = some it →
         ∃ ad bs, addrs[k]? = some ad ∧ it.encode (a.env ad) = .ok bs ∧ addrs[k + 1]? = some (ad + bs.length) ∧
           origin ≤ ad ∧ (∀ j b, bs[j]? = some b → a.bytes.data[ad - origin + j]? = some b) ∧
+          ad + bs.length ≤ origin + a.bytes.size ∧
           ∀ n, it = Item.label n → a.labels.reverse.lookup n = some ad := by
   unfold assemble at h
   split at h
@@ -197,11 +199,11 @@ theorem assemble_ok {items : List Item} {origin : Nat} {a : Assembled} (h : asse
         cases h
         obtain ⟨h0, _, hlab⟩ := place_spec items origin [] addrs labels hp
         refine ⟨addrs, h0, fun k it hk => ?_⟩
-        obtain ⟨ad, bs, a0, h1, h2, h3, h4, h5, h6⟩ := emit_spec _ items addrs bytes hem k it hk
+        obtain ⟨ad, bs, a0, h1, h2, h3, h4, h5, h6, h7⟩ := emit_spec _ items addrs bytes hem k it hk
         rw [h0] at h4
         cases h4
         refine ⟨ad, bs, h1, by simpa [Assembled.env] using h2, h3, h5, fun j b hj => by simpa using h6 j b hj,
-          fun n hn => ?_⟩
+          by simp [ByteArray.size]; omega, fun n hn => ?_⟩
         subst hn
         obtain ⟨a1, ha1, hl⟩ := hlab k n hk
         rw [h1] at ha1

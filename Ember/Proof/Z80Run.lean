@@ -24,6 +24,7 @@ def Placed (items : List Item) (origin : Nat) (a : Assembled) (addrs : List Nat)
     ∀ k it, items[k]? = some it →
       ∃ ad bs, addrs[k]? = some ad ∧ it.encode (a.env ad) = .ok bs ∧ addrs[k + 1]? = some (ad + bs.length) ∧
         origin ≤ ad ∧ (∀ j b, bs[j]? = some b → a.bytes.data[ad - origin + j]? = some b) ∧
+        ad + bs.length ≤ origin + a.bytes.size ∧
         ∀ n, it = Item.label n → a.labels.reverse.lookup n = some ad
 
 theorem placed_of_assemble {items : List Item} {origin : Nat} {a : Assembled} (h : assemble items origin = .ok a) :
