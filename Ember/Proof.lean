@@ -207,11 +207,14 @@ The Z80 back end (M7, begun) — `Ember.Z80.IR.Sem` is the semantics of its IR:
   SLIP build's IR is covered;
 * `Z80Fn`, `Z80FnGen`: **a function's code has the outcome of the IR's function** — it returns as
   `IR.Sem.callF` does, the machine standing for the world, or reaches `rt_trap` (`exec_ok`, `fn_ok`, by
-  induction on the fuel; `genFn_ok`).
+  induction on the fuel; `genFn_ok`);
+* `Z80Prog`, `Z80Shape`: in an image that holds the items `genProg` gives, every function does what
+  `IR.Sem.callF` does (`prog_ok`); the part of the assumptions about a body alone is checked on the SLIP
+  build and the loopback program (`shapeB_sound`).
 
 By-reference parameters and `inlineCalls` are outside M7.1; of `IR → Z80` (M7.3) not proved: the checks
-for what the theorems assume of a program (`FnStatic`); the runtime routines; the passes on the assembly;
-the whole image.
+for what the theorems assume of the layout (`FnStatic`, `ZCtx.OK`); the runtime routines; the passes on
+the assembly; the whole image.
 
 Every statement is about the definitions of `Ember.Spec` as they are;
 `Ember/Proof/README.md` lists the theorems, the hypotheses they need and

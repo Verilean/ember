@@ -733,6 +733,8 @@ footprint (`ZCtx.wr`) has changed.
 | `genBody_ok`, `Chain.fns` (`Z80Fn.lean`) | the generator's states before and after every instruction of a body, each with the promise of `ins_ok` |
 | **`exec_ok`**, **`fn_ok`** | from an instruction of a body with the states agreeing — and so from a function's entry (`Entry`) — the code has the `Outcome` of `IR.Sem.exec`/`callF`: it returns with the result in `A`/`HL`, the shared bytes as the IR left them and only the footprint written, or it is at `rt_trap`; by induction on the fuel, the functions called included |
 | `genFn_ok` (`Z80FnGen.lean`) | the run of `genFnCode` whose items are in the image gives what `fn_ok` needs of a function (`FnGen`) |
+| **`prog_ok`** (`Z80Prog.lean`) | in an image that holds the items `Codegen.genProg` gives (at any offset), given `FnStatic` of every function and `RtOK`: every function with code, entered as `Entry` says, has the outcome of `IR.Sem.callF` |
+| `shapeB_sound` (`Z80Shape.lean`) | a checker for the part of `FnStatic` that is about a body alone (covered instructions, the last one does not go on, labels unique); `#guard`: it accepts every function of the SLIP build and of the loopback program |
 
 **Checked, not proved** (translation validation, on every function
 generated): `jumpsOk` — what the generator assumes the registers hold
