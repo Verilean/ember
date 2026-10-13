@@ -759,7 +759,9 @@ footprint (`ZCtx.wr`) has changed.
 | **`stackH_ok`** (`Z80StackH.lean`, `Z80HarnessW.lean`) | the image of the stack for the test harness: every function, entered as `Entry` says, returns as `IR.Sem.callF` does with the machine of the harness standing for the world it leaves, or reaches `rt_trap` — **with nothing taken of the runtime**: the fifteen routines its functions call (`calls_eq`: `rt_ld32`, `rt_st32`, `rt_acc_a`, `rt_acc_hl`, `rt_add32`, `rt_sub32`, `rt_or32`, `rt_cmp32`, `rt_shr8`, `rt_not16`, `rt_input`, `rt_out_byte`, `rt_out_end`, `rt_drop`, `rt_note`) are the proved ones, found in the image at their places (`rtCheck`, by the kernel).  Of the functions; from reset see `stackH_run` |
 | `boot_zeroed`, `copy_ok` (`Z80Boot.lean`, `Z80BootInit.lean`) | start-up in two parts: from reset to the return of `rt_zero` inside `rt_init` (the RAM in use zero, memory below the stack as it was, the return address of `rt_init` in place) — `boot_ok` is this and a `ret`; and one copy of an initial value, `ld hl,src; ld de,dst; ld bc,n; ldir`: the bytes at the source are at the destination, nothing else changes |
 | `loop_iter`, `loop_run` (`Z80HarnessLoop.lean`) | the harness's loop that calls the entry, for any image (`LoopNeed`: where the loop is, its count of idle calls, the entry); the loopback image's `loop_iter`/`loop_run` are now these |
-| **`stackH_run`**, `stackH_run_halt` (`Z80StackHRun.lean`) | the image of the stack for the harness **from reset**: start-up — the RAM cleared, **the initial values of `iss` and `ip_id` copied from the ROM** (the bytes there are computed on the assembled image; the IR's initial memory in RAM is those two values and zero, `st0_ram`) — then the loop: for any number of calls of `main` that end in the IR's semantics from its initial state, the machine of the harness is at the head of the loop with the world they leave, or it left the loop and stopped with the input used up.  **Taken:** `Moves` (a call of `main` with input remaining moves the position in the input) — a property of the program, not proved.  **Not composed:** that the IR's calls end and transmit what the Spec does (`stack_ir`), and `Ember.Z80.Machine` (the machine the tests run) — both are done for the loopback image only |
+| **`stackH_run`**, `stackH_run_halt` (`Z80StackHRun.lean`) | the image of the stack for the harness **from reset**: start-up — the RAM cleared, **the initial values of `iss` and `ip_id` copied from the ROM** (the bytes there are computed on the assembled image; the IR's initial memory in RAM is those two values and zero, `st0_ram`) — then the loop: for any number of calls of `main` that end in the IR's semantics from its initial state, the machine of the harness is at the head of the loop with the world they leave, or it left the loop and stopped with the input used up.  Taken here: `Moves` (a call of `main` with input remaining moves the position in the input) and that the IR's calls end — both discharged in `stackH_spec_halt` |
+| **`stackH_spec_halt`** (`Z80StackHSpec.lean`) | the image of the stack for the harness **against the Spec**, from reset, for any input: the machine of the harness stops (`di; halt`) holding the world of some number of calls of `main` in the Ember semantics that leave no input, and the kept lines of that world — transmissions and drops, each with the number of its input — are those of `Spec.step`, input by input.  Composes `stackH_run_halt` with `main_step`/`main_run_all` (M5.6: a call never traps, reads one item; so `Moves`, `good_step`) and `lower_iter` (M7.1).  **Taken:** `StackSrc p` — that `p` is the checked SLIP build (`TcpAll`, `TcpReasons`, `main_fn`), lowered to `Stack.ir`, accepted by `progOkB`/`irOkB` with this layout; the parts that can be computed are a `#guard` on `Net.prog.check` |
+| **`stackH_halts`** (`Z80StackHMachine.lean`; `run_sim_of` in `Z80Machine.lean`) | the same **on the machine the tests run**: the image `assemble` makes of `StackH.items`, loaded into `Ember.Z80.Machine` as the tests load it (`harnessMachine`) and stepped by `Machine.step`, for any input: after some number of steps the CPU is halted and the machine stands for a world (`Sim`) with no input left whose transmissions and drops are those of `Spec.step`.  Not in it: `Target.runHarness` (its loop until `halted`, the printing of the trace), the notes and `tcb` lines (the comparison keeps transmissions and drops), the image as built by default, a board |
 
 **Checked, not proved** (translation validation, on every function
 generated): `jumpsOk` — what the generator assumes the registers hold
@@ -834,14 +836,15 @@ test harness and without the passes: `stackH_ok` — every function of
 the image does what the IR's does, nothing assumed of the program, the
 layout, the image or the runtime (the literal pool and the checks of
 the 1073 instructions are computed by the kernel, a function at a
-time).  From reset (`stackH_run`): start-up with the copy of the initial
-values and the harness's loop are proved from their items, so any
-number of calls of `main` that end in the IR's semantics leave the
-machine of the harness with the IR's world — given `Moves`, which is
-taken.  Not yet: the composition with `stack_ir` (the IR against the
-Spec: that the calls end, and what they transmit), `Moves` of the
-stack, and the step to `Machine.step` — all three exist for the
-loopback image only.  For the board the checks of its layout
+time).  From reset: start-up with the copy of the initial values and the
+harness's loop are proved from their items (`stackH_run`), composed
+with the Ember semantics and the Spec (`stackH_spec_halt`) and carried
+to `Machine.step` (`stackH_halts`): **the image of the stack, loaded
+and run as the tests do, processes all its input and stops, having
+transmitted and dropped what `Spec.step` does** — for the harness, the
+image without the passes, and given `StackSrc` of the Ember program
+(its computable parts, and that the written-out IR and items are the
+lowering and the build, are `#guard`s).  For the board the checks of its layout
 pass (`#guard`, not the kernel) and its image is not connected.  Of the images as
 built by default nothing is proved: `build` runs `retThreading`,
 `sweep`, `peephole`, `packHigh` and `relax` over the items, 303 bytes
@@ -867,9 +870,7 @@ ring) — proved are `rt_bound`, `rt_not16`, `rt_shr8`, the routines on
 four bytes of the accumulator the stack calls, the harness's five effect
 routines, `rt_zero`, and the harness's start-up and loop for the
 loopback image.
-Of the images: the stack's for the harness against the Spec and on
-`Ember.Z80.Machine` (its functions and its run from reset are proved,
-`stackH_ok`, `stackH_run`, the latter given `Moves`), the stack's for
+Of the images: the stack's for
 the board (its plan passes the
 checks, by `#guard`; its image is not connected), the board's loopback
 image beyond its functions, and every image as built by default — the passes

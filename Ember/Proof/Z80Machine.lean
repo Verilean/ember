@@ -367,21 +367,27 @@ def mrun : Nat → Machine → Machine
   | 0, m => m
   | n + 1, m => mrun n m.step
 
-/-- **A run of the machine the tests run is a run of the proofs' machine.** -/
-theorem run_sim (a : Assembled) (addrs : List Nat) : ∀ (n : Nat) (m : Machine) (w : HW), Sim img.ctx m w →
-    (mrun n m).cpu = (wrun (Zof a addrs (0, 0)) n (m.cpu, w)).1 ∧
-      Sim img.ctx (mrun n m) (wrun (Zof a addrs (0, 0)) n (m.cpu, w)).2
+/-- **A run of the machine the tests run is a run of the proofs' machine**, for any image. -/
+theorem run_sim_of (I : ImgIn) (a : Assembled) (addrs : List Nat) : ∀ (n : Nat) (m : Machine) (w : HW),
+    Sim I.ctx m w →
+    (mrun n m).cpu = (wrun (I.ZH a addrs (0, 0)) n (m.cpu, w)).1 ∧
+      Sim I.ctx (mrun n m) (wrun (I.ZH a addrs (0, 0)) n (m.cpu, w)).2
   | 0, _, _, S => ⟨rfl, S⟩
   | n + 1, m, w, S => by
     obtain ⟨hc, S1⟩ := step_sim S
-    obtain ⟨h1, h2⟩ := run_sim a addrs n m.step _ S1
-    have e : wstep (Zof a addrs (0, 0)) (m.cpu, w) = (m.step.cpu, hdev img.ctx w (m.cpu.step (hbus w)).io) := by
-      show (m.cpu.step (hbus w), hdev img.ctx w (m.cpu.step (hbus w)).io) = _
+    obtain ⟨h1, h2⟩ := run_sim_of I a addrs n m.step _ S1
+    have e : wstep (I.ZH a addrs (0, 0)) (m.cpu, w) = (m.step.cpu, hdev I.ctx w (m.cpu.step (hbus w)).io) := by
+      show (m.cpu.step (hbus w), hdev I.ctx w (m.cpu.step (hbus w)).io) = _
       rw [hc]
-    show (mrun n m.step).cpu = (wrun (Zof a addrs (0, 0)) n (wstep (Zof a addrs (0, 0)) (m.cpu, w))).1 ∧
-      Sim img.ctx (mrun n m.step) (wrun (Zof a addrs (0, 0)) n (wstep (Zof a addrs (0, 0)) (m.cpu, w))).2
+    show (mrun n m.step).cpu = (wrun (I.ZH a addrs (0, 0)) n (wstep (I.ZH a addrs (0, 0)) (m.cpu, w))).1 ∧
+      Sim I.ctx (mrun n m.step) (wrun (I.ZH a addrs (0, 0)) n (wstep (I.ZH a addrs (0, 0)) (m.cpu, w))).2
     rw [e]
     exact ⟨h1, h2⟩
+
+theorem run_sim (a : Assembled) (addrs : List Nat) (n : Nat) (m : Machine) (w : HW) (S : Sim img.ctx m w) :
+    (mrun n m).cpu = (wrun (Zof a addrs (0, 0)) n (m.cpu, w)).1 ∧
+      Sim img.ctx (mrun n m) (wrun (Zof a addrs (0, 0)) n (m.cpu, w)).2 :=
+  run_sim_of img a addrs n m w S
 
 /-- The machine as the tests set it up for a run of the harness: the
 CPU at reset with the image in ROM, the input given, nothing recorded,
