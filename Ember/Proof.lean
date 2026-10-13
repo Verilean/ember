@@ -112,6 +112,7 @@ import Ember.Proof.Z80Rt
 import Ember.Proof.Z80Boot
 import Ember.Proof.Z80Note
 import Ember.Proof.Z80Wide
+import Ember.Proof.Z80Bytes
 import Ember.Proof.Z80World
 import Ember.Proof.Z80Image
 import Ember.Proof.Z80LoopHItems

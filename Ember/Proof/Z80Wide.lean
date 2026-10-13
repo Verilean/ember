@@ -172,7 +172,8 @@ theorem ld_bc_imm (ok : Z.OK) {k : Nat} {v : Val} (hk : Z.items[k]? = some (.ins
 theorem ld_de_imm (ok : Z.OK) {k : Nat} {v : Val} (hk : Z.items[k]? = some (.ins ⟨.ld, [.de, .imm v]⟩))
     {s : Cpu} (M : Mach Z s) (hat : At Z.addrs k s) :
     ∃ s' ad, Z.addrs[k]? = some ad ∧ Steps s s' ∧ At Z.addrs (k + 1) s' ∧ Mach Z s' ∧ Sys s s' ∧
-      s'.de = Instr.immW (Z.a.env ad) ⟨.ld, [.de, .imm v]⟩ ∧ s'.hl = s.hl ∧ s'.bc = s.bc ∧ s'.a = s.a := by
+      s'.de = Instr.immW (Z.a.env ad) ⟨.ld, [.de, .imm v]⟩ ∧ s'.hl = s.hl ∧ s'.bc = s.bc ∧ s'.a = s.a ∧
+      s'.b = s.b ∧ s'.f = s.f := by
   obtain ⟨ad, had, hpc⟩ := hat
   obtain ⟨c1, hc1⟩ : ∃ c1 : Cpu, c1 =
       ((skip (op1 s) 2).setRp .hl 1 (Instr.immW (Z.a.env ad) ⟨.ld, [.de, .imm v]⟩)).tick 10 := ⟨_, rfl⟩
@@ -182,7 +183,7 @@ theorem ld_de_imm (ok : Z.OK) {k : Nat} {v : Val} (hk : Z.items[k]? = some (.ins
     rw [hc1]
     rfl) (by rw [hc1]; simp only [Cpu.setRp, skip, zsim])
   have hS : Sys s c1 := by rw [hc1]; simp only [Sys, Cpu.setRp, skip, zsim, and_self]
-  refine ⟨c1, ad, had, st, at' rfl, M.sys hS, hS, ?_, ?_, ?_, ?_⟩
+  refine ⟨c1, ad, had, st, at' rfl, M.sys hS, hS, ?_, ?_, ?_, ?_, ?_, ?_⟩
   · rw [hc1]
     show mk16 _ _ = _
     simp only [Cpu.setRp, skip, zsim, mk16_hi_lo]
@@ -191,6 +192,10 @@ theorem ld_de_imm (ok : Z.OK) {k : Nat} {v : Val} (hk : Z.items[k]? = some (.ins
     simp only [Cpu.setRp, skip, zsim]
   · rw [hc1]
     show mk16 _ _ = mk16 _ _
+    simp only [Cpu.setRp, skip, zsim]
+  · rw [hc1]
+    simp only [Cpu.setRp, skip, zsim]
+  · rw [hc1]
     simp only [Cpu.setRp, skip, zsim]
   · rw [hc1]
     simp only [Cpu.setRp, skip, zsim]
