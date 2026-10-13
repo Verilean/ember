@@ -120,6 +120,9 @@ import Ember.Proof.Z80StackHItems
 import Ember.Proof.Z80StackHGen
 import Ember.Proof.Z80StackHPlan
 import Ember.Proof.Z80StackH
+import Ember.Proof.Z80BootInit
+import Ember.Proof.Z80HarnessLoop
+import Ember.Proof.Z80StackHRun
 import Ember.Proof.Z80World
 import Ember.Proof.Z80Image
 import Ember.Proof.Z80LoopHItems
@@ -261,12 +264,15 @@ The Z80 back end (M7, begun) — `Ember.Z80.IR.Sem` is the semantics of its IR:
 * `Z80HarnessW`, `Z80ImageParts`, `Z80StackIR`, `Z80StackHItems`, `Z80StackHGen`, `Z80StackHPlan`, `Z80StackH`:
   **the image of the stack (SLIP build) for the harness** — the literal pool checked, the generator run by
   the kernel a function at a time: every function does what the IR's does, nothing taken of the runtime
-  (`stackH_ok`).  Of the functions only: not from reset.
+  (`stackH_ok`);
+* `Z80BootInit`, `Z80HarnessLoop`, `Z80StackHRun`: the copy of an initial value at start-up, the harness's
+  loop for any image, and **the image of the stack from reset** (`stackH_run`: given `Moves`, calls of `main`
+  that end in the IR's semantics leave the machine of the harness with the IR's world).
 
 By-reference parameters and `inlineCalls` are outside M7.1; of `IR → Z80` (M7.3) not proved: the routines
 of the runtime the stack's image for the harness does not call; interrupts and the board's runtime and
-start-up; the passes on the assembly (the images as built by default); for the stack's image, start-up
-(the copy of the initial values), the loop that calls `main`, and the composition with the Spec.
+start-up; the passes on the assembly (the images as built by default); for the stack's image, `Moves`, the
+composition with the Spec (`stack_ir`) and the step to `Ember.Z80.Machine`.
 
 Every statement is about the definitions of `Ember.Spec` as they are;
 `Ember/Proof/README.md` lists the theorems, the hypotheses they need and

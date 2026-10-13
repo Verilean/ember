@@ -706,6 +706,12 @@ def initItems : List Item :=
   [.label "rt_init", .ins ⟨.ld, [.hl, .imm (.sym "rt_ram")]⟩, .ins ⟨.ld, [.bc, .imm (.sym "rt_ram_size")]⟩,
    .ins ⟨.call, [.imm (.sym "rt_zero")]⟩, .ins ⟨.ret, []⟩]
 
+/-- `rt_init` up to the return of `rt_zero`: what every program's start-up begins with (the copies of the
+initial values, if any, come next). -/
+def initHead : List Item :=
+  [.label "rt_init", .ins ⟨.ld, [.hl, .imm (.sym "rt_ram")]⟩, .ins ⟨.ld, [.bc, .imm (.sym "rt_ram_size")]⟩,
+   .ins ⟨.call, [.imm (.sym "rt_zero")]⟩]
+
 /-- Items that are names only take no room: the CPU at the first is at the item after them. -/
 theorem at_skip_equs (ok : Z.OK) {s : Cpu} : ∀ (n : Nat), (∀ i, i < n → ∃ name v, Z.items[i]? = some (.equ name v)) →
     At Z.addrs 0 s → At Z.addrs n s
@@ -713,6 +719,24 @@ theorem at_skip_equs (ok : Z.OK) {s : Cpu} : ∀ (n : Nat), (∀ i, i < n → �
   | n + 1, hall, h => by
     obtain ⟨name, v, hi⟩ := hall n (Nat.lt_succ_self n)
     exact at_skip ok.placed hi (fun _ => rfl) (at_skip_equs ok n (fun i hi' => hall i (by omega)) h)
+
+/-- What start-up needs of the image, up to the return of `rt_zero`. -/
+structure BootHead (Z : ZCtx) (kH kS kI kZ R N : Nat) : Prop where
+  /-- The image begins with names, then the jump to `rt_start`. -/
+  head : ∀ i, i < kH → ∃ name v, Z.items[i]? = some (.equ name v)
+  jump : Z.items[kH]? = some (.ins ⟨.jp, [.imm (.sym "rt_start")]⟩)
+  start : Has Z kS startItems
+  init : Has Z kI initHead
+  zero : Has Z kZ zeroItems
+  ram : Z.sym "rt_ram" R
+  ramSize : Z.sym "rt_ram_size" N
+  /-- The RAM in use: at least two bytes, in RAM, below the four bytes of stack start-up uses. -/
+  n2 : 2 ≤ N
+  lo : Z.ramStart ≤ R
+  hi : R + N ≤ 65532
+  stackLo : Z.stackLo ≤ 65532
+  stackHi : Z.stackHi = 65536
+  size : Z.a.bytes.size < 65536
 
 /-- What start-up needs of the image. -/
 structure BootNeed (Z : ZCtx) (kH kS kI kZ R N : Nat) : Prop where
@@ -732,14 +756,26 @@ structure BootNeed (Z : ZCtx) (kH kS kI kZ R N : Nat) : Prop where
   stackHi : Z.stackHi = 65536
   size : Z.a.bytes.size < 65536
 
-/-- **Start-up**: from reset the CPU gets to the item after the call of
-`rt_init` (the head of the loop), its stack empty, the RAM in use zero. -/
-theorem boot_ok (ok : Z.OK) {kH kS kI kZ R N : Nat} (B : BootNeed Z kH kS kI kZ R N) {s : Cpu}
+theorem BootNeed.head' {Z : ZCtx} {kH kS kI kZ R N : Nat} (B : BootNeed Z kH kS kI kZ R N) :
+    BootHead Z kH kS kI kZ R N :=
+  { head := B.head, jump := B.jump, start := B.start,
+    init := Has.pre (l1 := initHead) (l2 := [.ins ⟨.ret, []⟩]) B.init,
+    zero := B.zero, ram := B.ram, ramSize := B.ramSize, n2 := B.n2, lo := B.lo, hi := B.hi, stackLo := B.stackLo,
+    stackHi := B.stackHi, size := B.size }
+
+/-- **Start-up, to the return of `rt_zero`**: from reset the CPU gets back into `rt_init` after its call of
+`rt_zero` — the RAM in use zero, the rest of memory below the stack as it was, the return address of
+`rt_init` in the last two bytes (a `ret` from there, with them unchanged, goes to the item after the call
+of `rt_init`). -/
+theorem boot_zeroed (ok : Z.OK) {kH kS kI kZ R N : Nat} (B : BootHead Z kH kS kI kZ R N) {s : Cpu}
     (hpc : s.pc.toNat = 0) (I : Img Z.a 0 s) (hh : s.halted = false) (hrs : s.ramStart.toNat = Z.ramStart)
     (hsz : s.mem.size = 65536) :
-    ∃ s', Steps s s' ∧ At Z.addrs (kS + 4) s' ∧ Img Z.a 0 s' ∧ s'.halted = false ∧
-      s'.ramStart.toNat = Z.ramStart ∧ s'.mem.size = 65536 ∧ s'.sp = 0 ∧
-      ∀ x, R ≤ x → x < R + N → s'.mem.get! x = 0 := by
+    ∃ s7 c3 : Cpu, Steps s s7 ∧ At Z.addrs (kI + 4) s7 ∧ Mach Z s7 ∧ s7.sp.toNat = 65534 ∧
+      s7.ramStart.toNat = Z.ramStart ∧ s7.mem.size = 65536 ∧
+      (∀ x, R ≤ x → x < R + N → s7.mem.get! x = 0) ∧
+      (∀ x, x < R ∨ R + N ≤ x → x < 65532 → s7.mem.get! x = s.mem.get! x) ∧
+      (∀ x, 65534 ≤ x → s7.mem.get! x = c3.mem.get! x) ∧
+      (∀ s' : Cpu, s'.pc.toNat = IR.Sem.rd c3.mem 65534 2 → At Z.addrs (kS + 4) s') := by
   have hstk := ok.stack
   have hlo := B.lo
   have hhi := B.hi
@@ -829,31 +865,46 @@ theorem boot_ok (ok : Z.OK) {kH kS kI kZ R N : Nat} (B : BootNeed Z kH kS kI kZ 
   obtain ⟨s7, sr, st7, Mr, hspr, hrsr, hszr, hpc7, hsp7, hmem7, hh7, hrs7, hzero, hkeep⟩ :=
     rt_zero_ok ok B.zero ⟨I6, hh6⟩ ⟨TZ, hTZ, hpc6⟩ (by rw [hrs6]; exact hrs5) (by rw [cs6.size]; exact hsz5)
       (by rw [hl_congr cs6.h cs6.l]; exact hhl5) (by rw [bc_congr cs6.b cs6.c]; exact hbc5) hn2 hlo (by omega)
-  -- back in rt_init: ret
   have hsr : sr.sp.toNat = 65532 := by rw [hspr]; exact hsp6
   have at7 : At Z.addrs (kI + 4) s7 := hback6 s7 (by
     rw [hpc7, cpu_rd16 _ _ (by rw [hsr]; omega), hsr, hsp5]
     exact rd_congr _ _ _ _ (by omega) (fun x h1 h2 => hkeep x (Or.inr (by omega))))
   have M7 : Mach Z s7 := ⟨Mr.1.congr hrs7 hmem7, by rw [hh7]; exact Mr.2⟩
-  obtain ⟨s8, st8, hpc8, hsp8, hmem8, hh8, hrs8, _, _, _⟩ := ret_raw ok (B.init.get 4 rfl) M7 at7
   have hsp7' : s7.sp.toNat = 65534 := by
     rw [hsp7, UInt16.toNat_add, hsr]
     rfl
   have hmem78 : ∀ x, 65534 ≤ x → s7.mem.get! x = c3.mem.get! x := by
     intro x hx
     rw [hmem7, hkeep x (Or.inr (by omega)), cs6.mem x (Or.inr (by omega)), hS35.1]
-  refine ⟨s8, ((((((((st0.trans st1).trans st2).trans st3).trans st4).trans st5).trans st6).trans st7)).trans st8, ?_,
-    M7.1.congr hrs8 hmem8, by rw [hh8]; exact M7.2, ?_, by rw [hmem8, hmem7]; exact hszr, ?_, ?_⟩
+  refine ⟨s7, c3, ((((((st0.trans st1).trans st2).trans st3).trans st4).trans st5).trans st6).trans st7, at7, M7,
+    hsp7', ?_, by rw [hmem7]; exact hszr, fun x h1 h2 => by rw [hmem7]; exact hzero x h1 h2, fun x hx hx2 => ?_,
+    hmem78, hback3⟩
+  · rw [hrs7, hrsr, hrs6]
+    exact hrs5
+  · rw [hmem7, hkeep x hx, cs6.mem x (Or.inl (by rw [hsp5]; omega)), hS35.1, hmem3 x (by omega), hS02.1]
+
+/-- **Start-up**: from reset the CPU gets to the item after the call of
+`rt_init` (the head of the loop), its stack empty, the RAM in use zero. -/
+theorem boot_ok (ok : Z.OK) {kH kS kI kZ R N : Nat} (B : BootNeed Z kH kS kI kZ R N) {s : Cpu}
+    (hpc : s.pc.toNat = 0) (I : Img Z.a 0 s) (hh : s.halted = false) (hrs : s.ramStart.toNat = Z.ramStart)
+    (hsz : s.mem.size = 65536) :
+    ∃ s', Steps s s' ∧ At Z.addrs (kS + 4) s' ∧ Img Z.a 0 s' ∧ s'.halted = false ∧
+      s'.ramStart.toNat = Z.ramStart ∧ s'.mem.size = 65536 ∧ s'.sp = 0 ∧
+      ∀ x, R ≤ x → x < R + N → s'.mem.get! x = 0 := by
+  have hn2 := B.n2
+  obtain ⟨s7, c3, st7, at7, M7, hsp7', hrs7, hsz7, hzero, _, hmem78, hback3⟩ := boot_zeroed ok B.head' hpc I hh hrs hsz
+  obtain ⟨s8, st8, hpc8, hsp8, hmem8, hh8, hrs8, _, _, _⟩ := ret_raw ok (B.init.get 4 rfl) M7 at7
+  refine ⟨s8, st7.trans st8, ?_, M7.1.congr hrs8 hmem8, by rw [hh8]; exact M7.2, ?_, by rw [hmem8]; exact hsz7, ?_, ?_⟩
   · exact hback3 s8 (by
       rw [hpc8, cpu_rd16 _ _ (by rw [hsp7']; omega), hsp7']
       exact rd_congr _ _ _ _ (by omega) (fun x h1 h2 => hmem78 x h1))
-  · rw [hrs8, hrs7, hrsr, hrs6]
-    exact hrs5
+  · rw [hrs8]
+    exact hrs7
   · apply UInt16.toNat_inj.mp
     rw [hsp8, UInt16.toNat_add, hsp7']
     rfl
   · intro x h1 h2
-    rw [hmem8, hmem7]
+    rw [hmem8]
     exact hzero x h1 h2
 
 /-- **`di; halt`**: the CPU stops — halted, interrupts off, memory as it was. -/
