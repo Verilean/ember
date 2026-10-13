@@ -753,6 +753,10 @@ footprint (`ZCtx.wr`) has changed.
 | `rt_add32_ok`, `rt_sub32_ok` (`Z80Bytes.lean`) | `rt_add32` and `rt_sub32` from their items (`#guard`: the pieces of `Runtime.pieces`), with `HLApart`: after `or a` clears the carry, `adc`/`sbc` through the four bytes leave the sum, or the difference, modulo 2³² (`runB_add`, `runB_sub`: the carry, or borrow, of each byte goes into the next — `adc_val`, `adc_c`, `sbc_val`, `sbc_c`); no other byte changes, no stack is used.  Not yet used by a theorem of an image |
 | `rt_shr8_ok` (`Z80Bytes.lean`) | `rt_shr8` from its items (`#guard`: the piece of `Runtime.pieces`): `A` is shifted right by `B` — at once when `B` is zero (`inc b; dec b; ret z`), else `B` times `srl a` — with `HL` and memory as they were; no stack is used.  Not yet used by a theorem of an image |
 | `rt_cmp32_ok` (`Z80Bytes.lean`) | `rt_cmp32` from its items (`#guard`: the piece of `Runtime.pieces`), with `HLApart` and `2 ≤ rtK`: `Z` when the accumulator's four bytes are those at `HL`, `C` when they are less (`cmpB_spec`: the borrow through the bytes, the differences or-ed into `C`; `inc c; dec c` keeps the carry).  It keeps `AF` on the stack while it or-s a byte into `C` — the two bytes below the stack pointer, which is why the bytes at `HL` are to be out of the stack and the runtime to have two bytes of it — and writes nothing else.  Not yet used by a theorem of an image; the plans so far have `rtK = 0` (loopback harness, no wide routine) or a placeholder (board) |
+| `litB_sound`, `ImgIn.ok` (`Z80Image.lean`) | the literal pool of an image, checked: for every wide constant of the program the label of its literal is in the image below the RAM and the bytes the assembler put there are the constant's (`litB`, computed on the assembled bytes) — so `LitOK`, which the theorems about wide operands take.  `ImgIn.check` asks it of every literal (it used to ask that there be none) |
+| `Gens.prog`, `ImgIn.ok_parts` (`Z80ImageParts.lean`) | an image checked in parts: `pass1B`/`pass2B` run one pass of the generator on one function and compare what it gives with what is written (`FnPart`); chained along the program (`Gens`) they give `progEnvs` and `genProg` of it; with `okB` of the plan, `fnStaticB` of each function and what `partsCheck` computes of the assembled items, the conclusion of `ImgIn.ok`.  (The kernel cannot run the generator over the stack in one evaluation: it keeps the generator's states as unevaluated terms — over 40 GB, stopped.  A function at a time it can: at most about 11 GB, for the 170 instructions of `tcp_segment`) |
+| `gens_ok`, `img_ok` (`Z80StackIR.lean`, `Z80StackHItems.lean`, `Z80StackHGen.lean`, `Z80StackHPlan.lean`) | the SLIP build of the stack for the test harness, without the passes on the assembly: its IR (1073 instructions, 35 functions) and the 2924 items of its image written out (`#guard`: they are what `IR.lower` and `build` give, and the layout is `build`'s); by the kernel, 70 passes of the generator, `okB`, 35 `fnStaticB`, the assembly, the labels, the six literals of the pool, the symbols, the generated items in place: the setting of the proofs holds of the image (`ZCtx.OK`, with `rtK = 2`) and, given `RtOK`, every function does what the IR's does |
+| **`stackH_ok`** (`Z80StackH.lean`, `Z80HarnessW.lean`) | the image of the stack for the test harness: every function, entered as `Entry` says, returns as `IR.Sem.callF` does with the machine of the harness standing for the world it leaves, or reaches `rt_trap` — **with nothing taken of the runtime**: the fifteen routines its functions call (`calls_eq`: `rt_ld32`, `rt_st32`, `rt_acc_a`, `rt_acc_hl`, `rt_add32`, `rt_sub32`, `rt_or32`, `rt_cmp32`, `rt_shr8`, `rt_not16`, `rt_input`, `rt_out_byte`, `rt_out_end`, `rt_drop`, `rt_note`) are the proved ones, found in the image at their places (`rtCheck`, by the kernel).  **Of the functions only**: start-up (which copies the initial values of the variables), the loop that calls `main`, and the composition with `stack_ir` and the Spec are not in it — this image is not run from reset in any theorem |
 
 **Checked, not proved** (translation validation, on every function
 generated): `jumpsOk` — what the generator assumes the registers hold
@@ -782,12 +786,16 @@ stack.  Without it the specifications were not true of the routines
 go; `rt_cmp32` pushes; `rt_st32` could write its own return address);
 the generated code is shown to call them so (`ptr_ok`: a wide operand
 is in the literal pool, in a shared slot or in a temporary's slot).
-Proved so far: `rt_bound`, and the four effect
-routines of the test harness (`Z80Rt.lean`); the board's routines (the
-ring filled by the interrupt routine) need interrupts in the machine of
-the proofs, which it does not have — `WSteps` runs instructions only —
-and the arithmetic and accumulator routines are tested (`rt-check`),
-not proved.
+Proved from their items: `rt_bound`, `rt_not16`, `rt_shr8`, the
+routines on the accumulator (`rt_ld32`, `rt_st32`, `rt_acc_a`,
+`rt_acc_hl`, `rt_add32`, `rt_sub32`, `rt_or32`, `rt_cmp32`) and the five
+effect routines of the test harness — every routine the functions of
+the stack's image for the harness call (`stackH_ok` takes none).  Not
+proved, tested only (`rt-check`): multiplication, division, the other
+shifts, `rt_neg16`, `and`/`xor` on the accumulator, the eight-byte
+routines.  The board's routines (the ring filled by the interrupt
+routine) need interrupts in the machine of the proofs, which it does
+not have — `WSteps` runs instructions only.
 
 **Two changes to the generator the proofs asked for** (the images
 changed; the tests and the size gate pass):
@@ -818,10 +826,16 @@ a function of the world (`hbus`, `hdev`); `Ember.Z80.Machine` — the
 machine the tests run — steps as it does (`step_sim`), so the statement
 is also of `Machine.step` from the machine as the tests build it
 (`loopH_halts`: it processes all its input and stops).  What the tests add around it is not in the theorem:
-`Target.runHarness` (its loop until `halted`, the printing of the trace).  Of the SLIP build, the checks of the
-layout pass (`#guard`, not the kernel), and nothing is connected to its
-image yet (it has wide constants: the literal pool; and 1073
-instructions to run the checks on in the kernel).  Of the images as
+`Target.runHarness` (its loop until `halted`, the printing of the trace).  Of the SLIP build of the stack, for the
+test harness and without the passes: `stackH_ok` — every function of
+the image does what the IR's does, nothing assumed of the program, the
+layout, the image or the runtime (the literal pool and the checks of
+the 1073 instructions are computed by the kernel, a function at a
+time).  That is of the functions: from reset — start-up with the copy
+of the initial values, the harness's loop, and so the composition with
+`stack_ir` (the IR against the Spec) and with `Machine.step` — nothing
+is proved of this image yet.  For the board the checks of its layout
+pass (`#guard`, not the kernel) and its image is not connected.  Of the images as
 built by default nothing is proved: `build` runs `retThreading`,
 `sweep`, `peephole`, `packHigh` and `relax` over the items, 303 bytes
 of 7159 in the SLIP build; `ember-z80 own-build --plain` is the image
@@ -838,14 +852,19 @@ all 79 of the loopback program's, 1559 of the 1562 of the Ethernet
 builds'.  **Not covered:** shifts by a variable, `zero`, `not`/`neg`
 and memory through an address on four bytes, values of eight bytes, the
 MMIO effects and `input.frame`, an address through a pointer
-(by-reference parameters).  Of the runtime: the arithmetic and shift
-routines, the routines on the accumulator, `rt_note`, the MMIO routines,
-and everything of the board's runtime (its effects, start-up, the
-interrupt routine and the ring) — proved are `rt_bound`, the harness's
-four effect routines, `rt_zero`, and the harness's start-up and loop.
-Of the images: the SLIP build's (its plan passes the checks, by
-`#guard`; its image is not connected), the board's loopback image
-beyond its functions, and every image as built by default — the passes
+(by-reference parameters).  Of the runtime: multiplication, division,
+the shifts but `rt_shr8`, `rt_neg16`, `and`/`xor` and the eight-byte
+routines on the accumulator, the MMIO routines, and everything of the
+board's runtime (its effects, start-up, the interrupt routine and the
+ring) — proved are `rt_bound`, `rt_not16`, `rt_shr8`, the routines on
+four bytes of the accumulator the stack calls, the harness's five effect
+routines, `rt_zero`, and the harness's start-up and loop for the
+loopback image.
+Of the images: the stack's for the harness from reset (its functions
+are proved, `stackH_ok`; start-up with the copy of the initial values
+and the loop are not), the stack's for the board (its plan passes the
+checks, by `#guard`; its image is not connected), the board's loopback
+image beyond its functions, and every image as built by default — the passes
 on the assembly (`retThreading`, `sweep`, `peephole`, `packHigh`,
 `relax`) are not proved.  Interrupts are not in the machine of the
 proofs.

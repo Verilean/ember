@@ -10,8 +10,9 @@ them: the environments the functions are generated in, `okB` and
 `fnStaticB` of the plan made for them, that the assembler accepts the
 items, that the items `genProg` gives are among them, the plan's labels,
 the symbols of the areas and of the accumulator (where an instruction
-names it), that the image is below 64 K.  The program has no wide
-constant (the literal pool is not checked yet).
+names it), that the image is below 64 K, and that every wide constant
+of the program is in the literal pool: its label is there, below the
+RAM, and the bytes the assembler put at it are the constant's (`litB`).
 
 `ImgIn.ok`: when the check passes (for a term, by the kernel), the
 setting of the proofs holds of the image (`ZCtx.OK`) for any machine
@@ -68,11 +69,54 @@ def noAcc : Item → Bool
      | _ => true)
   | _ => true
 
+/-- `n` bytes of the image at `ad`, little-endian (none past its end). -/
+def rdImg (b : ByteArray) (ad : Nat) : Nat → Option Nat
+  | 0 => some 0
+  | n + 1 =>
+    match b.data[ad]?, rdImg b (ad + 1) n with
+    | some x, some r => some (x.toNat + 256 * r)
+    | _, _ => none
+
+/-- The constant `l.2` of `l.1` bytes is in the pool of the image: its label, below the RAM, its bytes. -/
+def litB (a : Assembled) (ramStart : Nat) (l : Nat × Nat) : Bool :=
+  match a.labels.reverse.lookup s!"lit{bits l.1}_{l.2 % 2 ^ bits l.1}" with
+  | some ad => decide (ad + l.1 ≤ ramStart) && decide (ad + l.1 ≤ 65536) &&
+      rdImg a.bytes ad l.1 == some (l.2 % 2 ^ (8 * l.1))
+  | none => false
+
+theorem rdImg_rd {b : ByteArray} {m : ByteArray} (hm : ∀ x y, b.data[x]? = some y → m.get! x = y) :
+    ∀ (n ad r : Nat), rdImg b ad n = some r → ad + n ≤ 65536 → IR.Sem.rd m ad n = r
+  | 0, ad, r, h, _ => by
+    simp only [rdImg, Option.some.injEq] at h
+    rw [← h]; rfl
+  | n + 1, ad, r, h, hle => by
+    unfold rdImg at h
+    cases hx : b.data[ad]? with
+    | none => rw [hx] at h; cases h
+    | some x =>
+      cases hr : rdImg b (ad + 1) n with
+      | none => rw [hx, hr] at h; cases h
+      | some r' =>
+        rw [hx, hr] at h
+        simp only [Option.some.injEq] at h
+        rw [← h, IR.Sem.rd, Nat.mod_eq_of_lt (by omega), hm ad x hx, rdImg_rd hm n (ad + 1) r' hr (by omega)]
+
+theorem litB_sound (P : Plan) (M : Around) {r : Nat} (hr : P.ramStart = r) (n v : Nat)
+    (h : litB M.a r (n, v) = true) : LitOK (P.toZ M) n v := by
+  subst hr
+  unfold litB at h
+  cases hl : M.a.labels.reverse.lookup s!"lit{bits n}_{v % 2 ^ bits n}" with
+  | none => simp only [hl] at h; cases h
+  | some ad =>
+    simp only [hl, Bool.and_eq_true, decide_eq_true_eq, beq_iff_eq] at h
+    obtain ⟨⟨h1, h2⟩, h3⟩ := h
+    exact ⟨ad, hl, h1, fun s hs => rdImg_rd (fun x y hxy => by simpa using hs.bytes x y hxy) _ _ _ h3 h2⟩
+
 def check (I : ImgIn) : Bool :=
   match progEnvs I.ir false (sharedBytes I.ir), genProg I.ir false (sharedBytes I.ir), assemble I.items with
   | .ok envs, .ok c, .ok a =>
     let P := mkPlan (I.planIn envs)
-    planCheck (I.planIn envs) && (P.labels.all fun l => I.items.any (isLab l)) && P.lits.isEmpty &&
+    planCheck (I.planIn envs) && (P.labels.all fun l => I.items.any (isLab l)) && P.lits.all (litB a I.ramStart) &&
     (I.layout.globals.all fun e => a.labels.reverse.lookup (areaSym (.global e.1)) == some e.2) &&
     (I.layout.frames.all fun e => a.labels.reverse.lookup (areaSym (.frame e.1)) == some e.2) &&
     decide ((I.items.drop I.genOff).take c.items.length = c.items) &&
@@ -116,8 +160,7 @@ theorem ok (I : ImgIn) (h : I.check = true) :
       | ok a =>
         rw [he, hg, ha] at h
         have henvs : I.envs = es := by unfold envs; rw [he]
-        simp only [Bool.and_eq_true, List.all_eq_true, decide_eq_true_eq, beq_iff_eq, Bool.or_eq_true,
-          List.isEmpty_iff] at h
+        simp only [Bool.and_eq_true, List.all_eq_true, decide_eq_true_eq, beq_iff_eq, Bool.or_eq_true] at h
         obtain ⟨⟨⟨⟨⟨⟨⟨hplan, hlab⟩, hlits⟩, hglob⟩, hfr⟩, hsub⟩, hacc⟩, hsize⟩ := h
         obtain ⟨addrs, hpl⟩ := placed_of_assemble ha
         refine ⟨a, addrs, rfl, hsize, fun W bus dev wrel quiet => ?_⟩
@@ -142,9 +185,14 @@ theorem ok (I : ImgIn) (h : I.check = true) :
             · rw [List.getElem?_eq_none h'] at hj; cases hj
           rw [← hsub, List.getElem?_take_of_lt hlt, List.getElem?_drop] at hj
           exact hj
+        have hram : (mkPlan (I.planIn es)).ramStart = I.ramStart := rfl
+        have hLits : Lits (mkPlan (I.planIn es)) (I.around a addrs W bus dev wrel) := by
+          intro n v hv
+          have h1 : litB a I.ramStart (n, v) = true := hlits (n, v) hv
+          exact litB_sound (mkPlan (I.planIn es)) (I.around a addrs W bus dev wrel) hram n v h1
         exact prog_ok (Z := (mkPlan (I.planIn es)).toZ (I.around a addrs W bus dev wrel)) hok hrt (ann := false)
           hg hitems he (planCheck_static hplan _ (fun l hl => mem_label (hlab l hl))
-            (fun n v hv => by rw [hlits] at hv; cases hv))
+            hLits)
 
 end ImgIn
 

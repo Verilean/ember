@@ -113,6 +113,13 @@ import Ember.Proof.Z80Boot
 import Ember.Proof.Z80Note
 import Ember.Proof.Z80Wide
 import Ember.Proof.Z80Bytes
+import Ember.Proof.Z80HarnessW
+import Ember.Proof.Z80ImageParts
+import Ember.Proof.Z80StackIR
+import Ember.Proof.Z80StackHItems
+import Ember.Proof.Z80StackHGen
+import Ember.Proof.Z80StackHPlan
+import Ember.Proof.Z80StackH
 import Ember.Proof.Z80World
 import Ember.Proof.Z80Image
 import Ember.Proof.Z80LoopHItems
@@ -249,9 +256,17 @@ The Z80 back end (M7, begun) — `Ember.Z80.IR.Sem` is the semantics of its IR:
   image, loaded and run as the tests do, processes all its input and stops with the world the Ember
   semantics has** (`loopH_spec_halt`, `loopH_halts`).
 
-By-reference parameters and `inlineCalls` are outside M7.1; of `IR → Z80` (M7.3) not proved: the other
-routines of the runtime (`RtOK`, taken where the image calls them); interrupts and the board's start-up; the passes on the assembly (the images as built by
-default); start-up, the interrupt routine and the main loop; the SLIP build's image.
+* `Z80Note`, `Z80Wide`, `Z80Bytes`: the harness's `rt_note`, and the routines on the accumulator, `rt_shr8`,
+  proved from their items;
+* `Z80HarnessW`, `Z80ImageParts`, `Z80StackIR`, `Z80StackHItems`, `Z80StackHGen`, `Z80StackHPlan`, `Z80StackH`:
+  **the image of the stack (SLIP build) for the harness** — the literal pool checked, the generator run by
+  the kernel a function at a time: every function does what the IR's does, nothing taken of the runtime
+  (`stackH_ok`).  Of the functions only: not from reset.
+
+By-reference parameters and `inlineCalls` are outside M7.1; of `IR → Z80` (M7.3) not proved: the routines
+of the runtime the stack's image for the harness does not call; interrupts and the board's runtime and
+start-up; the passes on the assembly (the images as built by default); for the stack's image, start-up
+(the copy of the initial values), the loop that calls `main`, and the composition with the Spec.
 
 Every statement is about the definitions of `Ember.Spec` as they are;
 `Ember/Proof/README.md` lists the theorems, the hypotheses they need and
