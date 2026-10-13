@@ -384,6 +384,176 @@ def inRuntime (items : List Item) : Bool :=
 #guard inRuntime ldItems
 #guard inRuntime stItems
 
+/-! ## The accumulator from a register -/
+
+/-- `ld (name+off),hl`, in RAM: the word of `HL` is there, the rest as it was. -/
+theorem ld_cell_hl (ok : Z.OK) {k A : Nat} {name : String} (off : Nat)
+    (hk : Z.items[k]? = some (.ins ⟨.ld, [.mem (.sym name (Int.ofNat off)), .hl]⟩)) (hsym : Z.sym name A)
+    (hram : Z.ramStart ≤ A + off) (hA : A + off + 2 ≤ 65536) {s : Cpu} (M : Mach Z s)
+    (hrs : s.ramStart.toNat = Z.ramStart) (hat : At Z.addrs k s) :
+    ∃ s', Steps s s' ∧ At Z.addrs (k + 1) s' ∧ Mach Z s' ∧ s'.mem = IR.Sem.wr s.mem (A + off) 2 s.hl.toNat ∧
+      s'.ramStart = s.ramStart ∧ s'.halted = s.halted ∧ s'.sp = s.sp ∧ s'.hl = s.hl := by
+  obtain ⟨ad, had, hpc⟩ := hat
+  have hnn : (Instr.immW (Z.a.env ad) ⟨.ld, [.mem (.sym name (Int.ofNat off)), .hl]⟩).toNat = A + off :=
+    immW_toNat _ _ _ _ rfl (sym_val_off ad off hsym) (by omega)
+  have hnn1 : (Instr.immW (Z.a.env ad) ⟨.ld, [.mem (.sym name (Int.ofNat off)), .hl]⟩ + 1).toNat = A + off + 1 := by
+    rw [UInt16.toNat_add, hnn]
+    show (A + off + 1) % 65536 = _
+    omega
+  obtain ⟨c1, hc1⟩ : ∃ c1 : Cpu, c1 = ((skip (op1 s) 2).wr16
+      (Instr.immW (Z.a.env ad) ⟨.ld, [.mem (.sym name (Int.ofNat off)), .hl]⟩) (op1 s).hl).tick 16 := ⟨_, rfl⟩
+  obtain ⟨st, at'⟩ := step_raw ok hk M ⟨ad, had, hpc⟩ c1 (fun ad' had' inp => by
+    rw [had] at had'
+    cases had'
+    rw [hc1]
+    rfl) (by rw [hc1]; simp only [Cpu.wr16, skip, zsim])
+  have hset : c1.mem = (s.mem.set! (A + off) (s.hl.toUInt8)).set! (A + off + 1) ((s.hl >>> 8).toUInt8) := by
+    rw [hc1]
+    simp only [zsim, Cpu.wr16]
+    rw [cpu_wr_mem _ _ _ (by simp only [zsim]; rw [hnn1, hrs]; omega),
+      cpu_wr_mem _ _ _ (by simp only [zsim]; rw [hnn, hrs]; exact hram)]
+    simp only [zsim]
+    rw [hnn, hnn1]
+  have hmem : c1.mem = IR.Sem.wr s.mem (A + off) 2 s.hl.toNat := by
+    rw [hset]
+    have := s.hl.toNat_lt
+    refine wr_two _ _ _ (by omega) _ _ ?_ ?_
+    · rw [UInt16.toNat_toUInt8]
+    · rw [UInt16.toNat_toUInt8, UInt16.toNat_shiftRight]
+      rw [show (8 : UInt16).toNat % 16 = 8 from rfl, Nat.shiftRight_eq_div_pow]
+  have hr1 : c1.ramStart = s.ramStart := by rw [hc1]; simp only [Cpu.wr16, skip, zsim]
+  have hh1 : c1.halted = s.halted := by rw [hc1]; simp only [Cpu.wr16, skip, zsim]
+  refine ⟨c1, st, at' rfl, ⟨⟨by rw [hr1]; exact M.1.rom, fun x b hx => ?_⟩, by rw [hh1]; exact M.2⟩, hmem, hr1, hh1,
+    by rw [hc1]; simp only [Cpu.wr16, skip, zsim], ?_⟩
+  · have hlt : x < Z.a.bytes.size := by
+      rcases Nat.lt_or_ge x Z.a.bytes.data.size with h' | h'
+      · exact h'
+      · rw [Array.getElem?_eq_none h'] at hx; cases hx
+    have hrom := M.1.rom
+    have hb := M.1.bytes x b hx
+    rw [Nat.zero_add] at hb ⊢
+    rw [hset, getBang_set _ _ _ _ (by omega), getBang_set _ _ _ _ (by omega)]
+    exact hb
+  · rw [hc1]
+    show mk16 _ _ = mk16 _ _
+    simp only [Cpu.wr16, skip, zsim]
+
+/-- The items of `rt_acc_a`, `rt_acc_hl` and `rt_zx32`. -/
+def accItems : List Item :=
+  [.label "rt_acc_a", .ins ⟨.ld, [.l, .a]⟩, .ins ⟨.ld, [.h, .imm (.num 0)]⟩,
+   .label "rt_acc_hl", .ins ⟨.ld, [.mem (.sym "rt_acc" 0), .hl]⟩, .ins ⟨.ld, [.hl, .imm (.num 0)]⟩,
+   .ins ⟨.ld, [.mem (.sym "rt_acc" 2), .hl]⟩,
+   .label "rt_zx32", .ins ⟨.ld, [.hl, .imm (.num 0)]⟩, .ins ⟨.ld, [.mem (.sym "rt_acc" 4), .hl]⟩,
+   .ins ⟨.ld, [.mem (.sym "rt_acc" 6), .hl]⟩, .ins ⟨.ret, []⟩]
+
+/-- From `rt_acc_hl` on: the accumulator's eight bytes are `HL`, nothing else is written. -/
+theorem acc_core (ok : Z.OK) {k : Nat} (hhas : Has Z k accItems) {s : Cpu} (M : Mach Z s)
+    (hat : At Z.addrs (k + 4) s) (hrs : s.ramStart.toNat = Z.ramStart) (hmsz : s.mem.size = 65536)
+    (hlo : Z.stackLo ≤ s.sp.toNat) (hhi : s.sp.toNat + 2 ≤ Z.stackHi) :
+    ∃ s', Steps s s' ∧ s'.pc = s.rd16 s.sp ∧ s'.sp = s.sp + 2 ∧ s'.halted = false ∧ s'.ramStart = s.ramStart ∧
+      s'.mem.size = 65536 ∧ IR.Sem.rd s'.mem Z.acc 8 = s.hl.toNat ∧
+      ∀ x, x < Z.acc ∨ Z.acc + 8 ≤ x → s'.mem.get! x = s.mem.get! x := by
+  have hacc : Z.sym "rt_acc" Z.acc := ok.accSym ⟨k + 4, _, 0, hhas.get 4 rfl, rfl⟩
+  have hram := ok.accRam
+  have hstk := ok.stack
+  have hacs := ok.accStack
+  obtain ⟨c1, st1, at5, M1, hm1, hr1, hh1, hsp1, hhl1⟩ := ld_cell_hl ok 0 (hhas.get 4 rfl) hacc (by omega) (by omega) M hrs hat
+  obtain ⟨c2, ad2, _, st2, at6, M2, hS2, hhl2, _, _, _⟩ := ld_hl_imm ok (hhas.get 5 rfl) M1 at5
+  have hz2 : c2.hl.toNat = 0 := by rw [hhl2]; exact immW_toNat _ _ _ 0 rfl rfl (by decide)
+  obtain ⟨c3, st3, at7, M3, hm3, hr3, hh3, hsp3, hhl3⟩ := ld_cell_hl ok 2 (hhas.get 6 rfl) hacc (by omega) (by omega) M2
+    (by rw [hS2.2.1, hr1]; exact hrs) at6
+  have at8 := at_label ok (hhas.get 7 rfl) at7
+  obtain ⟨c4, ad4, _, st4, at9, M4, hS4, hhl4, _, _, _⟩ := ld_hl_imm ok (hhas.get 8 rfl) M3 at8
+  have hz4 : c4.hl.toNat = 0 := by rw [hhl4]; exact immW_toNat _ _ _ 0 rfl rfl (by decide)
+  obtain ⟨c5, st5, at10, M5, hm5, hr5, hh5, hsp5, hhl5⟩ := ld_cell_hl ok 4 (hhas.get 9 rfl) hacc (by omega) (by omega) M4
+    (by rw [hS4.2.1, hr3, hS2.2.1, hr1]; exact hrs) at9
+  obtain ⟨c6, st6, at11, M6, hm6, hr6, hh6, hsp6, hhl6⟩ := ld_cell_hl ok 6 (hhas.get 10 rfl) hacc (by omega) (by omega) M5
+    (by rw [hr5, hS4.2.1, hr3, hS2.2.1, hr1]; exact hrs) at10
+  obtain ⟨c', st7, hpc', hsp', hmem', hh', hrs', _, _, _⟩ := ret_raw ok (hhas.get 11 rfl) M6 at11
+  have hmem : c6.mem = IR.Sem.wr (IR.Sem.wr (IR.Sem.wr (IR.Sem.wr s.mem (Z.acc + 0) 2 s.hl.toNat) (Z.acc + 2) 2 0)
+      (Z.acc + 4) 2 0) (Z.acc + 6) 2 0 := by
+    rw [hm6, hhl5, hz4, hm5, hz4, hS4.1, hm3, hz2, hS2.1, hm1]
+  have hsp : c6.sp = s.sp := by rw [hsp6, hsp5, hS4.2.2.2, hsp3, hS2.2.2.2, hsp1]
+  have hfar : ∀ x, x < Z.acc ∨ Z.acc + 8 ≤ x → c6.mem.get! x = s.mem.get! x := by
+    intro x hx
+    rw [hmem, wr_get_far _ _ _ _ _ (by omega) (by omega), wr_get_far _ _ _ _ _ (by omega) (by omega),
+      wr_get_far _ _ _ _ _ (by omega) (by omega), wr_get_far _ _ _ _ _ (by omega) (by omega)]
+  have hv := s.hl.toNat_lt
+  refine ⟨c', ((((((st1.trans st2).trans st3).trans st4).trans st5).trans st6).trans st7), ?_, ?_, ?_, ?_, ?_, ?_, ?_⟩
+  · rw [hpc', hsp]
+    apply UInt16.toNat_inj.mp
+    rw [cpu_rd16 _ _ (by omega), cpu_rd16 _ _ (by omega)]
+    exact rd_congr _ _ _ _ (by omega) (fun x h1 h2 => hfar x (by omega))
+  · rw [hsp', hsp]
+  · rw [hh']
+    exact M6.2
+  · rw [hrs', hr6, hr5, hS4.2.1, hr3, hS2.2.1, hr1]
+  · rw [hmem', hmem]
+    simp only [wr_size]
+    exact hmsz
+  · rw [hmem', hmem]
+    rw [show (8 : Nat) = 2 + (2 + (2 + 2)) from rfl, rd_add, rd_add, rd_add]
+    rw [show Z.acc + 2 + 2 = Z.acc + 4 by omega, show Z.acc + 4 + 2 = Z.acc + 6 by omega]
+    rw [rd_wr_other _ _ _ _ _ 2 (by omega) (by omega) (by omega), rd_wr_other _ _ _ _ _ 2 (by omega) (by omega) (by omega),
+      rd_wr_other _ _ _ _ _ 2 (by omega) (by omega) (by omega),
+      rd_wr_other _ _ _ _ (Z.acc + 2) 2 (by omega) (by omega) (by omega),
+      rd_wr_other _ _ _ _ (Z.acc + 2) 2 (by omega) (by omega) (by omega),
+      rd_wr_other _ _ _ _ (Z.acc + 4) 2 (by omega) (by omega) (by omega)]
+    rw [show Z.acc + 0 = Z.acc from rfl,
+      rd_wr _ _ _ _ (by rw [hmsz]; omega) (by rw [hmsz]; exact Nat.le_refl _),
+      rd_wr _ _ _ _ (by simp only [wr_size]; rw [hmsz]; omega)
+        (by simp only [wr_size]; rw [hmsz]; exact Nat.le_refl _),
+      rd_wr _ _ _ _ (by simp only [wr_size]; rw [hmsz]; omega)
+        (by simp only [wr_size]; rw [hmsz]; exact Nat.le_refl _),
+      rd_wr _ _ _ _ (by simp only [wr_size]; rw [hmsz]; omega)
+        (by simp only [wr_size]; rw [hmsz]; exact Nat.le_refl _)]
+    rw [Nat.mod_eq_of_lt (show s.hl.toNat < 2 ^ (8 * 2) from hv)]
+    simp
+  · intro x hx
+    rw [hmem']
+    exact hfar x hx
+
+#guard inRuntime accItems
+
+/-- **`rt_acc_hl`**: the accumulator is `HL`, zero-extended to its eight bytes. -/
+theorem rt_acc_hl_ok (ok : Z.OK) (hsz : Z.a.bytes.size < 65536) {k : Nat} (hhas : Has Z k accItems) :
+    RtAcc Z "rt_acc_hl" (fun _ => True) (fun s s' => IR.Sem.rd s'.mem Z.acc 8 = s.hl.toNat) := by
+  intro _
+  obtain ⟨T, hT, hsym, hTle⟩ := label_sym ok (hhas.get 3 rfl)
+  refine ⟨T, hsym, by omega, fun s hpc I hh hrs hmsz hlo hhi _ => ?_⟩
+  have at4 : At Z.addrs (k + 4) s := at_label ok (hhas.get 3 rfl) ⟨T, hT, hpc⟩
+  obtain ⟨c', st, hpc', hsp', hh', hrs', hsz', hv, hfar⟩ := acc_core ok hhas ⟨I, hh⟩ at4 hrs hmsz (by omega) hhi
+  exact ⟨c', st, hpc', hsp', hh', hrs', hsz', hv, fun x _ _ hx => hfar x hx⟩
+
+/-- **`rt_acc_a`**: the accumulator is `A`, zero-extended to its eight bytes. -/
+theorem rt_acc_a_ok (ok : Z.OK) (hsz : Z.a.bytes.size < 65536) {k : Nat} (hhas : Has Z k accItems) :
+    RtAcc Z "rt_acc_a" (fun _ => True) (fun s s' => IR.Sem.rd s'.mem Z.acc 8 = s.a.toNat) := by
+  intro _
+  obtain ⟨T, hT, hsym, hTle⟩ := label_sym ok (hhas.get 0 rfl)
+  refine ⟨T, hsym, by omega, fun s hpc I hh hrs hmsz hlo hhi _ => ?_⟩
+  have M : Mach Z s := ⟨I, hh⟩
+  have at1 : At Z.addrs (k + 1) s := at_label ok (hhas.get 0 rfl) ⟨T, hT, hpc⟩
+  obtain ⟨st1, at2, M1, hS1⟩ := does_raw ok does_ld_l_a (hhas.get 1 rfl) M at1
+  obtain ⟨st2, at3, M2, hS2⟩ := does_raw ok does_ld_h_0 (hhas.get 2 rfl) M1 at2
+  have at4 := at_label ok (hhas.get 3 rfl) at3
+  have hS : Sys s (ldH0 (ldRA 5 s)) := hS1.trans hS2
+  obtain ⟨c', st, hpc', hsp', hh', hrs', hsz', hv, hfar⟩ := acc_core ok hhas M2 at4 (by rw [hS.2.1]; exact hrs)
+    (by rw [hS.1]; exact hmsz) (by rw [hS.2.2.2]; omega) (by rw [hS.2.2.2]; exact hhi)
+  have hhl : (ldH0 (ldRA 5 s)).hl.toNat = s.a.toNat := by
+    rw [hl_toNat]
+    have e1 : (ldH0 (ldRA 5 s)).h = 0 := by simp only [ldH0, zsim]; rfl
+    have e2 : (ldH0 (ldRA 5 s)).l = s.a := by simp only [ldH0, ldRA, zsim]
+    rw [e1, e2]
+    show 0 * 256 + _ = _
+    omega
+  refine ⟨c', (st1.trans st2).trans st, ?_, ?_, hh', ?_, hsz', ?_, fun x _ _ hx => ?_⟩
+  · rw [hpc', rd16_sys hS]
+  · rw [hsp', hS.2.2.2]
+  · rw [hrs', hS.2.1]
+  · show IR.Sem.rd c'.mem Z.acc 8 = s.a.toNat
+    rw [hv, hhl]
+  · rw [hfar x hx, hS.1]
+
 end
 
 end Ember.Proof.Z80Gen
