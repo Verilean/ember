@@ -11,7 +11,7 @@
  * row that consume nothing, as `Ember.Lang.runMachine` does), and writes
  * the same trace the interpreter writes: every input line followed by
  * the events attributed to it.  A trap is reported as a final
- * `note trap ...` line and exit status 3.
+ * `note trap (...)` line and exit status 3.
  *
  * EMBER_TRACE=0 omits drop/note lines; 2 (default) keeps them. */
 #define _POSIX_C_SOURCE 200809L
@@ -229,7 +229,7 @@ static int run_one(unsigned k, const char *in_path, FILE *o) {
       else print_line(o, i, "note", evs[e].text);
     }
   }
-  if (trapped) { char r[600]; snprintf(r, sizeof r, "trap %s", trap_msg); print_line(o, cur, "note", r); }
+  if (trapped) { char r[600]; snprintf(r, sizeof r, "trap (%s)", trap_msg); print_line(o, cur, "note", r); }
   for (size_t e = 0; e < nevs; e++) { free(evs[e].text); free(evs[e].b); }
   for (size_t i = 0; i < nins; i++) free(ins[i].b);
   return trapped ? 3 : 0;

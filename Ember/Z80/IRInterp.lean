@@ -204,7 +204,7 @@ def run (lp : Lang.Prog) (inputs : Array Input) (header : Header := { impl := "i
     lines := lines.push ⟨i, match w.inputs[i]! with | .rx b => .rx b | .tick => .tick⟩
     for (k, e) in w.events do
       if k == i then lines := lines.push ⟨i, e⟩
-  if let some e := trapped then lines := lines.push ⟨w.cur, .note s!"trap {e}"⟩
+  if let some e := trapped then lines := lines.push ⟨w.cur, .note (trapNote e)⟩
   return { header, lines }
 
 end Ember.Z80.IR

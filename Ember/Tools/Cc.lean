@@ -67,7 +67,7 @@ def run (exe : System.FilePath) (k : Nat) (inputs : System.FilePath) : IO (Trace
 def writeInputs (p : System.FilePath) (h : Header) (inputs : Array Input) : IO Unit :=
   IO.FS.writeFile p (Trace.ofSteps h (inputs.map (·, []))).print
 
-/-- Did a run end in a trap?  (Its last line is `note trap …`, which is
+/-- Did a run end in a trap?  (Its last line is `note trap (…)`, which is
 not a note of the program: `Trace.isTrapNote`.) -/
 def trapped (t : Trace) : Bool :=
   match t.lines.back? with

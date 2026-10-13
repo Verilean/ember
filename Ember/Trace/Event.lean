@@ -46,15 +46,19 @@ def Event.kind : Event → String
   | .rx _ => "rx" | .tx _ => "tx" | .tick => "tick"
   | .pkt _ => "pkt" | .tcb _ => "tcb" | .drop _ => "drop" | .note _ => "note"
 
-/-- Is the text of a `note` that of a trap, not of a note of the program?
-A trap is written `trap` or `trap <where>`, differently by each
-implementation; a note of the program is `<name> <value>`, the value in
-decimal.  So `trapdoor 1` is a program's note, and so is `trap 1` (a
-note the program named `trap`): only `trap` alone, or followed by
-something that is not a number, is a trap. -/
+/-- The text of the `note` that ends the trace of a run that trapped:
+`trap`, or `trap (<where>)` in the implementation's own words. -/
+def trapNote (wher : String) : String :=
+  if wher.isEmpty then "trap" else s!"trap ({wher})"
+
+/-- Is the text of a `note` that of a trap (`trapNote`), not of a note
+of the program?  A note of the program is `<name> <value>` with the
+value in decimal, whatever its name — any string, spaces and
+parentheses included — so its text ends in a digit; a trap's is `trap`
+or ends in `)`.  The two cannot be confused: `trap counter 42`,
+`trapdoor 1`, `trap 1` and `trap (z80) 7` are notes of a program. -/
 def isTrapNote (s : String) : Bool :=
-  s == "trap" || (s.startsWith "trap " &&
-    (let r := (s.drop 5).toString; r.isEmpty || !r.all Char.isDigit))
+  s == "trap" || (s.startsWith "trap (" && s.endsWith ")")
 
 structure Line where
   step : Nat

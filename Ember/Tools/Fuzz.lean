@@ -12,7 +12,7 @@ COUNT random programs (with random inputs) are emitted, compiled in
 batches of 100 with the host harness — strict warnings, `-O0` and `-O2`,
 UBSan and ASan — and their traces compared with the interpreter's:
 every line must agree — the program's notes with their values too —
-except the last line of a run that trapped (`note trap …`, which says
+except the last line of a run that trapped (`note trap (…)`, which says
 where in each implementation's own words), and a trap must happen in
 both or neither.  A diverging program is shrunk (statements removed, expressions
 replaced by operands) and printed, and saved under `Tests/Ember/regress/`.

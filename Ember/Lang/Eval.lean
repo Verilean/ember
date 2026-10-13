@@ -503,7 +503,7 @@ def runMachine (m : Machine) (header : Header) (fuel : Nat := 1000000) : Result 
     for (k, e) in w.events do
       if k == i then lines := lines.push ⟨i, e⟩
   if let some e := err then
-    lines := lines.push ⟨w.cur, .note s!"trap {e}"⟩
+    lines := lines.push ⟨w.cur, .note (trapNote (toString e))⟩
   return { trace := { header, lines }, error := err, machine := m }
 
 /-- Check and run a program on the inputs of a trace. -/

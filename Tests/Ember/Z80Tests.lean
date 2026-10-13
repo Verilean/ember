@@ -115,37 +115,72 @@ def ownExamples : IO Nat := do
 
 /-- Traces agree only when the program's notes do — names, values, how
 many — and the note of a trap, which each implementation words its own
-way, is the one line left out.  (A note whose name begins with `trap`
-is a note of the program.) -/
+way, is the one line left out.  A note of the program is never taken
+for a trap, whatever its name (`Trace.isTrapNote`): shown on made-up
+traces, and on a program whose note is named `trap counter`, run by the
+interpreter and by the own back end. -/
 def noteAgreeTests : IO Nat := do
   let tr (notes : List String) : Trace :=
     { lines := #[⟨0, .tick⟩] ++ (notes.map fun s => (⟨0, .note s⟩ : Line)).toArray }
   let agree (a b : List String) := Tools.Fuzz.agree (tr a) (tr b)
+  let trapped (s : String) := Tools.Cc.trapped (tr [s])
   let big := "tick 4294967295"
-  let cases : List (String × Bool) := [
+  -- names a program may give a note: none of them makes its note a trap
+  let names := ["trap", "trapdoor", "trapCount", "trap counter", "trap (z80)", "trap (", "trap ()", "trap (x) y",
+    "trap fn=main at stmt", "", " ", "trap "]
+  let namesOk := names.all fun n => [0, 1, 42, 4294967295].all fun (v : Nat) =>
+    !trapped s!"{n} {v}" && !agree [s!"{n} {v}"] [s!"{n} {v + 1}"] && agree [s!"{n} {v}"] [s!"{n} {v}"]
+  -- what the implementations write for a trap
+  let traps := [trapNote "", trapNote "z80", trapNote "sem", trapNote "trap", trapNote "out of fuel",
+    trapNote "fn=main at stmt 3 (x.lean:1:2): index 7 out of bounds [0, 4)", trapNote "index 3", trapNote "7",
+    trapNote "trap: index 7 out of bounds [0, 4) in f_1", trapNote "trap in main"]
+  let trapsOk := traps.all fun t => trapped t && traps.all fun u => agree ["tick 1", t] ["tick 1", u]
+  let mut cases : List (String × Bool) := [
     ("same note", agree ["tick 42"] ["tick 42"]),
     ("value differs", !agree ["tick 1"] ["tick 2"]),
     ("name differs", !agree ["tick 1"] ["tock 1"]),
     ("note missing", !agree ["tick 1"] []),
-    ("trapdoor is a note", !agree ["trapdoor 1"] ["trapdoor 2"] && !Tools.Cc.trapped (tr ["trapdoor 1"])),
-    ("trapCount is a note", !agree ["trapCount 1"] ["trapCount 2"] && !Tools.Cc.trapped (tr ["trapCount 1"])),
-    ("a note named trap is a note", !agree ["trap 1"] ["trap 2"] && !Tools.Cc.trapped (tr ["trap 1"])),
+    ("no name makes a note a trap", namesOk),
     ("several notes, the largest value", agree ["a 0", big, "b 7"] ["a 0", big, "b 7"]),
     ("several notes, one differs", !agree ["a 0", big, "b 7"] ["a 0", "tick 4294967294", "b 7"]),
     ("several notes, one missing", !agree ["a 0", big, "b 7"] ["a 0", "b 7"]),
     ("several notes, order", !agree ["a 0", "b 7"] ["b 7", "a 0"]),
-    ("a trap, worded differently", agree ["tick 1", "trap fn=main at stmt 3 (x.lean:1:2): index 7 out of bounds [0, 4)"]
-        ["tick 1", "trap (z80)"] && Tools.Cc.trapped (tr ["trap (z80)"]) && Tools.Cc.trapped (tr ["trap"]) &&
-        Tools.Cc.trapped (tr ["trap trap"]) && Tools.Cc.trapped (tr ["trap (sem)"])),
+    ("a trap, however worded", trapsOk),
     ("a trap after notes that differ", !agree ["tick 1", "trap (z80)"] ["tick 2", "trap (sem)"]),
     ("a trap against none", !agree ["tick 1", "trap (z80)"] ["tick 1"]),
+    ("a trap against a note that begins with trap", !agree ["trap (z80)"] ["trap (z80) 1"]),
     ("a trap is the last line only", !agree ["trap (z80)", "tick 1"] ["trap (sem)", "tick 1"])]
+  -- a program that type-checks, its note named `trap counter`
+  let p : Prog := { Examples.Constructs.prog with notes := ["trap counter"] }
+  let ins : Array Input := #[.tick]
+  let swap (t : Trace) : Trace :=
+    { t with lines := t.lines.map fun l => match l.ev with
+        | .note "trap counter 42" => { l with ev := .note "trap counter 99" }
+        | _ => l }
+  let hasNote (t : Trace) := t.lines.any fun l => match l.ev with | .note "trap counter 42" => true | _ => false
+  match p.check, Tools.Fuzz.interp p ins, Tools.Z80.ownRun p ins, IR.Sem.run p ins with
+  | .ok _, .ok it, .ok zt, .ok st =>
+    cases := cases ++ [
+      ("program: the note is there", hasNote it && hasNote zt && hasNote st),
+      ("program: not a trap", !Tools.Cc.trapped it && !Tools.Cc.trapped zt),
+      ("program: interpreter = own back end = IR semantics", Tools.Fuzz.agree it zt && Tools.Fuzz.agree it st),
+      ("program: another value is seen", !Tools.Fuzz.agree it (swap it) && !Tools.Fuzz.agree it (swap zt))]
+  | _, _, _, _ => cases := cases ++ [("program: checks and runs", false)]
+  -- and one that traps: every implementation's trace ends in a trap, and they agree
+  let q := Examples.Constructs.prog
+  let qins : Array Input := #[.rx (ByteArray.mk #[7])]
+  match Tools.Fuzz.interp q qins, Tools.Z80.ownRun q qins, IR.Sem.run q qins, IR.run q qins with
+  | .ok it, .ok zt, .ok st, .ok rt =>
+    cases := cases ++ [
+      ("a real trap: seen in all", [it, zt, st, rt].all Tools.Cc.trapped),
+      ("a real trap: they agree", [zt, st, rt].all (Tools.Fuzz.agree it))]
+  | _, _, _, _ => cases := cases ++ [("a real trap: runs", false)]
   let mut bad := 0
   for (n, okc) in cases do
     unless okc do
       bad := bad + 1
       IO.println s!"FAIL note agreement: {n}"
-  IO.println s!"trace agreement on notes: {cases.length} cases (values, names, missing notes, names beginning with trap, traps worded differently); {bad} failures"
+  IO.println s!"trace agreement on notes: {cases.length} cases (values, names, missing notes, any name against a trap, traps however worded, a program with a note named `trap counter`); {bad} failures"
   return bad
 
 /-- The static bound on the stack answers only for images of the shape
