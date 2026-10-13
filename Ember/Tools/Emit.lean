@@ -23,6 +23,9 @@ def registry : IO (List (String × Prog)) :=
   pure (Examples.all ++ [("net", Net.prog), ("sliploop", Net.Loop.prog),
     ("net-eth", Net.Eth.prog), ("net-eth-dhcp", Net.Eth.progDhcp)])
 
+/-- Programs of a test of the tools: emitted by name, without a golden file. -/
+def extra : List (String × Prog) := [("trapnote", Examples.TrapNote.prog)]
+
 def goldenDir : System.FilePath := "Tests/Ember/golden"
 
 def goldenPath (name : String) (p : Profile) : System.FilePath :=
@@ -48,7 +51,7 @@ def main (args : List String) : IO UInt32 := do
     | a :: r, _, p, e => go r (some a) p e
   let (name, prof, asEmber) := go args none .host64 false
   let some n := name | IO.eprintln s!"usage: ember-emit NAME [--profile P] [--ember] | --golden\nprograms: {progs.map (·.1)}"; return 2
-  let some prog := progs.lookup n | IO.eprintln s!"unknown program {n}; known: {progs.map (·.1)}"; return 2
+  let some prog := (progs ++ extra).lookup n | IO.eprintln s!"unknown program {n}; known: {progs.map (·.1)}"; return 2
   if asEmber then IO.println prog.pretty; return 0
   match emitFor prog prof with
   | .ok c => IO.print c; return 0

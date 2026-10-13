@@ -174,7 +174,9 @@ class Target:
                 events.append(("tx", self.take(int(l[3:]))))
             elif l.startswith("drop "):
                 events.append(("drop", l[5:]))
-            elif l.startswith("note trap") or l.startswith("# trap"):
+            elif l.startswith("# trap"):
+                # a trap of the CPU or of the program (ember_trap); a program's
+                # note named `trap` is a `note` line like any other
                 raise TargetError(l + self.context())
             elif l.startswith("note "):
                 events.append(("note", l[5:]))

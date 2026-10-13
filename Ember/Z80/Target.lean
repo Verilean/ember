@@ -40,9 +40,9 @@ def settle (m : Machine) (maxSteps : Nat) : Except String (Machine × List Event
   let (m, done) := m.runIdle maxSteps
   let (m', evs) ← collect m
   if !done then throw s!"not idle after {maxSteps} machine steps (pc={m.cpu.pc})"
-  -- the board writes `note trap` or `note trap <where>` on its debug port, and a program's note as
-  -- `note <name> <value>`: any note that begins with `trap` is taken for a trap here (an error, never a pass)
-  if evs.any (fun e => match e with | .note t => t == "trap" || t.startsWith "trap " | _ => false) then
+  -- the board writes `note trap` or `note trap (<where>)` on its debug port (`Trace.trapNote`), and a
+  -- program's note as `note <name> <value>`: a note named `trap`, or `trap counter`, is not a trap
+  if evs.any (fun e => match e with | .note t => isTrapNote t | _ => false) then
     throw s!"trap: {evs.filterMap fun e => match e with | .note t => some t | _ => none}"
   if m.dead then throw s!"the CPU halted with nothing able to wake it (pc={m.cpu.pc}, iff1={m.cpu.iff1})"
   return (m', evs)

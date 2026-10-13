@@ -183,6 +183,40 @@ def noteAgreeTests : IO Nat := do
   IO.println s!"trace agreement on notes: {cases.length} cases (values, names, missing notes, any name against a trap, traps however worded, a program with a note named `trap counter`); {bad} failures"
   return bad
 
+/-- On a board the notes and the trap come as lines of the debug port,
+through `Target.settle`: a note named `trap` or `trap counter` is a note
+(the image goes on), `note trap` and `note trap (<where>)` are the trap.
+On made-up lines, and on the image the own back end builds of
+`Examples.TrapNote` (`Runtime.board`), with and without the passes. -/
+def boardNoteTests : IO Nat := do
+  let settle (dbg : String) :=
+    Target.settle { cpu := { halted := true, iff1 := true }, dbg := dbg.toUTF8 } 1
+  let notes (dbg : String) : Option (List String) := match settle dbg with
+    | .ok (_, evs) => some (evs.filterMap fun e => match e with | .note t => some t | _ => none)
+    | .error _ => none
+  let mut cases : List (String × Bool) := [
+    ("a note named trap", notes "note trap 1\n" == some ["trap 1"]),
+    ("a note named trap counter", notes "note trap counter 5\n" == some ["trap counter 5"]),
+    ("notes named like the line of a trap", notes "note trap (z80) 0\nnote trap ( 65535\nnote trapdoor 3\n" ==
+      some ["trap (z80) 0", "trap ( 65535", "trapdoor 3"]),
+    ("a trap without its place", (notes "note trap\n").isNone),
+    ("a trap with its place", (notes "note trap (fn=main at stmt 3)\n").isNone),
+    ("a trap whose place ends in a digit", (notes "note trap (index 3)\n").isNone),
+    ("a trap after a note named trap", (notes "note trap 1\nnote trap\n").isNone)]
+  for passes in [true, false] do
+    match Tools.Z80.ownBoardImage "trapnote" 2 (passes := passes) with
+    | .error e => cases := cases ++ [(s!"own board image: {e}", false)]
+    | .ok img =>
+      let bad := Tools.Z80.trapNoteCheck (Tools.Z80.machineOf img) false
+      cases := cases ++ [(s!"own board image{if passes then "" else ", plain"}: {bad}", bad.isEmpty)]
+  let mut bad := 0
+  for (n, ok) in cases do
+    if !ok then
+      bad := bad + 1
+      IO.println s!"FAIL z80 board notes: {n}"
+  IO.println s!"z80 board notes and traps through Target.settle: {cases.length} cases, {bad} failures"
+  return bad
+
 /-- The static bound on the stack answers only for images of the shape
 it models: the counter-examples of the review (a jump to a label plus an
 offset, a stack pointer set elsewhere than at the top, an interrupt
@@ -225,6 +259,7 @@ def main : IO UInt32 := do
   let mut bad ← modelTests
   bad := bad + (← stackBoundTests)
   bad := bad + (← noteAgreeTests)
+  bad := bad + (← boardNoteTests)
   bad := bad + (← ownExamples)
   for t in ["sdcc", "make"] do
     if !(← Ember.Tests.TargetTests.installed t) then

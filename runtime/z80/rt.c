@@ -125,7 +125,8 @@ void ember_trap_terse(void) {
   dbg_str("note trap\n");
 #else
 void ember_trap(const char *where) {
-  dbg_str("note trap "); dbg_str(where); DBG = '\n';
+  /* `note trap (<where>)`: no note of a program has this form (a note ends in its value) */
+  dbg_str("note trap ("); dbg_str(where); dbg_str(")\n");
 #endif
   for (;;) { __asm__("di"); __asm__("halt"); }
 }

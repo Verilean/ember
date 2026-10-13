@@ -21,6 +21,10 @@ cmp -s $out/net.c Tests/Ember/golden/net.sdcc-z80.c || { echo "Tests/Ember/golde
 mk NAME=echo PROG=runtime/z80/echo.c
 mk NAME=sliploop PROG=$out/sliploop.c
 mk NAME=stack PROG=$out/net.c
+# notes named `trap` and `trap counter`, and a trap: with the place of the trap and without
+lake exe ember-emit trapnote --profile sdcc-z80 > $out/trapnote.c
+mk NAME=trapnote PROG=$out/trapnote.c
+mk NAME=trapnote-terse PROG=$out/trapnote.c DEFS=-DEMBER_TRAP_TERSE
 [ "$1" = build ] && exit 0
 
 # the model itself against z88dk-ticks, random instruction streams
@@ -33,6 +37,8 @@ else
 fi
 $z80 echo $out/echo.ihx
 $z80 slip $out/sliploop.ihx
+$z80 trap-note $out/trapnote.ihx
+$z80 trap-note-terse $out/trapnote-terse.ihx
 $z80 replay $out/stack.ihx Tests/Ember/corpus Tests/Ember/regress
 # generated sessions the Spec and the interpreter agree on
 gen=$out/sessions
@@ -47,6 +53,8 @@ $z80 ir-fuzz ${OWNFUZZ:-2000}
 $z80 own-fuzz ${OWNFUZZ:-2000}
 $z80 own-build sliploop --out $out
 $z80 slip $out/sliploop-own.ihx
+$z80 own-build trapnote --trace 2 --out $out
+$z80 trap-note-terse $out/trapnote-own.ihx
 $z80 own-build net --out $out
 $z80 replay $out/net-own.ihx Tests/Ember/corpus Tests/Ember/regress
 $z80 replay $out/net-own.ihx $gen

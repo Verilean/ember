@@ -610,13 +610,63 @@ def ownBoardImage (name : String) (trace : Nat) (annotate := false) (passes := t
   let prog ← match name with
     | "net" => pure Net.prog
     | "sliploop" => pure Net.Loop.prog
-    | n => throw s!"own-build: unknown program {n} (net, sliploop)"
+    | "trapnote" => pure Lang.Examples.TrapNote.prog
+    | n => throw s!"own-build: unknown program {n} (net, sliploop, trapnote)"
   let p ← match prog.check with
     | .ok p => pure p
     | .error e => throw e.toString
   let (_, reserved) := Runtime.boardCells 0x8000
   Codegen.build (← IR.lower p) (Runtime.board trace p.dropReasons p.notes) (Runtime.boardHead 0x8000)
     (reserved := reserved) (annotate := annotate) (passes := passes)
+
+/-- A board image of `Examples.TrapNote` on the model, through `Target`:
+its notes, named `trap` and `trap counter`, come out as notes and stop
+nothing; the byte `!` traps, and the line of the trap is a trap
+(`Trace.isTrapNote`) — `trap (<where>)` when the image names the place
+(`place`), `trap` otherwise.  The failures. -/
+def trapNoteCheck (m : Machine) (place : Bool) : List String := Id.run do
+  let bytes (l : List UInt8) : Input := .rx (ByteArray.mk l.toArray)
+  let notes (evs : List Event) := evs.filterMap fun e => match e with | .note t => some t | _ => none
+  let m0 ← match Target.boot m with
+    | .ok m => pure m
+    | .error e => return [s!"boot: {e}"]
+  let mut bad : List String := []
+  -- the notes of the program
+  let want := ["trap 5", "trap counter 517", "trap 7", "trap counter 519"]
+  match Target.feed m0 (bytes [5, 7]) with
+  | .ok (_, evs) =>
+    if notes evs != want || evs.length != want.length then bad := bad ++ [s!"notes: {notes evs}, expected {want}"]
+  | .error e => bad := bad ++ [s!"the notes of the program stopped the image: {e}"]
+  -- the trap: the line the image writes
+  let (mt, done) := (m0.send (ByteArray.mk #[0x21])).runIdle
+  match Target.collect mt with
+  | .ok (_, evs) =>
+    let ok := match notes evs with
+      | [t] => isTrapNote t && (if place then t.startsWith "trap (" && t.length > 7 else t == "trap")
+      | _ => false
+    if !done || !ok || evs.length != 1 then
+      bad := bad ++ [s!"trap: the image wrote {notes evs} ({if place then "with" else "without"} the place expected)"]
+  | .error e => bad := bad ++ [s!"trap: {e}"]
+  match Target.feed m0 (bytes [0x21]) with
+  | .ok _ => bad := bad ++ ["the trap was not reported"]
+  | .error _ => pure ()
+  -- a replay: the notes, then the trap as the last line
+  let r := Target.replay m0 { impl := "z80", profile := "z80" } #[bytes [5], bytes [0x21], bytes [7]]
+  let got := r.trace.lines.toList.filterMap fun l => match l.ev with | .note t => some t | _ => none
+  if r.error.isNone || !Cc.trapped r.trace || got.take 2 != ["trap 5", "trap counter 517"] || got.length != 3 then
+    bad := bad ++ [s!"replay: notes {got}, error {r.error}"]
+  let r := Target.replay m0 { impl := "z80", profile := "z80" } #[bytes [5], bytes [7]]
+  if r.error.isSome || Cc.trapped r.trace then bad := bad ++ [s!"replay of notes alone: {r.error}"]
+  return bad
+
+def trapNote (image : String) (place : Bool) : IO UInt32 := do
+  match Machine.ofIhx (← IO.FS.readFile image) with
+  | .error e => IO.println s!"FAIL trap-note {image}: {e}"; return 1
+  | .ok m =>
+    let bad := trapNoteCheck m place
+    for b in bad do IO.println s!"FAIL trap-note {image}: {b}"
+    IO.println s!"z80 notes named `trap`, `trap counter` and a trap{if place then " with its place" else ""}, {image}: {bad.length} failures"
+    return if bad.isEmpty then 0 else 1
 
 /-- Bytes of code per function and runtime routine, largest first. -/
 def ownSizes (img : Codegen.Image) : List (String × Nat) :=
@@ -759,8 +809,9 @@ def usage : String :=
   "  ember-z80 ir-fuzz [COUNT] [--seed S]                 random programs: interpreter vs IR interpreter\n" ++
   "  ember-z80 ir-replay PATH...                          the stack on the IR interpreter\n" ++
   "  ember-z80 own-fuzz [COUNT] [--seed S] [--verbose]    random programs: interpreter vs generated code\n" ++
-  "  ember-z80 own-build net|sliploop [--trace 0|1|2] [--out DIR]    image, listing, symbols\n" ++
+  "  ember-z80 own-build net|sliploop|trapnote [--trace 0|1|2] [--out DIR]    image, listing, symbols\n" ++
   "  ember-z80 own-size net|sliploop [--trace 0|1|2]      bytes per function\n" ++
+  "  ember-z80 trap-note|trap-note-terse IMAGE.ihx                   the `trapnote` program: notes named like a trap, and a trap\n" ++
   "  --plain with own-fuzz, own-build, own-size: without the passes on the assembly (the image the proofs speak of)"
 
 def main (args : List String) : IO UInt32 := do
@@ -791,6 +842,8 @@ def main (args : List String) : IO UInt32 := do
       if let some f := t.first then IO.println s!"FAIL {f}"
       IO.println s!"z80 runtime routines vs their specifications: {t.cases} cases, {t.bad} failures"
       return if t.bad == 0 then 0 else 1
+  | ["trap-note", image] => trapNote image true
+  | ["trap-note-terse", image] => trapNote image false
   | ["profile", image] => profile image
   | "stack" :: image :: paths => stackDepth image paths
   | ["own-build", name] => ownBuild name (o.out.getD ".lake/build/z80") o.traceLevel !o.plain

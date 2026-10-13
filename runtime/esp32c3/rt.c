@@ -288,7 +288,9 @@ void rt_trap(uint32_t cause, uint32_t epc, uint32_t tval) {
 }
 
 void ember_trap(const char *where) {
-  dbg_str("note trap "); dbg_str(where);
+  /* a `#` line, as the trap of the CPU above: not a `note` line, which a
+   * program's note named `trap` would be */
+  dbg_str("# trap "); dbg_str(where);
   dbg_str(" rx="); dbg_dec(n_rx);
   dbg_str(" tick="); dbg_dec(n_tick);
   dbg_str("\n");
