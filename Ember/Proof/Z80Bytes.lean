@@ -401,6 +401,253 @@ theorem rt_or32_ok (ok : Z.OK) (hsz : Z.a.bytes.size < 65536) {k : Nat}
 
 #guard inRuntime (bytewiseItems "or" [] ⟨.or, [.mhl]⟩)
 
+/-! ## `adc` and `sbc`: the carry from one byte to the next -/
+
+/-- The carry in the flags, as a number. -/
+def cin (f : UInt8) : Nat := if (f &&& FC != 0) = true then 1 else 0
+
+theorem cin_le (f : UInt8) : cin f ≤ 1 := by unfold cin; split <;> omega
+
+theorem adc_val (a f v : UInt8) : (aluA 1 a f v).toNat = (a.toNat + v.toNat + cin f) % 256 := by
+  show (add8 a v (f &&& FC != 0)).1.toNat = _
+  have ha := a.toNat_lt
+  have hv := v.toNat_lt
+  unfold cin
+  cases hc : (f &&& FC != 0) <;>
+    simp only [add8, UInt16.toNat_toUInt8, UInt16.toNat_add, UInt8.toNat_toUInt16, Bool.false_eq_true, if_false, if_true] <;>
+    (first
+      | (show (((a.toNat + v.toNat) % 65536 + 0) % 65536) % 256 = _; omega)
+      | (show (((a.toNat + v.toNat) % 65536 + 1) % 65536) % 256 = _; omega))
+
+theorem add8_c (a v : UInt8) (c : Bool) :
+    ((add8 a v c).2 &&& FC != 0) = decide (255 < a.toNat + v.toNat + (if c = true then 1 else 0)) := by
+  have ha := a.toNat_lt
+  have hv := v.toNat_lt
+  rw [flagC_bit]
+  cases c
+  · simp only [add8, szxy, UInt8.toNat_or, UInt8.toNat_and, Nat.testBit_or, Nat.testBit_and, bit_testBit]
+    simp [FZ, FH, FPV, FC, Nat.testBit]
+    rw [UInt16.lt_iff_toNat_lt, UInt16.toNat_add, UInt8.toNat_toUInt16, UInt8.toNat_toUInt16]
+    show 255 < (a.toNat + v.toNat) % 65536 ↔ _
+    omega
+  · simp only [add8, szxy, UInt8.toNat_or, UInt8.toNat_and, Nat.testBit_or, Nat.testBit_and, bit_testBit]
+    simp [FZ, FH, FPV, FC, Nat.testBit]
+    rw [UInt16.lt_iff_toNat_lt, UInt16.toNat_add, UInt16.toNat_add, UInt8.toNat_toUInt16, UInt8.toNat_toUInt16]
+    show 255 < ((a.toNat + v.toNat) % 65536 + 1) % 65536 ↔ _
+    omega
+
+theorem adc_c (a f v : UInt8) : cin (aluF 1 a f v) = (a.toNat + v.toNat + cin f) / 256 := by
+  have ha := a.toNat_lt
+  have hv := v.toNat_lt
+  have hc1 := cin_le f
+  show (if ((add8 a v (f &&& FC != 0)).2 &&& FC != 0) = true then 1 else 0) = _
+  rw [add8_c]
+  show _ = (a.toNat + v.toNat + cin f) / 256
+  have e : (if (f &&& FC != 0) = true then 1 else 0) = cin f := rfl
+  rw [e]
+  by_cases h : 255 < a.toNat + v.toNat + cin f
+  · simp only [h, decide_true, if_true]
+    omega
+  · simp only [h, decide_false, Bool.false_eq_true, if_false]
+    omega
+
+theorem sbc_val (a f v : UInt8) : (aluA 3 a f v).toNat = (a.toNat + 512 - v.toNat - cin f) % 256 := by
+  show (sub8 a v (f &&& FC != 0)).1.toNat = _
+  have ha := a.toNat_lt
+  have hv := v.toNat_lt
+  unfold cin
+  cases hc : (f &&& FC != 0)
+  · simp only [sub8, UInt16.toNat_toUInt8, UInt16.toNat_sub, UInt8.toNat_toUInt16, Bool.false_eq_true, if_false]
+    show ((2 ^ 16 - 0 + (2 ^ 16 - v.toNat + a.toNat) % 2 ^ 16) % 2 ^ 16) % 256 = _
+    omega
+  · simp only [sub8, UInt16.toNat_toUInt8, UInt16.toNat_sub, UInt8.toNat_toUInt16, if_true]
+    show ((2 ^ 16 - 1 + (2 ^ 16 - v.toNat + a.toNat) % 2 ^ 16) % 2 ^ 16) % 256 = _
+    omega
+
+theorem sub8_cc (a v : UInt8) (c : Bool) :
+    ((sub8 a v c).2 &&& FC != 0) = decide (a.toNat < v.toNat + (if c = true then 1 else 0)) := by
+  have ha := a.toNat_lt
+  have hv := v.toNat_lt
+  rw [flagC_bit]
+  cases c
+  · simp only [sub8, szxy, UInt8.toNat_or, UInt8.toNat_and, Nat.testBit_or, Nat.testBit_and, bit_testBit]
+    simp [FZ, FH, FPV, FN, FC, Nat.testBit]
+    rw [UInt16.lt_iff_toNat_lt, UInt16.toNat_sub, UInt8.toNat_toUInt16, UInt8.toNat_toUInt16]
+    show 255 < (2 ^ 16 - v.toNat + a.toNat) % 2 ^ 16 ↔ _
+    omega
+  · simp only [sub8, szxy, UInt8.toNat_or, UInt8.toNat_and, Nat.testBit_or, Nat.testBit_and, bit_testBit]
+    simp [FZ, FH, FPV, FN, FC, Nat.testBit]
+    rw [UInt16.lt_iff_toNat_lt, UInt16.toNat_sub, UInt16.toNat_sub, UInt8.toNat_toUInt16, UInt8.toNat_toUInt16]
+    show 255 < (2 ^ 16 - 1 + (2 ^ 16 - v.toNat + a.toNat) % 2 ^ 16) % 2 ^ 16 ↔ _
+    omega
+
+theorem sbc_c (a f v : UInt8) : cin (aluF 3 a f v) = if a.toNat < v.toNat + cin f then 1 else 0 := by
+  show (if ((sub8 a v (f &&& FC != 0)).2 &&& FC != 0) = true then 1 else 0) = _
+  rw [sub8_cc]
+  have e : (if (f &&& FC != 0) = true then 1 else 0) = cin f := rfl
+  rw [e]
+  by_cases h : a.toNat < v.toNat + cin f
+  · simp only [h, decide_true, if_true]
+  · simp only [h, decide_false, Bool.false_eq_true, if_false]
+
+/-- The loop with `adc`: the `n` bytes at `D`, with the carry out above them, are the sum of
+those that were there, those at `H` and the carry in. -/
+theorem runB_add : ∀ (n : Nat) (f : UInt8) (m : ByteArray) (D H : Nat), m.size = 65536 → D + n ≤ 65536 →
+    H + n ≤ 65536 → (∀ i, i < n → H + i < D ∨ D + n ≤ H + i) →
+    IR.Sem.rd (runB 1 f m D H n).1 D n + 2 ^ (8 * n) * cin (runB 1 f m D H n).2 =
+      IR.Sem.rd m D n + IR.Sem.rd m H n + cin f
+  | 0, _, _, _, _, _, _, _, _ => by simp [runB, IR.Sem.rd]
+  | n + 1, f, m, D, H, hsz, hD, hH, hap => by
+    rw [runB, IR.Sem.rd, IR.Sem.rd, IR.Sem.rd, Nat.mod_eq_of_lt (show D < 65536 by omega),
+      Nat.mod_eq_of_lt (show H < 65536 by omega)]
+    rw [runB_far 1 n _ _ _ _ D (Or.inl (by omega)), getBang_same _ _ _ (by omega)]
+    have ih := runB_add n (aluF 1 (m.get! D) f (m.get! H)) (m.set! D (aluA 1 (m.get! D) f (m.get! H))) (D + 1) (H + 1)
+      (by rw [set_size]; exact hsz) (by omega) (by omega) (fun i hi => by have := hap (i + 1) (by omega); omega)
+    have h0 := hap 0 (by omega)
+    rw [rd_congr m _ (D + 1) n (by omega) (fun x h1 h2 => getBang_set _ _ _ _ (by omega)),
+      rd_congr m _ (H + 1) n (by omega) (fun x h1 h2 => getBang_set _ _ _ _ (by
+        have := hap (x - H) (by omega)
+        omega))] at ih
+    have hv := adc_val (m.get! D) f (m.get! H)
+    have hc := adc_c (m.get! D) f (m.get! H)
+    rw [show 8 * (n + 1) = 8 * n + 8 by omega, Nat.pow_add, show (2 : Nat) ^ 8 = 256 from rfl,
+      Nat.mul_comm (2 ^ (8 * n)) 256, Nat.mul_assoc]
+    generalize 2 ^ (8 * n) * cin (runB 1 _ _ (D + 1) (H + 1) n).2 = P at ih ⊢
+    omega
+
+/-- The loop with `sbc`: the `n` bytes at `D` are those that were there less those at `H` and
+the borrow in, the borrow out above them. -/
+theorem runB_sub : ∀ (n : Nat) (f : UInt8) (m : ByteArray) (D H : Nat), m.size = 65536 → D + n ≤ 65536 →
+    H + n ≤ 65536 → (∀ i, i < n → H + i < D ∨ D + n ≤ H + i) →
+    IR.Sem.rd (runB 3 f m D H n).1 D n + IR.Sem.rd m H n + cin f =
+      IR.Sem.rd m D n + 2 ^ (8 * n) * cin (runB 3 f m D H n).2
+  | 0, _, _, _, _, _, _, _, _ => by simp [runB, IR.Sem.rd]
+  | n + 1, f, m, D, H, hsz, hD, hH, hap => by
+    rw [runB, IR.Sem.rd, IR.Sem.rd, IR.Sem.rd, Nat.mod_eq_of_lt (show D < 65536 by omega),
+      Nat.mod_eq_of_lt (show H < 65536 by omega)]
+    rw [runB_far 3 n _ _ _ _ D (Or.inl (by omega)), getBang_same _ _ _ (by omega)]
+    have ih := runB_sub n (aluF 3 (m.get! D) f (m.get! H)) (m.set! D (aluA 3 (m.get! D) f (m.get! H))) (D + 1) (H + 1)
+      (by rw [set_size]; exact hsz) (by omega) (by omega) (fun i hi => by have := hap (i + 1) (by omega); omega)
+    have h0 := hap 0 (by omega)
+    rw [rd_congr m _ (D + 1) n (by omega) (fun x h1 h2 => getBang_set _ _ _ _ (by omega)),
+      rd_congr m _ (H + 1) n (by omega) (fun x h1 h2 => getBang_set _ _ _ _ (by
+        have := hap (x - H) (by omega)
+        omega))] at ih
+    have hv := sbc_val (m.get! D) f (m.get! H)
+    have hc := sbc_c (m.get! D) f (m.get! H)
+    have ha := (m.get! D).toNat_lt
+    have hb := (m.get! H).toNat_lt
+    have hc1 := cin_le f
+    rw [show 8 * (n + 1) = 8 * n + 8 by omega, Nat.pow_add, show (2 : Nat) ^ 8 = 256 from rfl,
+      Nat.mul_comm (2 ^ (8 * n)) 256, Nat.mul_assoc]
+    generalize 2 ^ (8 * n) * cin (runB 3 _ _ (D + 1) (H + 1) n).2 = P at ih ⊢
+    split at hc <;> omega
+
+theorem orA_cin (s : Cpu) : cin (orA s).f = 0 := by
+  have h : (orA s).flag FC = false := by
+    simp only [orA, zsim]
+    exact alu6_flag _ _
+  show (if ((orA s).f &&& FC != 0) = true then 1 else 0) = 0
+  have h' : ((orA s).f &&& FC != 0) = false := h
+  rw [h']
+  rfl
+
+theorem orA_b (s : Cpu) : (orA s).b = s.b := by simp only [orA, zsim]
+theorem orA_hl (s : Cpu) : (orA s).hl = s.hl := by simp only [orA, zsim]
+theorem orA_de (s : Cpu) : (orA s).de = s.de := by simp only [orA, zsim]
+
+/-- **A routine that clears the carry and goes through the four bytes with it**: what the loop
+gives from a clear carry is what the routine leaves in the accumulator; nothing else is written. -/
+theorem bytewise_carry_ok (ok : Z.OK) (hsz : Z.a.bytes.size < 65536) {k : Nat} {name : String} {i : Instr}
+    {kk : UInt8} {g : Nat → Nat → Nat}
+    (hexec : ∀ env (s : Cpu) inp, exec env i s inp = some (((op1 s).alu kk ((op1 s).rd (op1 s).hl)).tick 7))
+    (hfalls : i.falls = true) (hhas : Has Z k (bytewiseItems name [.ins ⟨.or, [.a]⟩] i))
+    (hval : ∀ (f : UInt8) (m : ByteArray) (H : Nat), cin f = 0 → m.size = 65536 → H + 4 ≤ 65536 →
+      (∀ j, j < 4 → H + j < Z.acc ∨ Z.acc + 4 ≤ H + j) →
+      IR.Sem.rd (runB kk f m Z.acc H 4).1 Z.acc 4 = g (IR.Sem.rd m Z.acc 4) (IR.Sem.rd m H 4)) :
+    RtAcc Z s!"rt_{name}32" (HLApart Z 4)
+      (fun s s' => IR.Sem.rd s'.mem Z.acc 4 = g (IR.Sem.rd s.mem Z.acc 4) (IR.Sem.rd s.mem s.hl.toNat 4)) := by
+  intro _
+  obtain ⟨T, hT, hsym, hTle⟩ := label_sym ok (hhas.get 3 rfl)
+  have hacc : Z.sym "rt_acc" Z.acc := ok.accSym ⟨k + 6, _, 0, hhas.get 6 rfl, rfl⟩
+  have hram := ok.accRam
+  have hstk := ok.stack
+  have hacs := ok.accStack
+  have hL : Has Z (k + 8) (loopItems s!"rt_{name}w_l" i) :=
+    Has.pre (l2 := [.ins ⟨.ret, []⟩]) hhas.tail.tail.tail.tail.tail.tail.tail.tail
+  refine ⟨T, hsym, by omega, fun s hpc I hh hrs hmsz hlo hhi ⟨hb, hap⟩ => ?_⟩
+  have M : Mach Z s := ⟨I, hh⟩
+  have at4 : At Z.addrs (k + 4) s := at_label ok (hhas.get 3 rfl) ⟨T, hT, hpc⟩
+  obtain ⟨st1, at5, M1, hS1⟩ := does_raw ok does_ld_b_4 (hhas.get 4 rfl) M at4
+  have at6 := at_label ok (hhas.get 5 rfl) at5
+  obtain ⟨c2, ad2, had2, st2, at7, M2, hS2, hde2, hhl2, _, _, hb2, hf2⟩ := ld_de_imm ok (hhas.get 6 rfl) M1 at6
+  obtain ⟨st3, at8, M3, hS3⟩ := does_raw ok does_or_a (hhas.get 7 rfl) M2 at7
+  have hdev : (orA c2).de.toNat = Z.acc := by
+    rw [orA_de, hde2]
+    exact immW_toNat _ _ _ _ rfl (sym_val ad2 hacc) (by omega)
+  have hS03 : Sys s (orA c2) := (hS1.trans hS2).trans hS3
+  have at9 := at_label ok (hL.get 0 rfl) at8
+  obtain ⟨c4, st4, M4, at15, hsp4, hr4, hmem4, hf4⟩ := byte_loop ok hexec hfalls hL 3 (orA c2) Z.acc
+    s.hl.toNat M3 at9 (by rw [hS03.2.1]; exact hrs) hdev (by rw [orA_hl, hhl2, ldB_hl])
+    (by rw [orA_b, hb2, ldB_b 4 (by decide)]) hram.1 (by omega) (by omega)
+  obtain ⟨c', st5, hpc', hsp', hmem', hh', hrs', _, _, _⟩ := ret_raw ok (hhas.get 15 rfl) M4 at15
+  rw [hS03.1] at hmem4
+  have hfar : ∀ x, x < Z.acc ∨ Z.acc + 4 ≤ x → c4.mem.get! x = s.mem.get! x := fun x hx => by
+    rw [hmem4]
+    exact runB_far kk 4 _ _ _ _ x hx
+  refine ⟨c', (((st1.trans st2).trans st3).trans st4).trans st5, ?_, ?_, ?_, ?_, ?_, ?_, ?_⟩
+  · rw [hpc', hsp4, hS03.2.2.2]
+    apply UInt16.toNat_inj.mp
+    rw [cpu_rd16 _ _ (by omega), cpu_rd16 _ _ (by omega)]
+    exact rd_congr _ _ _ _ (by omega) (fun x h1 h2 => hfar x (by omega))
+  · rw [hsp', hsp4, hS03.2.2.2]
+  · rw [hh']
+    exact M4.2
+  · rw [hrs', hr4, hS03.2.1]
+  · rw [hmem', hmem4, runB_size]
+    exact hmsz
+  · show IR.Sem.rd c'.mem Z.acc 4 = _
+    rw [hmem', hmem4]
+    exact hval _ _ _ (orA_cin c2) hmsz hb (fun j hj => by have := (hap j hj).1; omega)
+  · intro x _ _ hx
+    rw [hmem']
+    exact hfar x (by omega)
+
+/-- **`rt_add32`**: the accumulator's four bytes are their sum with those at `HL`, modulo 2³². -/
+theorem rt_add32_ok (ok : Z.OK) (hsz : Z.a.bytes.size < 65536) {k : Nat}
+    (hhas : Has Z k (bytewiseItems "add" [.ins ⟨.or, [.a]⟩] ⟨.adc, [.a, .mhl]⟩)) :
+    RtAcc Z "rt_add32" (HLApart Z 4)
+      (fun s s' => IR.Sem.rd s'.mem Z.acc 4 = IR.binOp .add 4 (IR.Sem.rd s.mem Z.acc 4) (IR.Sem.rd s.mem s.hl.toNat 4)) :=
+  bytewise_carry_ok ok hsz (kk := 1) (fun _ _ _ => rfl) rfl hhas (fun f m H hc hm hH hap => by
+    have ha := ok.accRam
+    have h := runB_add 4 f m Z.acc H hm (by omega) hH hap
+    have h1 := rd_lt (runB 1 f m Z.acc H 4).1 Z.acc 4
+    have h2 := cin_le (runB 1 f m Z.acc H 4).2
+    rw [hc] at h
+    show _ = (_ + _) % 2 ^ (8 * 4)
+    rw [show (2 : Nat) ^ (8 * 4) = 4294967296 from rfl] at h h1 ⊢
+    omega)
+
+/-- **`rt_sub32`**: the accumulator's four bytes are theirs less those at `HL`, modulo 2³². -/
+theorem rt_sub32_ok (ok : Z.OK) (hsz : Z.a.bytes.size < 65536) {k : Nat}
+    (hhas : Has Z k (bytewiseItems "sub" [.ins ⟨.or, [.a]⟩] ⟨.sbc, [.a, .mhl]⟩)) :
+    RtAcc Z "rt_sub32" (HLApart Z 4)
+      (fun s s' => IR.Sem.rd s'.mem Z.acc 4 = IR.binOp .sub 4 (IR.Sem.rd s.mem Z.acc 4) (IR.Sem.rd s.mem s.hl.toNat 4)) :=
+  bytewise_carry_ok ok hsz (kk := 3) (fun _ _ _ => rfl) rfl hhas (fun f m H hc hm hH hap => by
+    have ha := ok.accRam
+    have h := runB_sub 4 f m Z.acc H hm (by omega) hH hap
+    have h1 := rd_lt (runB 3 f m Z.acc H 4).1 Z.acc 4
+    have h2 := cin_le (runB 3 f m Z.acc H 4).2
+    have h3 := rd_lt m Z.acc 4
+    have h4 := rd_lt m H 4
+    rw [hc] at h
+    show _ = (_ + 2 ^ (8 * 4) - _) % 2 ^ (8 * 4)
+    rw [show (2 : Nat) ^ (8 * 4) = 4294967296 from rfl] at h h1 h3 h4 ⊢
+    omega)
+
+#guard inRuntime (bytewiseItems "add" [.ins ⟨.or, [.a]⟩] ⟨.adc, [.a, .mhl]⟩)
+#guard inRuntime (bytewiseItems "sub" [.ins ⟨.or, [.a]⟩] ⟨.sbc, [.a, .mhl]⟩)
+
 end
 
 end Ember.Proof.Z80Gen
