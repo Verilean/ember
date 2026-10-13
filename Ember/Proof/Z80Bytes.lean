@@ -648,6 +648,176 @@ theorem rt_sub32_ok (ok : Z.OK) (hsz : Z.a.bytes.size < 65536) {k : Nat}
 #guard inRuntime (bytewiseItems "add" [.ins ⟨.or, [.a]⟩] ⟨.adc, [.a, .mhl]⟩)
 #guard inRuntime (bytewiseItems "sub" [.ins ⟨.or, [.a]⟩] ⟨.sbc, [.a, .mhl]⟩)
 
+/-! ## `rt_shr8` -/
+
+/-- **`ret z`**: it returns when `Z` is set, and goes on to the next item when not. -/
+theorem ret_z_step (ok : Z.OK) {k : Nat} (hk : Z.items[k]? = some (.ins ⟨.ret, [.z]⟩)) {s : Cpu} (M : Mach Z s)
+    (hat : At Z.addrs k s) :
+    ∃ s', Steps s s' ∧ s'.mem = s.mem ∧ s'.halted = s.halted ∧ s'.ramStart = s.ramStart ∧ s'.a = s.a ∧
+      s'.b = s.b ∧ s'.hl = s.hl ∧
+      (if s.flag FZ = true then s'.pc = s.rd16 s.sp ∧ s'.sp = s.sp + 2 else At Z.addrs (k + 1) s' ∧ s'.sp = s.sp) := by
+  obtain ⟨ad, had, hpcad⟩ := hat
+  obtain ⟨c4, hc4⟩ : ∃ c4 : Cpu, c4 = (if (op1 s).cond 1 then (retTo (op1 s)).tick 11 else (op1 s).tick 5) :=
+    ⟨_, rfl⟩
+  have hst := fun inp => (step_item ok.placed M.1 hk had hpcad M.2 (inp := inp) (s' := c4) (by rw [hc4]; rfl)).1
+  have hcond : (op1 s).cond 1 = s.flag FZ := cond_op1 s 1
+  by_cases hz : s.flag FZ = true
+  · rw [hcond, hz, if_pos rfl] at hc4
+    refine ⟨c4, Steps.one hst (by rw [hc4]; simp only [retTo, zsim]), ?_, ?_, ?_, ?_, ?_, ?_, ?_⟩
+    · rw [hc4]; simp only [retTo, zsim]
+    · rw [hc4]; simp only [retTo, zsim]
+    · rw [hc4]; simp only [retTo, zsim]
+    · rw [hc4]; simp only [retTo, zsim]
+    · rw [hc4]; simp only [retTo, zsim]
+    · rw [hc4]; show mk16 _ _ = mk16 _ _; simp only [retTo, zsim]
+    · rw [if_pos hz]
+      refine ⟨?_, ?_⟩
+      · rw [hc4]; simp only [retTo, zsim]
+      · rw [hc4]; simp only [retTo, zsim]
+  · have hz' : s.flag FZ = false := by simpa using hz
+    rw [hcond, hz'] at hc4
+    simp only [Bool.false_eq_true, if_false] at hc4
+    obtain ⟨bs, hbs, hnext, hlt65⟩ := ok.placed.next M.1 hk had
+    have hbs' : bs = [0xC8] := by
+      have : Item.encode (.ins ⟨.ret, [.z]⟩) (Z.a.env ad) = .ok [0xC8] := rfl
+      rw [this] at hbs
+      exact (Except.ok.inj hbs).symm
+    refine ⟨c4, Steps.one hst (by rw [hc4]; simp only [zsim]), ?_, ?_, ?_, ?_, ?_, ?_, ?_⟩
+    · rw [hc4]; simp only [zsim]
+    · rw [hc4]; simp only [zsim]
+    · rw [hc4]; simp only [zsim]
+    · rw [hc4]; simp only [zsim]
+    · rw [hc4]; simp only [zsim]
+    · rw [hc4]; show mk16 _ _ = mk16 _ _; simp only [zsim]
+    · rw [if_neg hz]
+      refine ⟨⟨ad + 1, by rw [hbs'] at hnext; exact hnext, ?_⟩, by rw [hc4]; simp only [zsim]⟩
+      have hb1 := hlt65 (by rw [hbs']; exact List.cons_ne_nil _ _)
+      rw [hbs'] at hb1
+      have hb1' : ad + 1 < 65536 := hb1
+      rw [hc4]
+      simp only [zsim]
+      rw [UInt16.toNat_add, hpcad]
+      show (ad + 1) % 65536 = ad + 1
+      omega
+
+def incB (s : Cpu) : Cpu :=
+  (((op1 s).inc8 ((op1 s).reg .hl 0)).2.setReg .hl 0 ((op1 s).inc8 ((op1 s).reg .hl 0)).1).tick 4
+def decB (s : Cpu) : Cpu :=
+  (((op1 s).dec8 ((op1 s).reg .hl 0)).2.setReg .hl 0 ((op1 s).dec8 ((op1 s).reg .hl 0)).1).tick 4
+
+theorem does_inc_b : Does ⟨.inc, [.b]⟩ incB :=
+  ⟨fun _ _ _ => rfl, rfl, fun s => by simp only [Sys, incB, Cpu.inc8, zsim, and_self],
+    fun s => by simp only [incB, Cpu.inc8, zsim]⟩
+theorem does_dec_b : Does ⟨.dec, [.b]⟩ decB :=
+  ⟨fun _ _ _ => rfl, rfl, fun s => by simp only [Sys, decB, Cpu.dec8, zsim, and_self],
+    fun s => by simp only [decB, Cpu.dec8, zsim]⟩
+
+/-- `inc b; dec b`: `B`, `A` and `HL` as they were, `Z` when `B` is zero. -/
+theorem incdec_b (s : Cpu) : (decB (incB s)).b = s.b ∧ (decB (incB s)).a = s.a ∧ (decB (incB s)).hl = s.hl ∧
+    (decB (incB s)).flag FZ = (s.b == 0) := by
+  have hb : (incB s).b = s.b + 1 := by simp only [incB, Cpu.inc8, zsim]
+  have e : s.b + 1 - 1 = s.b := by
+    apply UInt8.toNat_inj.mp
+    have := s.b.toNat_lt
+    rw [UInt8.toNat_sub, UInt8.toNat_add]
+    show (2 ^ 8 - 1 + (s.b.toNat + 1) % 2 ^ 8) % 2 ^ 8 = _
+    omega
+  refine ⟨?_, ?_, ?_, ?_⟩
+  · simp only [decB, Cpu.dec8, zsim, hb, e]
+  · simp only [decB, incB, Cpu.dec8, Cpu.inc8, zsim]
+  · show mk16 _ _ = mk16 _ _
+    simp only [decB, incB, Cpu.dec8, Cpu.inc8, zsim]
+  · show ((decB (incB s)).f &&& FZ != 0) = _
+    rw [flagZ_bit]
+    simp only [decB, Cpu.dec8, zsim, hb, e, szxy, UInt8.toNat_or, UInt8.toNat_and, Nat.testBit_or, Nat.testBit_and,
+      bit_testBit]
+    simp [FZ, FH, FPV, FN, FC, Nat.testBit]
+
+def shrItems : List Item :=
+  [.label "rt_shr8", .ins ⟨.inc, [.b]⟩, .ins ⟨.dec, [.b]⟩, .ins ⟨.ret, [.z]⟩,
+   .label "rt_shr8_l", .ins ⟨.srl, [.a]⟩, .ins ⟨.djnz, [.imm (.sym "rt_shr8_l")]⟩, .ins ⟨.ret, []⟩]
+
+#guard inRuntime shrItems
+
+/-- The loop of `rt_shr8`: `B` (not zero) times `srl a`. -/
+theorem shr_loop (ok : Z.OK) {k : Nat} (hhas : Has Z k shrItems) :
+    ∀ (n : Nat) (s : Cpu), Mach Z s → At Z.addrs (k + 5) s → s.b.toNat = n + 1 →
+      ∃ s', Steps s s' ∧ Mach Z s' ∧ At Z.addrs (k + 7) s' ∧ Sys s s' ∧ s'.a.toNat = s.a.toNat / 2 ^ (n + 1) ∧
+        s'.hl = s.hl := by
+  intro n
+  induction n with
+  | zero =>
+    intro s M hat hb
+    obtain ⟨st1, at6, M1, hS1⟩ := does_raw ok does_srl_a (hhas.get 5 rfl) M hat
+    have hb1 : (rotR 7 7 s).b = s.b := by simp only [rotR, Cpu.rot, zsim]
+    have hhl1 : (rotR 7 7 s).hl = s.hl := by simp only [rotR, Cpu.rot, zsim]; rfl
+    obtain ⟨c2, st2, M2, hS2, _, ha2, _, _, hhl2, _, hat2⟩ := djnz_step ok (hhas.get 6 rfl) (hhas.get 4 rfl) M1 at6
+    rw [hb1] at hat2
+    have hz : ¬ ((s.b - 1 != 0) = true) := fun h => ((b_sub1 s.b 0 hb).2.mp h) rfl
+    rw [if_neg hz] at hat2
+    exact ⟨c2, st1.trans st2, M2, hat2, hS1.trans hS2, by rw [ha2, rotR_srl_a], by rw [hhl2, hhl1]⟩
+  | succ n ih =>
+    intro s M hat hb
+    obtain ⟨st1, at6, M1, hS1⟩ := does_raw ok does_srl_a (hhas.get 5 rfl) M hat
+    have hb1 : (rotR 7 7 s).b = s.b := by simp only [rotR, Cpu.rot, zsim]
+    have hhl1 : (rotR 7 7 s).hl = s.hl := by simp only [rotR, Cpu.rot, zsim]; rfl
+    obtain ⟨c2, st2, M2, hS2, hb2, ha2, _, _, hhl2, _, hat2⟩ := djnz_step ok (hhas.get 6 rfl) (hhas.get 4 rfl) M1 at6
+    rw [hb1] at hat2 hb2
+    have hnz : (s.b - 1 != 0) = true := (b_sub1 s.b (n + 1) hb).2.mpr (by omega)
+    rw [if_pos hnz] at hat2
+    have at5 := at_label ok (hhas.get 4 rfl) hat2
+    obtain ⟨s', st', M', at', hS', ha', hhl'⟩ := ih c2 M2 at5 (by rw [hb2]; exact (b_sub1 s.b (n + 1) hb).1)
+    refine ⟨s', (st1.trans st2).trans st', M', at', (hS1.trans hS2).trans hS', ?_, by rw [hhl', hhl2, hhl1]⟩
+    rw [ha', ha2, rotR_srl_a, Nat.div_div_eq_div_mul, Nat.pow_succ 2 (n + 1), Nat.mul_comm]
+
+/-- **`rt_shr8`**: `A` shifted right by `B`; `HL` and memory as they were. -/
+theorem rt_shr8_ok (ok : Z.OK) (hsz : Z.a.bytes.size < 65536) {k : Nat} (hhas : Has Z k shrItems) :
+    RtPure Z "rt_shr8" (fun s s' => s'.a.toNat = s.a.toNat / 2 ^ s.b.toNat ∧ s'.hl = s.hl) := by
+  intro _
+  obtain ⟨T, hT, hsym, hTle⟩ := label_sym ok (hhas.get 0 rfl)
+  refine ⟨T, hsym, by omega, fun s hpc I hh hrs hmsz hlo hhi _ => ?_⟩
+  have M : Mach Z s := ⟨I, hh⟩
+  have at1 : At Z.addrs (k + 1) s := at_label ok (hhas.get 0 rfl) ⟨T, hT, hpc⟩
+  obtain ⟨st1, at2, M1, hS1⟩ := does_raw ok does_inc_b (hhas.get 1 rfl) M at1
+  obtain ⟨st2, at3, M2, hS2⟩ := does_raw ok does_dec_b (hhas.get 2 rfl) M1 at2
+  obtain ⟨hb, ha, hhl, hfz⟩ := incdec_b s
+  have hS02 : Sys s (decB (incB s)) := hS1.trans hS2
+  obtain ⟨c3, st3, hm3, hh3, hr3, ha3, hb3, hhl3, hcase⟩ := ret_z_step ok (hhas.get 3 rfl) M2 at3
+  rw [hfz] at hcase
+  by_cases hz : s.b = 0
+  · have hz' : (s.b == 0) = true := by simpa using hz
+    rw [if_pos hz'] at hcase
+    refine ⟨c3, (st1.trans st2).trans st3, ?_, ?_, ?_, ?_, ?_, ⟨?_, ?_⟩, fun x _ _ => ?_⟩
+    · rw [hcase.1, rd16_sys hS02]
+    · rw [hcase.2, hS02.2.2.2]
+    · rw [hh3, hS02.2.2.1]; exact hh
+    · rw [hr3, hS02.2.1]
+    · rw [hm3, hS02.1]; exact hmsz
+    · rw [ha3, ha, hz]
+      show _ = s.a.toNat / 2 ^ 0
+      simp
+    · rw [hhl3, hhl]
+    · rw [hm3, hS02.1]
+  · have hz' : ¬ ((s.b == 0) = true) := by simpa using hz
+    rw [if_neg hz'] at hcase
+    have hbn : s.b.toNat ≠ 0 := fun h => hz (UInt8.toNat_inj.mp (by rw [h]; rfl))
+    have M3 : Mach Z c3 := ⟨M2.1.congr hr3 hm3, by rw [hh3]; exact M2.2⟩
+    have at5 := at_label ok (hhas.get 4 rfl) hcase.1
+    obtain ⟨c4, st4, M4, at7, hS4, ha4, hhl4⟩ := shr_loop ok hhas (s.b.toNat - 1) c3 M3 at5 (by rw [hb3, hb]; omega)
+    obtain ⟨c', st5, hpc', hsp', hmem', hh', hrs', _, _, ha'⟩ := ret_raw ok (hhas.get 7 rfl) M4 at7
+    have hS03 : Sys s c3 := ⟨by rw [hm3, hS02.1], by rw [hr3, hS02.2.1], by rw [hh3, hS02.2.2.1], by rw [hcase.2, hS02.2.2.2]⟩
+    have hS : Sys s c4 := hS03.trans hS4
+    refine ⟨c', ((((st1.trans st2).trans st3).trans st4).trans st5), ?_, ?_, ?_, ?_, ?_, ⟨?_, ?_⟩, fun x _ _ => ?_⟩
+    · rw [hpc', rd16_sys hS]
+    · rw [hsp', hS.2.2.2]
+    · rw [hh']; exact M4.2
+    · rw [hrs', hS.2.1]
+    · rw [hmem', hS.1]; exact hmsz
+    · rw [ha', ha4, ha3, ha, show s.b.toNat - 1 + 1 = s.b.toNat by omega]
+    · apply UInt16.toNat_inj.mp
+      rw [hl_toNat, ‹c'.h = c4.h›, ‹c'.l = c4.l›, ← hl_toNat, hhl4, hhl3, hhl]
+    · rw [hmem', hS.1]
+
 end
 
 end Ember.Proof.Z80Gen
