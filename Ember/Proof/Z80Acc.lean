@@ -64,6 +64,7 @@ theorem ptr_ok (ok : Z.OK) (hT : FnLay Z E) {n : Nat} (hn : 0 < n) {o : Opd} (hr
     (hsp : ∀ t, o = .tmp t → E.spilled[t]! = true) (hlv : MemLive E o) (pc : Nat) :
     ∃ A, (Z.a.env pc).val (ptrVal E n o) = Int.ofNat A ∧ A + n ≤ 65536 ∧
       (∀ j, j < n → A + j < Z.stackLo ∨ Z.stackHi ≤ A + j) ∧
+      (∀ j, j < n → A + j < Z.acc ∨ Z.acc + 8 ≤ A + j) ∧
       ∀ regs ist tmps (s : Cpu), Rel Z E fr dt regs ist tmps s →
         IR.Sem.rd s.mem A n = IR.Sem.opd Z.c ist tmps n o := by
   have hstk := ok.stack
@@ -71,19 +72,24 @@ theorem ptr_ok (ok : Z.OK) (hT : FnLay Z E) {n : Nat} (hn : 0 < n) {o : Opd} (hr
   cases o with
   | const v =>
     obtain ⟨ad, hsym, hb, hval⟩ := hrd
-    refine ⟨ad, sym_val pc hsym, by omega, fun j hj => Or.inl (by omega), fun regs ist tmps s R => ?_⟩
+    refine ⟨ad, sym_val pc hsym, by omega, fun j hj => Or.inl (by omega), fun j hj => Or.inl (by omega),
+      fun regs ist tmps s R => ?_⟩
     rw [hval s R.img]
     rfl
   | slot sl =>
     obtain ⟨hv, hb⟩ := opd_val (dt := dt) ok (o := .slot sl) hrd hsp (fun v h => by cases h) pc
-    refine ⟨_, hv, hb, fun j hj => ok.nostack _ (hrd.2.2.1 hlv j hj), fun regs ist tmps s R => ?_⟩
+    refine ⟨_, hv, hb, fun j hj => ok.nostack _ (hrd.2.2.1 hlv j hj), fun j hj => ok.accData _ (hrd.2.2.1 hlv j hj),
+      fun regs ist tmps s R => ?_⟩
     exact opd_mem (dt := dt) (o := .slot sl) hrd hsp (fun v h => by cases h) hlv R
   | tmp t =>
     obtain ⟨hv, hb⟩ := opd_val (dt := dt) ok (o := .tmp t) hrd hsp (fun v h => by cases h) pc
     have hns := hT.nostack t (hsp t rfl)
     have hsz := (hrd (hsp t rfl)).2.2.2
-    refine ⟨_, hv, hb, fun j hj => ?_, fun regs ist tmps s R => ?_⟩
+    have hna := hT.noacc t (hsp t rfl)
+    refine ⟨_, hv, hb, fun j hj => ?_, fun j hj => ?_, fun regs ist tmps s R => ?_⟩
     · show tmpAddr Z E t + j < Z.stackLo ∨ Z.stackHi ≤ tmpAddr Z E t + j
+      omega
+    · show tmpAddr Z E t + j < Z.acc ∨ Z.acc + 8 ≤ tmpAddr Z E t + j
       omega
     · exact opd_mem (dt := dt) (o := .tmp t) hrd hsp (fun v h => by cases h) hlv R
 
@@ -116,7 +122,7 @@ theorem loadAcc_ok (ok : Z.OK) (hT : FnLay Z E) (F : GFinal Z base sF) {n : Nat}
     have hxm : GExt (pushL [⟨.ld, [.hl, .imm (ptrVal E n o)]⟩, ⟨.call, [.imm (.sym s!"rt_ld{bits n}")]⟩] s1) sF :=
       (GExt.regs _ _).trans hx
     obtain ⟨ad, had, hpc⟩ := hat
-    obtain ⟨A, hv, hb, hns, hmem⟩ := ptr_ok (fr := fr) ok hT hn.1 hrd hsp hlv ad
+    obtain ⟨A, hv, hb, hns, hna, hmem⟩ := ptr_ok (fr := fr) ok hT hn.1 hrd hsp hlv ad
     have hnn : (Instr.immW (Z.a.env ad) ⟨.ld, [.hl, .imm (ptrVal E n o)]⟩).toNat = A :=
       immW_toNat _ _ _ _ rfl hv (by omega)
     have hS : Sys s (((skip (op1 s) 2).setHL (Instr.immW (Z.a.env ad) ⟨.ld, [.hl, .imm (ptrVal E n o)]⟩)).tick 10) := by
@@ -135,7 +141,12 @@ theorem loadAcc_ok (ok : Z.OK) (hT : FnLay Z E) (F : GFinal Z base sF) {n : Nat}
     obtain ⟨c1, s', cs, st2, at2, hrel, hfree, hsp', hh', hrs', hsz'⟩ := acc_call ok F
       (s0 := { s1 with out := s1.out.push (.ins ⟨.ld, [.hl, .imm (ptrVal E n o)]⟩) })
       (s1 := pushL [⟨.ld, [.hl, .imm (ptrVal E n o)]⟩, ⟨.call, [.imm (.sym s!"rt_ld{bits n}")]⟩] s1)
-      hxm rfl hrt.ld hdep R1 at1 (fun _ _ => trivial)
+      hxm rfl hrt.ld hdep R1 at1 (fun c1 cs => by
+        have hc1 : c1.hl.toNat = A := by
+          rw [hl_congr cs.h cs.l]
+          simp only [zsim]
+          exact hnn
+        exact ⟨by rw [hc1]; exact hb, fun j hj => by rw [hc1]; exact ⟨hna j hj, hns j hj⟩⟩)
     refine ⟨s', st1.trans st2, at2, R1.acc_free ok hT hfree hsz' hrs' hh' hsp' (fun o' ho' => by cases ho')
       (fun o' ho' => by cases ho') (fun sl h => by cases h) (fun sl h => by cases h) (fun m o' h hown => ?_)
       (fun m sl h hown => ?_) (fun m o' h => ?_)⟩
@@ -165,7 +176,8 @@ theorem st_run (ok : Z.OK) (F : GFinal Z base sF) {n : Nat} (hn : 0 < n ∧ n �
     (hx : GExt (pushL [⟨.ld, [.hl, .imm p]⟩, ⟨.call, [.imm (.sym s!"rt_st{bits n}")]⟩] s1) sF)
     {regs : Regs} {ist : IR.Sem.St} {tmps : Array Nat} {s : Cpu} (R : Rel Z E fr dt regs ist tmps s)
     (hat : At Z.addrs (base + s1.out.size) s) {A : Nat}
-    (hv : ∀ pc, (Z.a.env pc).val p = Int.ofNat A) (hram : Z.ramStart ≤ A) (hb : A + n ≤ 65536) :
+    (hv : ∀ pc, (Z.a.env pc).val p = Int.ofNat A) (hram : Z.ramStart ≤ A) (hb : A + n ≤ 65536)
+    (hna : A + n ≤ Z.acc ∨ Z.acc + 8 ≤ A) (hnst : A + n ≤ Z.stackLo ∨ Z.stackHi ≤ A) :
     ∃ s', Steps s s' ∧
       At Z.addrs (base + (pushL [⟨.ld, [.hl, .imm p]⟩, ⟨.call, [.imm (.sym s!"rt_st{bits n}")]⟩] s1).out.size) s' ∧
       s'.sp = s.sp ∧ s'.halted = s.halted ∧ s'.ramStart = s.ramStart ∧ s'.mem.size = 65536 ∧
@@ -192,10 +204,11 @@ theorem st_run (ok : Z.OK) (F : GFinal Z base sF) {n : Nat} (hn : 0 < n ∧ n �
     (F.emitted (s := pushL [⟨.ld, [.hl, .imm p]⟩, ⟨.call, [.imm (.sym s!"rt_st{bits n}")]⟩] s1) hx rfl) hsym hent hR
     at1 M1.1 M1.2 (by rw [hS.2.1]; exact R.rs) (by rw [hS.1]; exact R.msz) (by rw [hS.2.2.2]; omega)
     (by rw [hS.2.2.2]; omega) (fun c1 cs => by
-      rw [hl_congr cs.h cs.l]
-      simp only [zsim]
-      rw [hnn]
-      exact ⟨hram, hb⟩)
+      have hc1 : c1.hl.toNat = A := by
+        rw [hl_congr cs.h cs.l]
+        simp only [zsim]
+        exact hnn
+      exact ⟨by rw [hc1]; exact hram, by rw [hc1]; exact hb, fun j hj => by rw [hc1]; exact ⟨by omega, by omega⟩⟩)
   have hc1sp : c1.sp.toNat = s.sp.toNat - 2 := by
     rw [cs.sp, hS.2.2.2]
     exact sub2_toNat _ (by omega)
@@ -269,7 +282,7 @@ theorem storeAcc_ok (ok : Z.OK) (hT : FnLay Z E) (F : GFinal Z base sF) {n : Nat
       have hb' := ok.dbound E.fn.name sl n W.dst
       obtain ⟨s', st, at', hsp', hh', hrs', hsz', hfree⟩ := st_run ok F hn hrt hdep
         (s1 := s0) (p := slotVal sl) ⟨hx.out, hx.jumps, hx.labels⟩ R hat
-        (fun pc => slot_val ok sl ad0 pc harea) W.ram hb'
+        (fun pc => slot_val ok sl ad0 pc harea) W.ram hb' W.noacc W.nostack
       rw [hv] at hfree
       have hacc_keep : IR.Sem.rd (IR.Sem.wr s.mem (Z.c.layout.addr sl) n v) Z.acc n = v := by
         rw [rd_wr_other _ _ _ _ _ n hb' (by omega) (by rcases W.noacc with h | h; exact Or.inl h; exact Or.inr (by omega))]
@@ -323,6 +336,8 @@ theorem storeAcc_ok (ok : Z.OK) (hT : FnLay Z E) (F : GFinal Z base sF) {n : Nat
         (s1 := s0) (p := slotVal { area := tmpArea E.fn.name, off := E.tmpOff[t]! })
         ⟨hx.out, hx.jumps, hx.labels⟩ R hat
         (fun pc => slot_val ok { area := tmpArea E.fn.name, off := E.tmpOff[t]! } ad0 pc harea) (hT.ram t hsp) hb'
+        (by have := hT.noacc t hsp; rw [W.size] at this; exact this)
+        (by have := hT.nostack t hsp; rw [W.size] at this; exact this)
       rw [hv] at hfree
       have hna := hT.noacc t hsp
       rw [W.size] at hna

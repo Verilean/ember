@@ -768,7 +768,15 @@ effect does to the world).  Each is taken where the image calls the
 routine (`Uses`), and the accumulator's symbol where an instruction
 names it (`AccRef`): an image has the routines its code uses and no
 others, so the loopback image, without the wide routines and `rt_acc`,
-can meet them.  Proved so far: `rt_bound`, and the four effect
+can meet them.  The routines on the four bytes at `HL` (`rt_ld32`,
+`rt_st32`, `rt_add32`, …, `rt_cmp32`) are taken with `HLApart`: those
+bytes do not wrap and none is a byte of the accumulator or of the
+stack.  Without it the specifications were not true of the routines
+(they go through the bytes in order, writing the accumulator as they
+go; `rt_cmp32` pushes; `rt_st32` could write its own return address);
+the generated code is shown to call them so (`ptr_ok`: a wide operand
+is in the literal pool, in a shared slot or in a temporary's slot).
+Proved so far: `rt_bound`, and the four effect
 routines of the test harness (`Z80Rt.lean`); the board's routines (the
 ring filled by the interrupt routine) need interrupts in the machine of
 the proofs, which it does not have — `WSteps` runs instructions only —

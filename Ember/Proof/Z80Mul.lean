@@ -50,19 +50,20 @@ def RtEff (Z : ZCtx) (e : Ember.Lang.Effect) : Prop :=
 
 /-- The routines on values of `n` bytes in the accumulator. -/
 structure RtW (Z : ZCtx) (n : Nat) : Prop where
-  /-- accumulator := the `n` bytes at `HL` -/
-  ld : RtAcc Z s!"rt_ld{bits n}" (fun _ => True)
+  /-- accumulator := the `n` bytes at `HL`.  (Of all four: the bytes at `HL` are apart from the accumulator
+  and the stack, `HLApart` — the routines of the runtime are not right without it.) -/
+  ld : RtAcc Z s!"rt_ld{bits n}" (HLApart Z n)
     (fun s s' => IR.Sem.rd s'.mem Z.acc n = IR.Sem.rd s.mem s.hl.toNat n)
   /-- the `n` bytes at `HL` (in RAM) := accumulator -/
   st : Uses Z s!"rt_st{bits n}" → ∃ entry, Z.sym s!"rt_st{bits n}" entry ∧ entry < 65536 ∧
-    Routine Z entry Z.rtK (fun s => Z.ramStart ≤ s.hl.toNat ∧ s.hl.toNat + n ≤ 65536)
+    Routine Z entry Z.rtK (fun s => Z.ramStart ≤ s.hl.toNat ∧ HLApart Z n s)
       (fun s s' => ∀ x, x < Z.stackLo ∨ s.sp.toNat ≤ x → ¬ Z.rt x →
         s'.mem.get! x = (IR.Sem.wr s.mem s.hl.toNat n (IR.Sem.rd s.mem Z.acc n)).get! x)
   /-- accumulator := accumulator `op` the `n` bytes at `HL` -/
-  bin : ∀ op, RtAcc Z (routineW op n) (fun _ => True)
+  bin : ∀ op, RtAcc Z (routineW op n) (HLApart Z n)
     (fun s s' => IR.Sem.rd s'.mem Z.acc n = IR.binOp op n (IR.Sem.rd s.mem Z.acc n) (IR.Sem.rd s.mem s.hl.toNat n))
   /-- the flags of accumulator − the `n` bytes at `HL` -/
-  cmp : RtPure Z s!"rt_cmp{bits n}"
+  cmp : RtPre Z s!"rt_cmp{bits n}" (HLApart Z n)
     (fun s s' => s'.flag FZ = (IR.Sem.rd s.mem Z.acc n == IR.Sem.rd s.mem s.hl.toNat n) ∧
       s'.flag FC = decide (IR.Sem.rd s.mem Z.acc n < IR.Sem.rd s.mem s.hl.toNat n))
 

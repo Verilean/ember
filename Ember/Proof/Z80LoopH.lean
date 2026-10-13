@@ -238,7 +238,7 @@ theorem loopH_setting :
         { ld := acc _ _ _ (by rw [calls_eq]; decide +kernel)
           st := fun hu => absurd hu (no _ (by rw [calls_eq]; decide +kernel))
           bin := fun op => acc _ _ _ (by rw [calls_eq]; cases op <;> decide +kernel)
-          cmp := pure _ _ (by rw [calls_eq]; decide +kernel) }
+          cmp := fun hu => absurd hu (no _ (by rw [calls_eq]; decide +kernel)) }
       accA := acc _ _ _ (by rw [calls_eq]; decide)
       accHL := acc _ _ _ (by rw [calls_eq]; decide)
       eff := fun e he => by

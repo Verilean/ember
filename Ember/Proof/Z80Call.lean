@@ -347,18 +347,35 @@ def RtAcc (Z : ZCtx) (name : String) (pre : Cpu → Prop) (rel : Cpu → Cpu →
   Uses Z name → ∃ entry, Z.sym name entry ∧ entry < 65536 ∧
     Routine Z entry Z.rtK pre (fun s s' => rel s s' ∧ AccFree Z s s')
 
+/-- The `n` bytes at `HL` are ones a routine on the accumulator can work
+with: they do not wrap, and none is a byte of the accumulator (the
+routines go through the bytes in order, writing the accumulator as they
+go) or of the stack (a routine may push, and `rt_st` must not write its
+own return address). -/
+def HLApart (Z : ZCtx) (n : Nat) (s : Cpu) : Prop :=
+  s.hl.toNat + n ≤ 65536 ∧ ∀ j, j < n →
+    (s.hl.toNat + j < Z.acc ∨ Z.acc + 8 ≤ s.hl.toNat + j) ∧
+    (s.hl.toNat + j < Z.stackLo ∨ Z.stackHi ≤ s.hl.toNat + j)
+
+/-- A routine of the runtime that leaves memory alone but the free
+stack: `rel` between the state it is entered in (with `pre`) and the
+state it returns in. -/
+def RtPre (Z : ZCtx) (name : String) (pre : Cpu → Prop) (rel : Cpu → Cpu → Prop) : Prop :=
+  Uses Z name → ∃ entry, Z.sym name entry ∧ entry < 65536 ∧
+    Routine Z entry Z.rtK pre (fun s s' => rel s s' ∧ FreeStack Z s s')
+
 /-- A routine of the runtime that works on registers: `rel` between the
 state it is entered in and the state it returns in. -/
 def RtPure (Z : ZCtx) (name : String) (rel : Cpu → Cpu → Prop) : Prop :=
-  Uses Z name → ∃ entry, Z.sym name entry ∧ entry < 65536 ∧
-    Routine Z entry Z.rtK (fun _ => True) (fun s s' => rel s s' ∧ FreeStack Z s s')
+  RtPre Z name (fun _ => True) rel
 
 /-- **A call of a routine of the runtime**, from states that agree. -/
-theorem rt_call {base : Nat} {sF : GS} (ok : Z.OK) (hT : FnLay Z E) (F : GFinal Z base sF) {s0 s1 : GS}
-    {name : String} {rel : Cpu → Cpu → Prop} (hx : GExt s1 sF)
-    (ho : s1.out = s0.out.push (.ins ⟨.call, [.imm (.sym name)]⟩)) (hrt : RtPure Z name rel)
+theorem rt_call_pre {base : Nat} {sF : GS} (ok : Z.OK) (hT : FnLay Z E) (F : GFinal Z base sF) {s0 s1 : GS}
+    {name : String} {pre : Cpu → Prop} {rel : Cpu → Cpu → Prop} (hx : GExt s1 sF)
+    (ho : s1.out = s0.out.push (.ins ⟨.call, [.imm (.sym name)]⟩)) (hrt : RtPre Z name pre rel)
     (hdep : Z.rtK + 2 ≤ Z.depth E.fn.name) {regs : Regs} {ist : IR.Sem.St} {tmps : Array Nat} {s : Cpu}
-    (R : Rel Z E fr dt regs ist tmps s) (hat : At Z.addrs (base + s0.out.size) s) :
+    (R : Rel Z E fr dt regs ist tmps s) (hat : At Z.addrs (base + s0.out.size) s)
+    (hpre : ∀ c1, CallSt s c1 → pre c1) :
     ∃ c1 s', CallSt s c1 ∧ Steps s s' ∧ At Z.addrs (base + s1.out.size) s' ∧ rel c1 s' ∧
       ∀ regs' : Regs,
         (∀ o, o ∈ regs'.a → Own E o → s'.a.toNat = IR.Sem.opd Z.c ist tmps 1 o) →
@@ -372,13 +389,27 @@ theorem rt_call {base : Nat} {sF : GS} (ok : Z.OK) (hT : FnLay Z E) (F : GFinal 
   have hspv : s.sp.toNat = fr.sp.toNat := by rw [R.sp]
   have hstk := ok.stack
   obtain ⟨c1, s', cs, hst, hat', hsp', hh', hrs', hsz', hrel, hfree⟩ :=
-    call_rule ok (F.emitted hx ho) hsym hent hR hat R.img R.run R.rs R.msz (by omega) (by omega)
-      (fun _ _ => trivial)
+    call_rule ok (F.emitted hx ho) hsym hent hR hat R.img R.run R.rs R.msz (by omega) (by omega) hpre
   refine ⟨c1, s', cs, hst, by rw [ho, Array.size_push, ← Nat.add_assoc]; exact hat', hrel, fun regs' ha hhl hina hinhl hacc => ?_⟩
   refine R.free_stack ok hT (fun x hx => ?_) hsz' hrs' (by rw [hh', R.run]) hsp' ha hhl hina hinhl hacc
   have hc1sp : c1.sp.toNat = s.sp.toNat - 2 := by rw [cs.sp]; exact sub2_toNat _ (by omega)
   intro hnrt
   rw [hfree x (by omega) hnrt, cs.mem x (by omega)]
+
+theorem rt_call {base : Nat} {sF : GS} (ok : Z.OK) (hT : FnLay Z E) (F : GFinal Z base sF) {s0 s1 : GS}
+    {name : String} {rel : Cpu → Cpu → Prop} (hx : GExt s1 sF)
+    (ho : s1.out = s0.out.push (.ins ⟨.call, [.imm (.sym name)]⟩)) (hrt : RtPure Z name rel)
+    (hdep : Z.rtK + 2 ≤ Z.depth E.fn.name) {regs : Regs} {ist : IR.Sem.St} {tmps : Array Nat} {s : Cpu}
+    (R : Rel Z E fr dt regs ist tmps s) (hat : At Z.addrs (base + s0.out.size) s) :
+    ∃ c1 s', CallSt s c1 ∧ Steps s s' ∧ At Z.addrs (base + s1.out.size) s' ∧ rel c1 s' ∧
+      ∀ regs' : Regs,
+        (∀ o, o ∈ regs'.a → Own E o → s'.a.toNat = IR.Sem.opd Z.c ist tmps 1 o) →
+        (∀ o, o ∈ regs'.hl → Own E o → s'.hl.toNat = IR.Sem.opd Z.c ist tmps 2 o) →
+        (∀ sl, Opd.slot sl ∈ regs'.a → Own E (.slot sl) → Z.use E.fn.name (sl, 1)) →
+        (∀ sl, Opd.slot sl ∈ regs'.hl → Own E (.slot sl) → Z.use E.fn.name (sl, 2)) →
+        (∀ n o, regs'.acc = some (n, o) → regs.acc = some (n, o)) →
+        Rel Z E fr dt regs' ist tmps s' :=
+  rt_call_pre ok hT F hx ho hrt hdep R hat (fun _ _ => trivial)
 
 /-- **A call of a routine that works on the accumulator**, from states that agree. -/
 theorem acc_call {base : Nat} {sF : GS} (ok : Z.OK) (F : GFinal Z base sF) {s0 s1 : GS}

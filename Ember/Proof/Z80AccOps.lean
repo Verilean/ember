@@ -32,7 +32,7 @@ theorem accHL_ok (ok : Z.OK) (hT : FnLay Z E) (F : GFinal Z base sF) {n : Nat} (
           (∀ c : Cpu, c.h = s'.h → c.l = s'.l →
             (∀ x, x < s'.sp.toNat - 2 ∨ s'.sp.toNat ≤ x → c.mem.get! x = s'.mem.get! x) →
             IR.Sem.rd c.mem Z.acc n = IR.Sem.opd Z.c ist tmps n a ∧
-            IR.Sem.rd c.mem c.hl.toNat n = IR.Sem.opd Z.c ist tmps n b))) s0 := by
+            IR.Sem.rd c.mem c.hl.toNat n = IR.Sem.opd Z.c ist tmps n b ∧ HLApart Z n c))) s0 := by
   simp only [wpg_bind]
   refine wpg_mono (ptrOf_ok n b s0) ?_
   intro pb s1 ⟨ho1, hr1, hp, hsp, hj1, hl1, hlv⟩
@@ -45,7 +45,7 @@ theorem accHL_ok (ok : Z.OK) (hT : FnLay Z E) (F : GFinal Z base sF) {n : Nat} (
   obtain ⟨s', st1, at1, R1⟩ := hl ((GExt.push _ _).trans hx) fr ist tmps s hra
     (by rw [hr1]; exact R) (by rw [ho1]; exact hat)
   obtain ⟨ad, had, hpc⟩ := at1
-  obtain ⟨B, hv, hb, hns, hmem⟩ := ptr_ok (fr := fr) ok hT hn.1 hrb hsp hlv ad
+  obtain ⟨B, hv, hb, hns, hna, hmem⟩ := ptr_ok (fr := fr) ok hT hn.1 hrb hsp hlv ad
   have hnn : (Instr.immW (Z.a.env ad) ⟨.ld, [.hl, .imm (ptrVal E n b)]⟩).toNat = B :=
     immW_toNat _ _ _ _ rfl hv (by omega)
   have hS : Sys s' (((skip (op1 s') 2).setHL (Instr.immW (Z.a.env ad) ⟨.ld, [.hl, .imm (ptrVal E n b)]⟩)).tick 10) := by
@@ -70,6 +70,7 @@ theorem accHL_ok (ok : Z.OK) (hT : FnLay Z E) (F : GFinal Z base sF) {n : Nat} (
     exact rd_congr _ _ _ _ (by omega) (fun x h1 h2 => hcm x (by omega))
   · have hchl : c.hl.toNat = B := by
       rw [hl_toNat, hch, hcl, ← hnn, ← mk16_toNat, mk16_hi_lo]
+    refine ⟨?_, by rw [hchl]; exact hb, fun j hj => by rw [hchl]; exact ⟨hna j hj, hns j hj⟩⟩
     rw [hchl, ← hmem _ ist tmps _ R1]
     refine rd_congr _ _ _ _ hb (fun x h1 h2 => hcm x ?_)
     have := hns (x - B) (by omega)
@@ -102,8 +103,9 @@ theorem binW_ok (ok : Z.OK) (hT : FnLay Z E) (F : GFinal Z base sF) {n : Nat} (h
   obtain ⟨s', st1, at1, R1, _, hop⟩ := hl (hmid.trans (hx2.trans hxF)) fr ist tmps s hra hrb R hat
   obtain ⟨c1, s'', cs, st2, at2, hrel, hfree, hsp', hh', hrs', hsz'⟩ := acc_call ok F (s0 := s1)
     (s1 := { s1 with out := s1.out.push (.ins ⟨.call, [.imm (.sym (routineW op n))]⟩) })
-    ((GExt.regs _ _).trans (hx2.trans hxF)) rfl (hrt.bin op) hdep R1 at1 (fun _ _ => trivial)
-  obtain ⟨ha, hb⟩ := hop c1 cs.h cs.l cs.mem
+    ((GExt.regs _ _).trans (hx2.trans hxF)) rfl (hrt.bin op) hdep R1 at1
+    (fun c1 cs => (hop c1 cs.h cs.l cs.mem).2.2)
+  obtain ⟨ha, hb, _⟩ := hop c1 cs.h cs.l cs.mem
   have R2 : Rel Z E fr dt {} ist tmps s'' :=
     R1.acc_free ok hT hfree hsz' hrs' hh' hsp' (fun o ho => by cases ho) (fun o ho => by cases ho)
       (fun sl h => by cases h) (fun sl h => by cases h) (fun k o h => by cases h) (fun k sl h => by cases h)
@@ -131,10 +133,10 @@ theorem flagsW_ok (ok : Z.OK) (hT : FnLay Z E) (F : GFinal Z base sF) {n : Nat} 
   refine ⟨hx1.trans ((GExt.push _ _).trans (GExt.regs _ _)), fun hxF fr ist tmps s hra hrb R hat => ?_⟩
   obtain ⟨s', st1, at1, R1, hav, hop⟩ :=
     hl ((GExt.push _ _).trans ((GExt.regs _ _).trans hxF)) fr ist tmps s hra hrb R hat
-  obtain ⟨c1, s'', cs, st2, at2, ⟨hz, hc⟩, hRel⟩ := rt_call ok hT F (s0 := s1)
+  obtain ⟨c1, s'', cs, st2, at2, ⟨hz, hc⟩, hRel⟩ := rt_call_pre ok hT F (s0 := s1)
     (s1 := { s1 with out := s1.out.push (.ins ⟨.call, [.imm (.sym s!"rt_cmp{bits n}")]⟩) })
-    ((GExt.regs _ _).trans hxF) rfl hrt.cmp hdep R1 at1
-  obtain ⟨ha, hb⟩ := hop c1 cs.h cs.l cs.mem
+    ((GExt.regs _ _).trans hxF) rfl hrt.cmp hdep R1 at1 (fun c1 cs => (hop c1 cs.h cs.l cs.mem).2.2)
+  obtain ⟨ha, hb, _⟩ := hop c1 cs.h cs.l cs.mem
   rw [ha, hb] at hz hc
   exact ⟨s'', st1.trans st2, at2, hRel _ (fun o ho => by cases ho) (fun o ho => by cases ho)
     (fun sl h => by cases h) (fun sl h => by cases h) (fun k o h => h), FlagsOf.both hz hc⟩
