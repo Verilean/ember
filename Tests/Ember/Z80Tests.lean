@@ -113,6 +113,41 @@ def ownExamples : IO Nat := do
   IO.println s!"z80 own back end: {cases.size} runs of the examples, regressions and index-check programs ({traps} of them trap): interpreter = IR = IR semantics = generated code; {bad} failures"
   return bad
 
+/-- Traces agree only when the program's notes do — names, values, how
+many — and the note of a trap, which each implementation words its own
+way, is the one line left out.  (A note whose name begins with `trap`
+is a note of the program.) -/
+def noteAgreeTests : IO Nat := do
+  let tr (notes : List String) : Trace :=
+    { lines := #[⟨0, .tick⟩] ++ (notes.map fun s => (⟨0, .note s⟩ : Line)).toArray }
+  let agree (a b : List String) := Tools.Fuzz.agree (tr a) (tr b)
+  let big := "tick 4294967295"
+  let cases : List (String × Bool) := [
+    ("same note", agree ["tick 42"] ["tick 42"]),
+    ("value differs", !agree ["tick 1"] ["tick 2"]),
+    ("name differs", !agree ["tick 1"] ["tock 1"]),
+    ("note missing", !agree ["tick 1"] []),
+    ("trapdoor is a note", !agree ["trapdoor 1"] ["trapdoor 2"] && !Tools.Cc.trapped (tr ["trapdoor 1"])),
+    ("trapCount is a note", !agree ["trapCount 1"] ["trapCount 2"] && !Tools.Cc.trapped (tr ["trapCount 1"])),
+    ("a note named trap is a note", !agree ["trap 1"] ["trap 2"] && !Tools.Cc.trapped (tr ["trap 1"])),
+    ("several notes, the largest value", agree ["a 0", big, "b 7"] ["a 0", big, "b 7"]),
+    ("several notes, one differs", !agree ["a 0", big, "b 7"] ["a 0", "tick 4294967294", "b 7"]),
+    ("several notes, one missing", !agree ["a 0", big, "b 7"] ["a 0", "b 7"]),
+    ("several notes, order", !agree ["a 0", "b 7"] ["b 7", "a 0"]),
+    ("a trap, worded differently", agree ["tick 1", "trap fn=main at stmt 3 (x.lean:1:2): index 7 out of bounds [0, 4)"]
+        ["tick 1", "trap (z80)"] && Tools.Cc.trapped (tr ["trap (z80)"]) && Tools.Cc.trapped (tr ["trap"]) &&
+        Tools.Cc.trapped (tr ["trap trap"]) && Tools.Cc.trapped (tr ["trap (sem)"])),
+    ("a trap after notes that differ", !agree ["tick 1", "trap (z80)"] ["tick 2", "trap (sem)"]),
+    ("a trap against none", !agree ["tick 1", "trap (z80)"] ["tick 1"]),
+    ("a trap is the last line only", !agree ["trap (z80)", "tick 1"] ["trap (sem)", "tick 1"])]
+  let mut bad := 0
+  for (n, okc) in cases do
+    unless okc do
+      bad := bad + 1
+      IO.println s!"FAIL note agreement: {n}"
+  IO.println s!"trace agreement on notes: {cases.length} cases (values, names, missing notes, names beginning with trap, traps worded differently); {bad} failures"
+  return bad
+
 /-- The static bound on the stack answers only for images of the shape
 it models: the counter-examples of the review (a jump to a label plus an
 offset, a stack pointer set elsewhere than at the top, an interrupt
@@ -154,6 +189,7 @@ def stackBoundTests : IO Nat := do
 def main : IO UInt32 := do
   let mut bad ← modelTests
   bad := bad + (← stackBoundTests)
+  bad := bad + (← noteAgreeTests)
   bad := bad + (← ownExamples)
   for t in ["sdcc", "make"] do
     if !(← Ember.Tests.TargetTests.installed t) then

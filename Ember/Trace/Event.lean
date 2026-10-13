@@ -46,6 +46,16 @@ def Event.kind : Event → String
   | .rx _ => "rx" | .tx _ => "tx" | .tick => "tick"
   | .pkt _ => "pkt" | .tcb _ => "tcb" | .drop _ => "drop" | .note _ => "note"
 
+/-- Is the text of a `note` that of a trap, not of a note of the program?
+A trap is written `trap` or `trap <where>`, differently by each
+implementation; a note of the program is `<name> <value>`, the value in
+decimal.  So `trapdoor 1` is a program's note, and so is `trap 1` (a
+note the program named `trap`): only `trap` alone, or followed by
+something that is not a number, is a trap. -/
+def isTrapNote (s : String) : Bool :=
+  s == "trap" || (s.startsWith "trap " &&
+    (let r := (s.drop 5).toString; r.isEmpty || !r.all Char.isDigit))
+
 structure Line where
   step : Nat
   ev   : Event
