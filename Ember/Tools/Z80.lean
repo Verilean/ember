@@ -846,8 +846,9 @@ def main (args : List String) : IO UInt32 := do
       return if t.bad == 0 then 0 else 1
   | ["proof-files"] => do
     -- EMBER_STRETCH: instructions in a stretch (for measuring; the files use the default)
-    let n := ((← IO.getEnv "EMBER_STRETCH").bind String.toNat?).getD ProofGen.stretch
-    ProofGen.write (o.out.getD "Ember/Proof") n
+    match ProofGen.stretchOf (← IO.getEnv "EMBER_STRETCH") with
+    | .error e => IO.eprintln s!"proof-files: {e}"; return 1
+    | .ok n => ProofGen.write (o.out.getD "Ember/Proof") n
   | ["trap-note", image] => trapNote image true
   | ["trap-note-terse", image] => trapNote image false
   | ["profile", image] => profile image

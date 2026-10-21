@@ -255,8 +255,31 @@ def stackBoundTests : IO Nat := do
   IO.println s!"z80 stack bound: {cases.length} small images, the unsupported shapes refused; {bad} failures"
   return bad
 
+/-- `proof-files` refuses a stretch of 0 instructions (it never ended) and what is not a number. -/
+def proofGenTests : IO Nat := do
+  let mut bad := 0
+  let check (name : String) (ok : Bool) : IO Nat := do
+    if !ok then IO.println s!"FAIL proof-files: {name}"
+    return if ok then 0 else 1
+  bad := bad + (← check "EMBER_STRETCH unset" (Ember.Tools.ProofGen.stretchOf none matches .ok 20))
+  bad := bad + (← check "EMBER_STRETCH=7" (Ember.Tools.ProofGen.stretchOf (some "7") matches .ok 7))
+  bad := bad + (← check "EMBER_STRETCH=0" (Ember.Tools.ProofGen.stretchOf (some "0") matches .error _))
+  bad := bad + (← check "EMBER_STRETCH=x" (Ember.Tools.ProofGen.stretchOf (some "x") matches .error _))
+  match Net.prog.check with
+  | .error _ => bad := bad + (← check "Net.prog checks" false)
+  | .ok q => match IR.lower q with
+    | .error _ => bad := bad + (← check "Net.prog lowers" false)
+    | .ok ir =>
+      let some f := ir.fns.find? (·.body.size > 0) | return bad + (← check "a function with a body" false)
+      let c (n : Nat) := Ember.Tools.ProofGen.cutsOf f (Array.replicate f.tmps.size true) #[] false none n
+      bad := bad + (← check "cutsOf, a stretch of 0" (c 0 matches .error _))
+      bad := bad + (← check "cutsOf, a stretch of 1" (c 1 matches .ok _))
+  IO.println s!"proof-files: a stretch of 0 or not a number refused; {bad} failures"
+  return bad
+
 def main : IO UInt32 := do
   let mut bad ← modelTests
+  bad := bad + (← proofGenTests)
   bad := bad + (← stackBoundTests)
   bad := bad + (← noteAgreeTests)
   bad := bad + (← boardNoteTests)

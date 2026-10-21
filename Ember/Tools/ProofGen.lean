@@ -294,9 +294,18 @@ def cutAbove : Nat := 40
 /-- Instructions in a stretch. -/
 def stretch : Nat := 20
 
+/-- The instructions in a stretch from `EMBER_STRETCH` (unset: `stretch`); 0 and what is not a number refused. -/
+def stretchOf : Option String → Except String Nat
+  | none => .ok stretch
+  | some v => match v.toNat? with
+    | some n => if n == 0 then .error "EMBER_STRETCH=0: a stretch has at least one instruction" else .ok n
+    | none => .error s!"EMBER_STRETCH={v}: not a number"
+
 /-- The states of one pass at the cuts. -/
 def cutsOf (f : IR.Fn) (spilled : Array Bool) (lits : Array (Nat × Nat)) (isEntry : Bool)
     (live : Option (Array Bool)) (n : Nat := stretch) : Except String Cuts := do
+  -- a stretch of none would never end
+  if n == 0 then throw "a stretch of 0 instructions"
   let env : GEnv := { fn := f, spilled, tmpOff := (tmpLayout f spilled).1, live }
   let s0 : GS := { missed := Array.replicate f.tmps.size false, lits, reads := Array.replicate f.frame false }
   let ((), pre) ← ((genPre f isEntry).run env).run s0
