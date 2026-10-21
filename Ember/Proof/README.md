@@ -761,7 +761,8 @@ footprint (`ZCtx.wr`) has changed.
 | `loop_iter`, `loop_run` (`Z80HarnessLoop.lean`) | the harness's loop that calls the entry, for any image (`LoopNeed`: where the loop is, its count of idle calls, the entry); the loopback image's `loop_iter`/`loop_run` are now these |
 | **`stackH_run`**, `stackH_run_halt` (`Z80StackHRun.lean`) | the image of the stack for the harness **from reset**: start-up — the RAM cleared, **the initial values of `iss` and `ip_id` copied from the ROM** (the bytes there are computed on the assembled image; the IR's initial memory in RAM is those two values and zero, `st0_ram`) — then the loop: for any number of calls of `main` that end in the IR's semantics from its initial state, the machine of the harness is at the head of the loop with the world they leave, or it left the loop and stopped with the input used up.  Taken here: `Moves` (a call of `main` with input remaining moves the position in the input) and that the IR's calls end — both discharged in `stackH_spec_halt` |
 | **`stackH_spec_halt`** (`Z80StackHSpec.lean`) | the image of the stack for the harness **against the Spec**, from reset, for any input: the machine of the harness stops (`di; halt`) holding the world of some number of calls of `main` in the Ember semantics that leave no input, and the kept lines of that world — transmissions and drops, each with the number of its input — are those of `Spec.step`, input by input.  Composes `stackH_run_halt` with `main_step`/`main_run_all` (M5.6: a call never traps, reads one item; so `Moves`, `good_step`) and `lower_iter` (M7.1).  **Taken:** `StackSrc p` — that `p` is the checked SLIP build (`TcpAll`, `TcpReasons`, `main_fn`), lowered to `Stack.ir`, accepted by `progOkB`/`irOkB` with this layout; the parts that can be computed are a `#guard` on `Net.prog.check` |
-| **`stackH_halts`** (`Z80StackHMachine.lean`; `run_sim_of` in `Z80Machine.lean`) | the same **on the machine the tests run**: the image `assemble` makes of `StackH.items`, loaded into `Ember.Z80.Machine` as the tests load it (`harnessMachine`) and stepped by `Machine.step`, for any input: after some number of steps the CPU is halted and the machine stands for a world (`Sim`) with no input left whose transmissions and drops are those of `Spec.step`.  Not in it: `Target.runHarness` (its loop until `halted`, the printing of the trace), the notes and `tcb` lines (the comparison keeps transmissions and drops), the image as built by default, a board |
+| **`stackH_halts`** (`Z80StackHMachine.lean`; `run_sim_of` in `Z80Machine.lean`) | the same **on the machine the tests run**: the image `assemble` makes of `StackH.items`, loaded into `Ember.Z80.Machine` as the tests load it (`harnessMachine`) and stepped by `Machine.step`, for any input: after some number of steps the CPU is halted and the machine stands for a world (`Sim`) with no input left whose transmissions and drops are those of `Spec.step`.  Not in it (see `stackH_trace`): the notes and `tcb` lines (the comparison keeps transmissions and drops), the image as built by default, a board |
+| **`stackH_trace`** (`Z80StackHTrace.lean`; `Target.runToHalt`, `Target.inputLines` in `Ember/Z80/Target.lean`) | **the trace the tests print**: the same image loaded as `Tools.Z80.machineOf` loads it (`loaded`; `#guard`: `build` without the passes gives these bytes at 0) and run by `Target.runHarness` with the program's names of drops and notes, for any header and input: from some number of steps on (`maxSteps`) the run does not fail, its transmissions and drops — each with the number of its input, in order — are those of `Spec.run` (`keptLines`), and its input lines are the inputs.  `runHarness` steps by a recursion on the steps (`runToHalt`) and prints by list functions, so that the proof follows it (the trace it prints is the one it printed before; `lake test` compares it).  Not in it: the notes (the comparison does not keep them), the line a trap would add (a note; that no trap is recorded is not proved), the image as built by default, a board |
 
 **Checked, not proved** (translation validation, on every function
 generated): `jumpsOk` — what the generator assumes the registers hold
@@ -830,8 +831,8 @@ The machine there is the CPU model with the harness's ports written as
 a function of the world (`hbus`, `hdev`); `Ember.Z80.Machine` — the
 machine the tests run — steps as it does (`step_sim`), so the statement
 is also of `Machine.step` from the machine as the tests build it
-(`loopH_halts`: it processes all its input and stops).  What the tests add around it is not in the theorem:
-`Target.runHarness` (its loop until `halted`, the printing of the trace).  Of the SLIP build of the stack, for the
+(`loopH_halts`: it processes all its input and stops).  What the tests add around it is not in that theorem:
+`Target.runHarness` (its loop until `halted`, the printing of the trace) — for the stack it is (`stackH_trace`).  Of the SLIP build of the stack, for the
 test harness and without the passes: `stackH_ok` — every function of
 the image does what the IR's does, nothing assumed of the program, the
 layout, the image or the runtime (the literal pool and the checks of
@@ -841,7 +842,9 @@ harness's loop are proved from their items (`stackH_run`), composed
 with the Ember semantics and the Spec (`stackH_spec_halt`) and carried
 to `Machine.step` (`stackH_halts`): **the image of the stack, loaded
 and run as the tests do, processes all its input and stops, having
-transmitted and dropped what `Spec.step` does** — for the harness, the
+transmitted and dropped what `Spec.step` does**, and the trace
+`Target.runHarness` prints of it has the transmissions and drops of
+`Spec.run`'s, input by input (`stackH_trace`) — for the harness, the
 image without the passes, and given `StackSrc` of the Ember program
 (its computable parts, and that the written-out IR and items are the
 lowering and the build, are `#guard`s).  For the board the checks of its layout

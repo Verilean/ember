@@ -19,8 +19,8 @@ machine).
 
 What it is not: `Target.runHarness` — the loop of the tests until
 `halted`, and the trace it prints from the machine's events — is not in
-the theorem; nor is the image as built by default (with the passes on
-the assembly), nor a board.
+the theorem (it is in `stackH_trace`, `Z80StackHTrace`); nor is the
+image as built by default (with the passes on the assembly), nor a board.
 -/
 
 namespace Ember.Proof.Z80Gen.StackH

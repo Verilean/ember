@@ -79,28 +79,44 @@ def replay (m : Machine) (h : Header) (inputs : Array Input) : Result := Id.run 
 
 /-! ## The test harness (`runtime/z80/harness.c`) -/
 
+/-- Step until the CPU halts, at most `fuel` steps: the halted machine,
+or the machine still running when the steps ran out.  (A recursion on
+the steps, so that proofs can follow it.) -/
+def runToHalt : Nat → Machine → Except Machine Machine
+  | fuel, m =>
+    if m.cpu.halted then .ok m
+    else match fuel with
+      | 0 => .error m
+      | f + 1 => runToHalt f m.step
+
+/-- The line the harness writes of an event it recorded (a trap: none,
+it is noted after the last input). -/
+def eventLine (dropNames noteNames : Array String) : HEvent → Option Event
+  | .tx b => some (.tx b)
+  | .drop c => some (.drop (dropNames.getD c.toNat s!"code-{c.toNat}"))
+  | .note c v => some (.note s!"{noteNames.getD c.toNat s!"note-{c.toNat}"} {v}")
+  | .trap => none
+
+/-- The line of an input. -/
+def inputEvent : Input → Event
+  | .rx b => .rx b
+  | .tick => .tick
+
+/-- The lines of input `i`: the input, then the events recorded for it, in order. -/
+def inputLines (inputs : Array Input) (events : List (Nat × HEvent)) (dropNames noteNames : Array String)
+    (i : Nat) : List Line :=
+  ⟨i, inputEvent inputs[i]!⟩ ::
+    events.filterMap fun (j, e) => if j == i then (eventLine dropNames noteNames e).map (⟨i, ·⟩) else none
+
 /-- Run program `k` of a harness image on the inputs, as the interpreter's
 `runMachine` and the host harness do; the trace they would write. -/
 def runHarness (m : Machine) (k : Nat) (h : Header) (inputs : Array Input)
     (dropNames noteNames : Array String) (maxSteps : Nat := 200000000) : Except String Trace := do
-  let mut m := { m with harness := true, inputs := inputs, program := UInt8.ofNat k }
-  let mut n := 0
-  while !m.cpu.halted do
-    if n ≥ maxSteps then throw s!"still running after {maxSteps} instructions (pc={m.cpu.pc})"
-    m := m.step
-    n := n + 1
-  let mut lines : Array Line := #[]
-  let mut trapped := false
-  for i in [0:inputs.size] do
-    lines := lines.push ⟨i, match inputs[i]! with | .rx b => .rx b | .tick => .tick⟩
-    for (j, e) in m.events do
-      if j == i then
-        match e with
-        | .tx b => lines := lines.push ⟨i, .tx b⟩
-        | .drop c => lines := lines.push ⟨i, .drop (dropNames.getD c.toNat s!"code-{c}")⟩
-        | .note c v => lines := lines.push ⟨i, .note s!"{noteNames.getD c.toNat s!"note-{c}"} {v}"⟩
-        | .trap => trapped := true
-  if trapped then lines := lines.push ⟨m.cur, .note "trap (z80)"⟩
-  return { header := h, lines }
+  let m ← match runToHalt maxSteps { m with harness := true, inputs := inputs, program := UInt8.ofNat k } with
+    | .ok m => pure m
+    | .error m => throw s!"still running after {maxSteps} instructions (pc={m.cpu.pc})"
+  let lines := (List.range inputs.size).flatMap (inputLines inputs m.events.toList dropNames noteNames)
+  let trapped := m.events.any fun (j, e) => j < inputs.size && e matches .trap
+  return { header := h, lines := (lines ++ if trapped then [(⟨m.cur, .note "trap (z80)"⟩ : Line)] else []).toArray }
 
 end Ember.Z80.Target
