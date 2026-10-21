@@ -132,9 +132,9 @@ def runCheck : Bool :=
       | some e => a.labels.reverse.lookup (fnLabel "main") == some e && decide (e < 65536)
       | none => false)
    | .error _ => false) &&
-  !img.plan.wrB "main" 32776 &&
-  decide (img.plan.stackLo + img.plan.depthOf "main" ≤ 65534) && decide (img.plan.stackLo ≤ 65532) &&
-  (img.plan.data.all fun iv => decide (32777 ≤ iv.1) && decide (iv.2 ≤ 33565)) &&
+  !plan.wrB "main" 32776 &&
+  decide (plan.stackLo + plan.depthOf "main" ≤ 65534) && decide (plan.stackLo ≤ 65532) &&
+  (plan.data.all fun iv => decide (32777 ≤ iv.1) && decide (iv.2 ≤ 33565)) &&
   decide ((initsOf layout Stack.ir.globals).drop 61 = [(33068, [0, 0, 1, 0]), (33072, [1, 0])]) &&
   ((initsOf layout Stack.ir.globals).take 61).all fun p => decide (p.1 + p.2.length ≤ 32768)
 
@@ -175,8 +175,9 @@ theorem facts {a : Assembled} (ha : assemble items = .ok a) : Facts a := by
   obtain ⟨⟨⟨⟨⟨⟨⟨⟨⟨⟨⟨⟨hhead, hjump⟩, hstart⟩, hinit⟩, hzero⟩, hloop⟩, hlab⟩, hnowr⟩, hdep⟩, hslo⟩, hdata⟩, hinits⟩,
     hconsts⟩ := hbc
   obtain ⟨⟨⟨⟨⟨⟨⟨⟨hram, hrsz⟩, hidle⟩, h1⟩, h2⟩, h3⟩, h4⟩, hrom⟩, hentry⟩ := hlab
-  refine ⟨hhead, hjump, hstart, hinit, hzero, hloop, hram, hrsz, hidle, h1, h2, h3, h4, hrom, ?_, hnowr, hdep, hslo,
-    hdata, hinits, hconsts⟩
+  refine ⟨hhead, hjump, hstart, hinit, hzero, hloop, hram, hrsz, hidle, h1, h2, h3, h4, hrom, ?_,
+    by rw [img_plan]; exact hnowr, by rw [img_plan]; exact hdep, by rw [img_plan]; exact hslo,
+    by rw [img_plan]; exact hdata, hinits, hconsts⟩
   cases he : a.labels.reverse.lookup "f_entry" with
   | none => rw [he] at hentry; cases hentry
   | some e =>

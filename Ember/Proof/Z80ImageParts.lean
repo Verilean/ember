@@ -155,6 +155,15 @@ theorem Gens.prog {p : IR.Prog} {gs : List FnPart} (h : Gens p #[] gs) (hfns : p
 
 namespace ImgIn
 
+/-- The plan of an image whose functions are generated as `gs` say: the
+plan of their environments (so the kernel need not run the generator
+over the program to know it). -/
+theorem plan_parts (I : ImgIn) (gs : List FnPart) (hfns : I.ir.fns = gs.map (·.f)) (hgen : Gens I.ir #[] gs) :
+    I.plan = mkPlan (I.planIn (envsOf gs)) := by
+  have henvs : I.envs = envsOf gs := by unfold envs; rw [(hgen.prog hfns).1]
+  unfold plan
+  rw [henvs]
+
 /-- What is computed of the assembled items, the functions being `gs`. -/
 def partsCheck (I : ImgIn) (gs : List FnPart) : Bool :=
   match assemble I.items with
@@ -185,13 +194,11 @@ theorem ok_parts (I : ImgIn) (gs : List FnPart) (hfns : I.ir.fns = gs.map (·.f)
   | error e => rw [ha] at h; cases h
   | ok a =>
     rw [ha] at h
-    have henvs : I.envs = envsOf gs := by unfold envs; rw [he]
     simp only [Bool.and_eq_true, List.all_eq_true, decide_eq_true_eq, beq_iff_eq, Bool.or_eq_true] at h
     obtain ⟨⟨⟨⟨⟨⟨hlab, hlits⟩, hglob⟩, hfr⟩, hsub⟩, hacc⟩, hsize⟩ := h
     obtain ⟨addrs, hpl⟩ := placed_of_assemble ha
     refine ⟨a, addrs, rfl, hsize, fun W bus dev wrel quiet => ?_⟩
-    have hP : I.plan = mkPlan (I.planIn (envsOf gs)) := by unfold plan; rw [henvs]
-    rw [hP]
+    rw [I.plan_parts gs hfns hgen]
     have hpc : planCheck (I.planIn (envsOf gs)) = true := by
       unfold planCheck
       rw [hplan, Bool.true_and, List.all_eq_true]

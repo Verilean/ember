@@ -63,6 +63,9 @@ theorem st_main : fnStaticB plan (genEnv g_main.f g_main.missed g_main.live) = t
 theorem plan_static : ∀ g, g ∈ gens → fnStaticB plan (genEnv g.f g.missed g.live) = true :=
   (List.forall_mem_cons.mpr ⟨st_get16, (List.forall_mem_cons.mpr ⟨st_get32, (List.forall_mem_cons.mpr ⟨st_set16, (List.forall_mem_cons.mpr ⟨st_set32, (List.forall_mem_cons.mpr ⟨st_add16, (List.forall_mem_cons.mpr ⟨st_csum, (List.forall_mem_cons.mpr ⟨st_pseudo, (List.forall_mem_cons.mpr ⟨st_csum_update, (List.forall_mem_cons.mpr ⟨st_verifies, (List.forall_mem_cons.mpr ⟨st_slip_send, (List.forall_mem_cons.mpr ⟨st_ip_send, (List.forall_mem_cons.mpr ⟨st_icmp_input, (List.forall_mem_cons.mpr ⟨st_udp_input, (List.forall_mem_cons.mpr ⟨st_ip_input, (List.forall_mem_cons.mpr ⟨st_slip_store, (List.forall_mem_cons.mpr ⟨st_slip_rx, (List.forall_mem_cons.mpr ⟨st_rto, (List.forall_mem_cons.mpr ⟨st_tcb_reset, (List.forall_mem_cons.mpr ⟨st_cap, (List.forall_mem_cons.mpr ⟨st_wnd, (List.forall_mem_cons.mpr ⟨st_seg_len, (List.forall_mem_cons.mpr ⟨st_tcp_emit, (List.forall_mem_cons.mpr ⟨st_send_seg, (List.forall_mem_cons.mpr ⟨st_send_syn_ack, (List.forall_mem_cons.mpr ⟨st_send_reset, (List.forall_mem_cons.mpr ⟨st_output, (List.forall_mem_cons.mpr ⟨st_rexmit, (List.forall_mem_cons.mpr ⟨st_acceptable, (List.forall_mem_cons.mpr ⟨st_listen_input, (List.forall_mem_cons.mpr ⟨st_ack_input, (List.forall_mem_cons.mpr ⟨st_tcp_segment, (List.forall_mem_cons.mpr ⟨st_parse_mss, (List.forall_mem_cons.mpr ⟨st_tcp_input, (List.forall_mem_cons.mpr ⟨st_tcp_tick, (List.forall_mem_cons.mpr ⟨st_main, (fun _ h => absurd h List.not_mem_nil)⟩)⟩)⟩)⟩)⟩)⟩)⟩)⟩)⟩)⟩)⟩)⟩)⟩)⟩)⟩)⟩)⟩)⟩)⟩)⟩)⟩)⟩)⟩)⟩)⟩)⟩)⟩)⟩)⟩)⟩)⟩)⟩)⟩)⟩)⟩)
 
+/-- The plan of the image, without the kernel running the generator over the program. -/
+theorem img_plan : img.plan = plan := img.plan_parts gens fns_eq gens_ok
+
 theorem parts_check : img.partsCheck gens = true := by decide +kernel
 
 /-- **The image of the stack for the harness, checked**: the setting of
