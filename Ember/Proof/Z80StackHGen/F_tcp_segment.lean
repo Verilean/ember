@@ -1,4 +1,4 @@
-import Ember.Proof.Z80StackHGen.F_ack_input
+import Ember.Proof.Z80StackHGen.F_tcp_segment_0
 
 /-! The generator on `tcp_segment` (written by `ember-z80 proof-files`; see `Z80StackHGen`). -/
 
@@ -8,555 +8,6 @@ open Ember.Z80 Ember.Z80.Asm Ember.Z80.Codegen
 set_option maxRecDepth 100000
 -- one theorem at a time: checked at once, the kernel's work for each adds up
 set_option Elab.async false
-
-def g_tcp_segment : FnPart :=
-  { f := Stack.fn_tcp_segment, missed := #[false, false, false, false, false, false, false, false, false, false, true, false, false, false, false, false, false, false], live := some #[true, true, true, true, true, true, true, true, true, false, true, false, true, false, true, false, true, false],
-    code := (items.drop 1803).take 383, lits := #[(4, 167772161), (4, 4294967295), (4, 0), (4, 1), (4, 65536), (4, 2147483648)], size := 4 }
-
-def p1code_tcp_segment : List Item := [
-  .label "f_tcp_segment",
-  .ins { op := .ld, args := [.hl, .mem (.sym "g_sg" 6)] },
-  .ins { op := .ld, args := [.a, .l] },
-  .ins { op := .xor, args := [.imm (.num 7)] },
-  .ins { op := .or, args := [.h] },
-  .ins { op := .jp, args := [.z, .imm (.sym "l_tcp_segment_0" 0)] },
-  .ins { op := .ld, args := [.a, .mem (.sym "g_sg" 16)] },
-  .ins { op := .and, args := [.imm (.num 4)] },
-  .ins { op := .ld, args := [.mem (.sym "fr_tcp_segment_46_t" 0), .a] },
-  .ins { op := .or, args := [.a] },
-  .ins { op := .jp, args := [.nz, .imm (.sym "l_tcp_segment_1" 0)] },
-  .ins { op := .call, args := [.imm (.sym "f_send_reset" 0)] },
-  .label "l_tcp_segment_1",
-  .ins { op := .ld, args := [.a, .imm (.num 21)] },
-  .ins { op := .call, args := [.imm (.sym "rt_drop" 0)] },
-  .ins { op := .ret, args := [] },
-  .label "l_tcp_segment_0",
-  .ins { op := .ld, args := [.a, .mem (.sym "g_t" 0)] },
-  .ins { op := .or, args := [.a] },
-  .ins { op := .jp, args := [.z, .imm (.sym "l_tcp_segment_3" 0)] },
-  .ins { op := .ld, args := [.hl, .imm (.sym "g_sg" 0)] },
-  .ins { op := .call, args := [.imm (.sym "rt_ld32" 0)] },
-  .ins { op := .ld, args := [.hl, .imm (.sym "g_t" 1)] },
-  .ins { op := .call, args := [.imm (.sym "rt_cmp32" 0)] },
-  .ins { op := .jp, args := [.nz, .imm (.sym "l_tcp_segment_4" 0)] },
-  .ins { op := .ld, args := [.hl, .mem (.sym "g_sg" 4)] },
-  .ins { op := .ld, args := [.de, .mem (.sym "g_t" 5)] },
-  .ins { op := .or, args := [.a] },
-  .ins { op := .sbc, args := [.hl, .de] },
-  .ins { op := .jp, args := [.z, .imm (.sym "l_tcp_segment_2" 0)] },
-  .label "l_tcp_segment_4",
-  .label "l_tcp_segment_3",
-  .ins { op := .call, args := [.imm (.sym "f_listen_input" 0)] },
-  .ins { op := .ret, args := [] },
-  .label "l_tcp_segment_2",
-  .ins { op := .xor, args := [.a] },
-  .ins { op := .ld, args := [.mem (.sym "g_t" 33), .a] },
-  .ins { op := .call, args := [.imm (.sym "f_acceptable" 0)] },
-  .ins { op := .ld, args := [.mem (.sym "fr_tcp_segment" 0), .a] },
-  .ins { op := .or, args := [.a] },
-  .ins { op := .jp, args := [.nz, .imm (.sym "l_tcp_segment_5" 0)] },
-  .ins { op := .ld, args := [.a, .mem (.sym "g_sg" 16)] },
-  .ins { op := .and, args := [.imm (.num 4)] },
-  .ins { op := .ld, args := [.mem (.sym "fr_tcp_segment_46_t" 1), .a] },
-  .ins { op := .or, args := [.a] },
-  .ins { op := .jp, args := [.z, .imm (.sym "l_tcp_segment_6" 0)] },
-  .ins { op := .ld, args := [.a, .imm (.num 27)] },
-  .ins { op := .call, args := [.imm (.sym "rt_drop" 0)] },
-  .ins { op := .ret, args := [] },
-  .label "l_tcp_segment_6",
-  .ins { op := .ld, args := [.a, .mem (.sym "g_t" 0)] },
-  .ins { op := .cp, args := [.imm (.num 1)] },
-  .ins { op := .jp, args := [.nz, .imm (.sym "l_tcp_segment_7" 0)] },
-  .ins { op := .ld, args := [.a, .mem (.sym "g_sg" 16)] },
-  .ins { op := .and, args := [.imm (.num 2)] },
-  .ins { op := .ld, args := [.mem (.sym "fr_tcp_segment_46_t" 2), .a] },
-  .ins { op := .or, args := [.a] },
-  .ins { op := .jp, args := [.z, .imm (.sym "l_tcp_segment_7" 0)] },
-  .ins { op := .ld, args := [.a, .mem (.sym "g_sg" 16)] },
-  .ins { op := .and, args := [.imm (.num 16)] },
-  .ins { op := .ld, args := [.mem (.sym "fr_tcp_segment_46_t" 3), .a] },
-  .ins { op := .or, args := [.a] },
-  .ins { op := .jp, args := [.nz, .imm (.sym "l_tcp_segment_7" 0)] },
-  .ins { op := .ld, args := [.hl, .imm (.sym "g_sg" 8)] },
-  .ins { op := .call, args := [.imm (.sym "rt_ld32" 0)] },
-  .ins { op := .ld, args := [.hl, .imm (.sym "lit32_1" 0)] },
-  .ins { op := .call, args := [.imm (.sym "rt_add32" 0)] },
-  .ins { op := .ld, args := [.hl, .imm (.sym "fr_tcp_segment_46_t" 4)] },
-  .ins { op := .call, args := [.imm (.sym "rt_st32" 0)] },
-  .ins { op := .ld, args := [.hl, .imm (.sym "g_t" 15)] },
-  .ins { op := .call, args := [.imm (.sym "rt_cmp32" 0)] },
-  .ins { op := .jp, args := [.nz, .imm (.sym "l_tcp_segment_7" 0)] },
-  .ins { op := .call, args := [.imm (.sym "f_send_syn_ack" 0)] },
-  .ins { op := .ld, args := [.a, .imm (.num 28)] },
-  .ins { op := .call, args := [.imm (.sym "rt_drop" 0)] },
-  .ins { op := .ret, args := [] },
-  .label "l_tcp_segment_7",
-  .ins { op := .ld, args := [.a, .imm (.num 16)] },
-  .ins { op := .ld, args := [.mem (.sym "fr_send_seg" 0), .a] },
-  .ins { op := .ld, args := [.hl, .imm (.sym "g_t" 11)] },
-  .ins { op := .call, args := [.imm (.sym "rt_ld32" 0)] },
-  .ins { op := .ld, args := [.hl, .imm (.sym "fr_send_seg" 1)] },
-  .ins { op := .call, args := [.imm (.sym "rt_st32" 0)] },
-  .ins { op := .ld, args := [.hl, .imm (.num 0)] },
-  .ins { op := .ld, args := [.mem (.sym "fr_send_seg" 5), .hl] },
-  .ins { op := .ld, args := [.mem (.sym "fr_send_seg" 7), .hl] },
-  .ins { op := .xor, args := [.a] },
-  .ins { op := .call, args := [.imm (.sym "f_send_seg" 0)] },
-  .ins { op := .ld, args := [.a, .imm (.num 29)] },
-  .ins { op := .call, args := [.imm (.sym "rt_drop" 0)] },
-  .ins { op := .ret, args := [] },
-  .label "l_tcp_segment_5",
-  .ins { op := .ld, args := [.a, .mem (.sym "g_sg" 16)] },
-  .ins { op := .and, args := [.imm (.num 4)] },
-  .ins { op := .ld, args := [.mem (.sym "fr_tcp_segment_46_t" 8), .a] },
-  .ins { op := .or, args := [.a] },
-  .ins { op := .jp, args := [.z, .imm (.sym "l_tcp_segment_8" 0)] },
-  .ins { op := .call, args := [.imm (.sym "f_tcb_reset" 0)] },
-  .ins { op := .ld, args := [.hl, .imm (.sym "lit32_0" 0)] },
-  .ins { op := .call, args := [.imm (.sym "rt_ld32" 0)] },
-  .ins { op := .xor, args := [.a] },
-  .ins { op := .call, args := [.imm (.sym "rt_note" 0)] },
-  .ins { op := .ret, args := [] },
-  .label "l_tcp_segment_8",
-  .ins { op := .ld, args := [.a, .mem (.sym "g_sg" 16)] },
-  .ins { op := .and, args := [.imm (.num 2)] },
-  .ins { op := .ld, args := [.mem (.sym "fr_tcp_segment_46_t" 9), .a] },
-  .ins { op := .or, args := [.a] },
-  .ins { op := .jp, args := [.z, .imm (.sym "l_tcp_segment_9" 0)] },
-  .ins { op := .ld, args := [.hl, .imm (.sym "g_t" 1)] },
-  .ins { op := .call, args := [.imm (.sym "rt_ld32" 0)] },
-  .ins { op := .ld, args := [.hl, .imm (.sym "fr_tcp_emit" 0)] },
-  .ins { op := .call, args := [.imm (.sym "rt_st32" 0)] },
-  .ins { op := .ld, args := [.hl, .imm (.num 7)] },
-  .ins { op := .ld, args := [.mem (.sym "fr_tcp_emit" 4), .hl] },
-  .ins { op := .ld, args := [.hl, .mem (.sym "g_t" 5)] },
-  .ins { op := .ld, args := [.mem (.sym "fr_tcp_emit" 6), .hl] },
-  .ins { op := .ld, args := [.hl, .imm (.sym "g_t" 11)] },
-  .ins { op := .call, args := [.imm (.sym "rt_ld32" 0)] },
-  .ins { op := .ld, args := [.hl, .imm (.sym "fr_tcp_emit" 8)] },
-  .ins { op := .call, args := [.imm (.sym "rt_st32" 0)] },
-  .ins { op := .ld, args := [.hl, .imm (.sym "lit32_0" 0)] },
-  .ins { op := .call, args := [.imm (.sym "rt_ld32" 0)] },
-  .ins { op := .ld, args := [.hl, .imm (.sym "fr_tcp_emit" 12)] },
-  .ins { op := .call, args := [.imm (.sym "rt_st32" 0)] },
-  .ins { op := .ld, args := [.a, .imm (.num 4)] },
-  .ins { op := .ld, args := [.mem (.sym "fr_tcp_emit" 16), .a] },
-  .ins { op := .ld, args := [.hl, .imm (.num 0)] },
-  .ins { op := .ld, args := [.mem (.sym "fr_tcp_emit" 17), .hl] },
-  .ins { op := .xor, args := [.a] },
-  .ins { op := .ld, args := [.mem (.sym "fr_tcp_emit" 19), .a] },
-  .ins { op := .ld, args := [.mem (.sym "fr_tcp_emit" 20), .hl] },
-  .ins { op := .call, args := [.imm (.sym "f_tcp_emit" 0)] },
-  .ins { op := .call, args := [.imm (.sym "f_tcb_reset" 0)] },
-  .ins { op := .ld, args := [.a, .imm (.num 30)] },
-  .ins { op := .call, args := [.imm (.sym "rt_drop" 0)] },
-  .ins { op := .ret, args := [] },
-  .label "l_tcp_segment_9",
-  .ins { op := .ld, args := [.a, .mem (.sym "g_sg" 16)] },
-  .ins { op := .and, args := [.imm (.num 16)] },
-  .ins { op := .ld, args := [.mem (.sym "fr_tcp_segment_46_t" 10), .a] },
-  .ins { op := .or, args := [.a] },
-  .ins { op := .jp, args := [.nz, .imm (.sym "l_tcp_segment_10" 0)] },
-  .ins { op := .ld, args := [.a, .imm (.num 31)] },
-  .ins { op := .call, args := [.imm (.sym "rt_drop" 0)] },
-  .ins { op := .ret, args := [] },
-  .label "l_tcp_segment_10",
-  .ins { op := .ld, args := [.a, .mem (.sym "g_t" 0)] },
-  .ins { op := .cp, args := [.imm (.num 1)] },
-  .ins { op := .jp, args := [.nz, .imm (.sym "l_tcp_segment_11" 0)] },
-  .ins { op := .ld, args := [.hl, .imm (.sym "g_sg" 12)] },
-  .ins { op := .call, args := [.imm (.sym "rt_ld32" 0)] },
-  .ins { op := .ld, args := [.hl, .imm (.sym "g_t" 11)] },
-  .ins { op := .call, args := [.imm (.sym "rt_cmp32" 0)] },
-  .ins { op := .jp, args := [.z, .imm (.sym "l_tcp_segment_12" 0)] },
-  .ins { op := .call, args := [.imm (.sym "f_send_reset" 0)] },
-  .ins { op := .ld, args := [.a, .imm (.num 32)] },
-  .ins { op := .call, args := [.imm (.sym "rt_drop" 0)] },
-  .ins { op := .ret, args := [] },
-  .label "l_tcp_segment_12",
-  .ins { op := .ld, args := [.a, .imm (.num 2)] },
-  .ins { op := .ld, args := [.mem (.sym "g_t" 0), .a] },
-  .ins { op := .ld, args := [.hl, .imm (.sym "g_t" 7)] },
-  .ins { op := .call, args := [.imm (.sym "rt_st32" 0)] },
-  .ins { op := .xor, args := [.a] },
-  .ins { op := .ld, args := [.mem (.sym "g_t" 30), .a] },
-  .ins { op := .ld, args := [.mem (.sym "g_t" 31), .a] },
-  .ins { op := .jp, args := [.imm (.sym "l_tcp_segment_13" 0)] },
-  .label "l_tcp_segment_11",
-  .ins { op := .call, args := [.imm (.sym "f_ack_input" 0)] },
-  .ins { op := .ld, args := [.mem (.sym "fr_tcp_segment" 1), .a] },
-  .ins { op := .or, args := [.a] },
-  .ins { op := .jp, args := [.nz, .imm (.sym "l_tcp_segment_14" 0)] },
-  .ins { op := .ret, args := [] },
-  .label "l_tcp_segment_14",
-  .label "l_tcp_segment_13",
-  .ins { op := .xor, args := [.a] },
-  .ins { op := .ld, args := [.mem (.sym "fr_tcp_segment" 1), .a] },
-  .ins { op := .ld, args := [.a, .imm (.num 1)] },
-  .ins { op := .ld, args := [.mem (.sym "fr_tcp_segment" 2), .a] },
-  .ins { op := .ld, args := [.c, .a] },
-  .ins { op := .ld, args := [.a, .mem (.sym "g_sg" 16)] },
-  .ins { op := .and, args := [.c] },
-  .ins { op := .ld, args := [.mem (.sym "fr_tcp_segment_46_t" 11), .a] },
-  .ins { op := .or, args := [.a] },
-  .ins { op := .ld, args := [.a, .imm (.num 0)] },
-  .ins { op := .jr, args := [.z, .imm (.sym "x_tcp_segment_0" 0)] },
-  .ins { op := .inc, args := [.a] },
-  .label "x_tcp_segment_0",
-  .ins { op := .ld, args := [.mem (.sym "fr_tcp_segment" 3), .a] },
-  .ins { op := .ld, args := [.hl, .mem (.sym "g_sg" 22)] },
-  .ins { op := .ld, args := [.a, .h] },
-  .ins { op := .or, args := [.l] },
-  .ins { op := .jp, args := [.nz, .imm (.sym "l_tcp_segment_16" 0)] },
-  .ins { op := .ld, args := [.a, .mem (.sym "fr_tcp_segment" 3)] },
-  .ins { op := .or, args := [.a] },
-  .ins { op := .jp, args := [.z, .imm (.sym "l_tcp_segment_15" 0)] },
-  .label "l_tcp_segment_16",
-  .ins { op := .ld, args := [.hl, .imm (.sym "g_t" 15)] },
-  .ins { op := .call, args := [.imm (.sym "rt_ld32" 0)] },
-  .ins { op := .ld, args := [.hl, .imm (.sym "g_sg" 8)] },
-  .ins { op := .call, args := [.imm (.sym "rt_sub32" 0)] },
-  .ins { op := .ld, args := [.hl, .imm (.sym "fr_tcp_segment_46_t" 12)] },
-  .ins { op := .call, args := [.imm (.sym "rt_st32" 0)] },
-  .ins { op := .ld, args := [.hl, .imm (.sym "lit32_2147483648" 0)] },
-  .ins { op := .call, args := [.imm (.sym "rt_cmp32" 0)] },
-  .ins { op := .jp, args := [.c, .imm (.sym "l_tcp_segment_15" 0)] },
-  .ins { op := .ld, args := [.a, .imm (.num 16)] },
-  .ins { op := .ld, args := [.mem (.sym "fr_send_seg" 0), .a] },
-  .ins { op := .ld, args := [.hl, .imm (.sym "g_t" 11)] },
-  .ins { op := .call, args := [.imm (.sym "rt_ld32" 0)] },
-  .ins { op := .ld, args := [.hl, .imm (.sym "fr_send_seg" 1)] },
-  .ins { op := .call, args := [.imm (.sym "rt_st32" 0)] },
-  .ins { op := .ld, args := [.hl, .imm (.num 0)] },
-  .ins { op := .ld, args := [.mem (.sym "fr_send_seg" 5), .hl] },
-  .ins { op := .ld, args := [.mem (.sym "fr_send_seg" 7), .hl] },
-  .ins { op := .xor, args := [.a] },
-  .ins { op := .call, args := [.imm (.sym "f_send_seg" 0)] },
-  .ins { op := .ld, args := [.a, .imm (.num 34)] },
-  .ins { op := .call, args := [.imm (.sym "rt_drop" 0)] },
-  .ins { op := .ret, args := [] },
-  .label "l_tcp_segment_15",
-  .ins { op := .ld, args := [.hl, .mem (.sym "g_sg" 22)] },
-  .ins { op := .ld, args := [.a, .h] },
-  .ins { op := .or, args := [.l] },
-  .ins { op := .jp, args := [.z, .imm (.sym "l_tcp_segment_17" 0)] },
-  .ins { op := .ld, args := [.a, .mem (.sym "g_t" 0)] },
-  .ins { op := .cp, args := [.imm (.num 2)] },
-  .ins { op := .jp, args := [.z, .imm (.sym "l_tcp_segment_19" 0)] },
-  .ins { op := .cp, args := [.imm (.num 5)] },
-  .ins { op := .jp, args := [.z, .imm (.sym "l_tcp_segment_20" 0)] },
-  .ins { op := .cp, args := [.imm (.num 6)] },
-  .ins { op := .jp, args := [.nz, .imm (.sym "l_tcp_segment_18" 0)] },
-  .label "l_tcp_segment_20",
-  .label "l_tcp_segment_19",
-  .ins { op := .ld, args := [.hl, .imm (.sym "g_t" 15)] },
-  .ins { op := .call, args := [.imm (.sym "rt_ld32" 0)] },
-  .ins { op := .ld, args := [.hl, .imm (.sym "g_sg" 8)] },
-  .ins { op := .call, args := [.imm (.sym "rt_sub32" 0)] },
-  .ins { op := .ld, args := [.hl, .imm (.sym "fr_tcp_segment" 4)] },
-  .ins { op := .call, args := [.imm (.sym "rt_st32" 0)] },
-  .ins { op := .ld, args := [.hl, .imm (.num 0)] },
-  .ins { op := .ld, args := [.mem (.sym "fr_tcp_segment" 8), .hl] },
-  .ins { op := .ld, args := [.hl, .mem (.sym "g_sg" 22)] },
-  .ins { op := .call, args := [.imm (.sym "rt_acc_hl" 0)] },
-  .ins { op := .ld, args := [.hl, .imm (.sym "fr_tcp_segment_46_t" 16)] },
-  .ins { op := .call, args := [.imm (.sym "rt_st32" 0)] },
-  .ins { op := .ld, args := [.hl, .imm (.sym "fr_tcp_segment" 4)] },
-  .ins { op := .call, args := [.imm (.sym "rt_ld32" 0)] },
-  .ins { op := .ld, args := [.hl, .imm (.sym "fr_tcp_segment_46_t" 16)] },
-  .ins { op := .call, args := [.imm (.sym "rt_cmp32" 0)] },
-  .ins { op := .jp, args := [.nc, .imm (.sym "l_tcp_segment_21" 0)] },
-  .ins { op := .ld, args := [.hl, .mem (.sym "g_sg" 22)] },
-  .ins { op := .ld, args := [.de, .mem (.sym "fr_tcp_segment" 4)] },
-  .ins { op := .or, args := [.a] },
-  .ins { op := .sbc, args := [.hl, .de] },
-  .ins { op := .ld, args := [.mem (.sym "fr_tcp_segment" 8), .hl] },
-  .label "l_tcp_segment_21",
-  .ins { op := .call, args := [.imm (.sym "f_wnd" 0)] },
-  .ins { op := .ld, args := [.mem (.sym "fr_tcp_segment" 10), .hl] },
-  .ins { op := .ld, args := [.hl, .mem (.sym "fr_tcp_segment" 8)] },
-  .ins { op := .ld, args := [.mem (.sym "fr_tcp_segment" 12), .hl] },
-  .ins { op := .ex, args := [.de, .hl] },
-  .ins { op := .ld, args := [.hl, .mem (.sym "fr_tcp_segment" 10)] },
-  .ins { op := .or, args := [.a] },
-  .ins { op := .sbc, args := [.hl, .de] },
-  .ins { op := .add, args := [.hl, .de] },
-  .ins { op := .jp, args := [.nc, .imm (.sym "l_tcp_segment_22" 0)] },
-  .ins { op := .ld, args := [.mem (.sym "fr_tcp_segment" 12), .hl] },
-  .label "l_tcp_segment_22",
-  .ins { op := .ld, args := [.a, .mem (.sym "g_t" 0)] },
-  .ins { op := .cp, args := [.imm (.num 2)] },
-  .ins { op := .jp, args := [.nz, .imm (.sym "l_tcp_segment_23" 0)] },
-  .ins { op := .ld, args := [.hl, .imm (.num 0)] },
-  .ins { op := .ld, args := [.mem (.sym "fr_tcp_segment" 14), .hl] },
-  .ins { op := .ld, args := [.hl, .mem (.sym "fr_tcp_segment" 12)] },
-  .ins { op := .ld, args := [.mem (.sym "fr_tcp_segment" 16), .hl] },
-  .label "l_tcp_segment_24",
-  .ins { op := .ld, args := [.hl, .mem (.sym "fr_tcp_segment" 14)] },
-  .ins { op := .ld, args := [.de, .mem (.sym "fr_tcp_segment" 16)] },
-  .ins { op := .or, args := [.a] },
-  .ins { op := .sbc, args := [.hl, .de] },
-  .ins { op := .jp, args := [.nc, .imm (.sym "l_tcp_segment_25" 0)] },
-  .ins { op := .ld, args := [.hl, .mem (.sym "g_sg" 20)] },
-  .ins { op := .ld, args := [.de, .mem (.sym "fr_tcp_segment" 4)] },
-  .ins { op := .add, args := [.hl, .de] },
-  .ins { op := .ld, args := [.mem (.sym "fr_tcp_segment_46_t" 22), .hl] },
-  .ins { op := .ld, args := [.de, .mem (.sym "fr_tcp_segment" 14)] },
-  .ins { op := .add, args := [.hl, .de] },
-  .ins { op := .ld, args := [.mem (.sym "fr_tcp_segment_46_t" 20), .hl] },
-  .ins { op := .ld, args := [.bc, .imm (.num 65240)] },
-  .ins { op := .add, args := [.hl, .bc] },
-  .ins { op := .jp, args := [.c, .imm (.sym "rt_trap" 0)] },
-  .ins { op := .ld, args := [.bc, .imm (.sym "g_buf" 296)] },
-  .ins { op := .add, args := [.hl, .bc] },
-  .ins { op := .ld, args := [.a, .mhl] },
-  .ins { op := .ld, args := [.mem (.sym "fr_tcp_segment_46_t" 24), .a] },
-  .ins { op := .ld, args := [.hl, .mem (.sym "g_t" 19)] },
-  .ins { op := .ld, args := [.de, .mem (.sym "fr_tcp_segment" 14)] },
-  .ins { op := .add, args := [.hl, .de] },
-  .ins { op := .ld, args := [.mem (.sym "fr_tcp_segment_46_t" 25), .hl] },
-  .ins { op := .ld, args := [.bc, .imm (.num 65280)] },
-  .ins { op := .add, args := [.hl, .bc] },
-  .ins { op := .jp, args := [.c, .imm (.sym "rt_trap" 0)] },
-  .ins { op := .ld, args := [.bc, .imm (.sym "g_pend" 256)] },
-  .ins { op := .add, args := [.hl, .bc] },
-  .ins { op := .ld, args := [.mhl, .a] },
-  .ins { op := .ld, args := [.hl, .mem (.sym "fr_tcp_segment" 14)] },
-  .ins { op := .inc, args := [.hl] },
-  .ins { op := .ld, args := [.mem (.sym "fr_tcp_segment" 14), .hl] },
-  .ins { op := .jp, args := [.imm (.sym "l_tcp_segment_24" 0)] },
-  .label "l_tcp_segment_25",
-  .ins { op := .ld, args := [.hl, .mem (.sym "g_t" 19)] },
-  .ins { op := .ld, args := [.de, .mem (.sym "fr_tcp_segment" 12)] },
-  .ins { op := .add, args := [.hl, .de] },
-  .ins { op := .ld, args := [.mem (.sym "g_t" 19), .hl] },
-  .label "l_tcp_segment_23",
-  .ins { op := .ld, args := [.hl, .mem (.sym "fr_tcp_segment" 12)] },
-  .ins { op := .call, args := [.imm (.sym "rt_acc_hl" 0)] },
-  .ins { op := .ld, args := [.hl, .imm (.sym "fr_tcp_segment_46_t" 27)] },
-  .ins { op := .call, args := [.imm (.sym "rt_st32" 0)] },
-  .ins { op := .ld, args := [.hl, .imm (.sym "g_t" 15)] },
-  .ins { op := .call, args := [.imm (.sym "rt_add32" 0)] },
-  .ins { op := .ld, args := [.hl, .imm (.sym "g_t" 15)] },
-  .ins { op := .call, args := [.imm (.sym "rt_st32" 0)] },
-  .ins { op := .ld, args := [.a, .imm (.num 1)] },
-  .ins { op := .ld, args := [.mem (.sym "fr_tcp_segment" 1), .a] },
-  .ins { op := .ld, args := [.hl, .mem (.sym "fr_tcp_segment" 12)] },
-  .ins { op := .ld, args := [.de, .mem (.sym "fr_tcp_segment" 8)] },
-  .ins { op := .or, args := [.a] },
-  .ins { op := .sbc, args := [.hl, .de] },
-  .ins { op := .ld, args := [.a, .imm (.num 0)] },
-  .ins { op := .jr, args := [.nz, .imm (.sym "x_tcp_segment_1" 0)] },
-  .ins { op := .inc, args := [.a] },
-  .label "x_tcp_segment_1",
-  .ins { op := .ld, args := [.mem (.sym "fr_tcp_segment" 2), .a] },
-  .label "l_tcp_segment_18",
-  .label "l_tcp_segment_17",
-  .ins { op := .ld, args := [.a, .mem (.sym "fr_tcp_segment" 3)] },
-  .ins { op := .or, args := [.a] },
-  .ins { op := .jp, args := [.z, .imm (.sym "l_tcp_segment_26" 0)] },
-  .ins { op := .ld, args := [.a, .mem (.sym "fr_tcp_segment" 2)] },
-  .ins { op := .or, args := [.a] },
-  .ins { op := .jp, args := [.z, .imm (.sym "l_tcp_segment_26" 0)] },
-  .ins { op := .ld, args := [.hl, .mem (.sym "g_sg" 22)] },
-  .ins { op := .call, args := [.imm (.sym "rt_acc_hl" 0)] },
-  .ins { op := .ld, args := [.hl, .imm (.sym "fr_tcp_segment_46_t" 35)] },
-  .ins { op := .call, args := [.imm (.sym "rt_st32" 0)] },
-  .ins { op := .ld, args := [.hl, .imm (.sym "g_sg" 8)] },
-  .ins { op := .call, args := [.imm (.sym "rt_add32" 0)] },
-  .ins { op := .ld, args := [.hl, .imm (.sym "fr_tcp_segment_46_t" 31)] },
-  .ins { op := .call, args := [.imm (.sym "rt_st32" 0)] },
-  .ins { op := .ld, args := [.hl, .imm (.sym "g_t" 15)] },
-  .ins { op := .call, args := [.imm (.sym "rt_cmp32" 0)] },
-  .ins { op := .jp, args := [.nz, .imm (.sym "l_tcp_segment_26" 0)] },
-  .ins { op := .ld, args := [.a, .mem (.sym "g_t" 0)] },
-  .ins { op := .cp, args := [.imm (.num 2)] },
-  .ins { op := .jp, args := [.nz, .imm (.sym "l_tcp_segment_27" 0)] },
-  .ins { op := .ld, args := [.a, .imm (.num 3)] },
-  .ins { op := .ld, args := [.mem (.sym "g_t" 0), .a] },
-  .ins { op := .ld, args := [.hl, .imm (.sym "g_t" 15)] },
-  .ins { op := .call, args := [.imm (.sym "rt_ld32" 0)] },
-  .ins { op := .ld, args := [.hl, .imm (.sym "lit32_1" 0)] },
-  .ins { op := .call, args := [.imm (.sym "rt_add32" 0)] },
-  .ins { op := .ld, args := [.hl, .imm (.sym "g_t" 15)] },
-  .ins { op := .call, args := [.imm (.sym "rt_st32" 0)] },
-  .ins { op := .ld, args := [.a, .imm (.num 1)] },
-  .ins { op := .ld, args := [.mem (.sym "fr_tcp_segment" 1), .a] },
-  .ins { op := .jp, args := [.imm (.sym "l_tcp_segment_28" 0)] },
-  .label "l_tcp_segment_27",
-  .ins { op := .cp, args := [.imm (.num 5)] },
-  .ins { op := .jp, args := [.nz, .imm (.sym "l_tcp_segment_29" 0)] },
-  .ins { op := .ld, args := [.a, .imm (.num 7)] },
-  .ins { op := .ld, args := [.mem (.sym "g_t" 0), .a] },
-  .ins { op := .ld, args := [.hl, .imm (.sym "g_t" 15)] },
-  .ins { op := .call, args := [.imm (.sym "rt_ld32" 0)] },
-  .ins { op := .ld, args := [.hl, .imm (.sym "lit32_1" 0)] },
-  .ins { op := .call, args := [.imm (.sym "rt_add32" 0)] },
-  .ins { op := .ld, args := [.hl, .imm (.sym "g_t" 15)] },
-  .ins { op := .call, args := [.imm (.sym "rt_st32" 0)] },
-  .ins { op := .ld, args := [.a, .imm (.num 1)] },
-  .ins { op := .ld, args := [.mem (.sym "fr_tcp_segment" 1), .a] },
-  .ins { op := .jp, args := [.imm (.sym "l_tcp_segment_30" 0)] },
-  .label "l_tcp_segment_29",
-  .ins { op := .cp, args := [.imm (.num 6)] },
-  .ins { op := .jp, args := [.nz, .imm (.sym "l_tcp_segment_31" 0)] },
-  .ins { op := .ld, args := [.a, .imm (.num 8)] },
-  .ins { op := .ld, args := [.mem (.sym "g_t" 0), .a] },
-  .ins { op := .ld, args := [.a, .imm (.num 20)] },
-  .ins { op := .ld, args := [.mem (.sym "g_t" 32), .a] },
-  .ins { op := .ld, args := [.hl, .imm (.sym "g_t" 15)] },
-  .ins { op := .call, args := [.imm (.sym "rt_ld32" 0)] },
-  .ins { op := .ld, args := [.hl, .imm (.sym "lit32_1" 0)] },
-  .ins { op := .call, args := [.imm (.sym "rt_add32" 0)] },
-  .ins { op := .ld, args := [.hl, .imm (.sym "g_t" 15)] },
-  .ins { op := .call, args := [.imm (.sym "rt_st32" 0)] },
-  .ins { op := .ld, args := [.a, .imm (.num 1)] },
-  .ins { op := .ld, args := [.mem (.sym "fr_tcp_segment" 1), .a] },
-  .label "l_tcp_segment_31",
-  .label "l_tcp_segment_30",
-  .label "l_tcp_segment_28",
-  .label "l_tcp_segment_26",
-  .ins { op := .ld, args := [.a, .mem (.sym "fr_tcp_segment" 1)] },
-  .ins { op := .call, args := [.imm (.sym "f_output" 0)] },
-  .ins { op := .ret, args := [] }]
-
-def e1_tcp_segment : GEnv := fnEnv Stack.fn_tcp_segment (Array.replicate Stack.fn_tcp_segment.tmps.size true) none
-
-def s1_tcp_segment_pre : GS :=
-  { out := ⟨p1code_tcp_segment.take 1⟩,
-    regs := { a := [], hl := [], acc := none },
-    missed := #[false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false], lits := #[(4, 167772161), (4, 4294967295), (4, 0), (4, 1), (4, 65536)], labels := 0,
-    atLabel := [],
-    dead := false, reads := #[false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false], addrTaken := false,
-    jumps := [],
-    labelRegs := [] }
-
-def s1_tcp_segment_20 : GS :=
-  { out := ⟨p1code_tcp_segment.take 44⟩,
-    regs := { a := [IR.Opd.tmp 1], hl := [], acc := none },
-    missed := #[false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false], lits := #[(4, 167772161), (4, 4294967295), (4, 0), (4, 1), (4, 65536)], labels := 0,
-    atLabel := [(5, { a := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 0 }], hl := [], acc := none }), (2, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "sg", off := 0 }) }), (4, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "sg", off := 0 }) }), (3, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 6 }], acc := none }), (1, { a := [IR.Opd.tmp 0], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 6 }], acc := none }), (0, { a := [], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 6 }], acc := none })],
-    dead := false, reads := #[false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false], addrTaken := false,
-    jumps := [(5, { a := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 0 }], hl := [], acc := none }), (3, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "sg", off := 0 }) }), (4, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "sg", off := 0 }) }), (2, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "sg", off := 0 }) }), (4, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "sg", off := 0 }) }), (3, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 6 }], acc := none }), (1, { a := [], hl := [], acc := none }), (1, { a := [IR.Opd.tmp 0], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 6 }], acc := none }), (0, { a := [], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 6 }], acc := none })],
-    labelRegs := [(2, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "sg", off := 0 }) }), (3, { a := [], hl := [], acc := none }), (4, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "sg", off := 0 }) }), (0, { a := [], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 6 }], acc := none }), (1, { a := [], hl := [], acc := none })] }
-
-def s1_tcp_segment_40 : GS :=
-  { out := ⟨p1code_tcp_segment.take 88⟩,
-    regs := { a := [], hl := [], acc := none },
-    missed := #[false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false], lits := #[(4, 167772161), (4, 4294967295), (4, 0), (4, 1), (4, 65536)], labels := 0,
-    atLabel := [(7, { a := [], hl := [], acc := none }), (6, { a := [IR.Opd.tmp 1], hl := [], acc := none }), (5, { a := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 0 }], hl := [], acc := none }), (2, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "sg", off := 0 }) }), (4, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "sg", off := 0 }) }), (3, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 6 }], acc := none }), (1, { a := [IR.Opd.tmp 0], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 6 }], acc := none }), (0, { a := [], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 6 }], acc := none })],
-    dead := false, reads := #[false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false], addrTaken := false,
-    jumps := [(7, { a := [], hl := [], acc := some (4, IR.Opd.tmp 4) }), (7, { a := [IR.Opd.tmp 3], hl := [], acc := none }), (7, { a := [IR.Opd.tmp 2], hl := [], acc := none }), (7, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [], acc := none }), (6, { a := [IR.Opd.tmp 1], hl := [], acc := none }), (5, { a := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 0 }], hl := [], acc := none }), (3, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "sg", off := 0 }) }), (4, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "sg", off := 0 }) }), (2, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "sg", off := 0 }) }), (4, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "sg", off := 0 }) }), (3, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 6 }], acc := none }), (1, { a := [], hl := [], acc := none }), (1, { a := [IR.Opd.tmp 0], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 6 }], acc := none }), (0, { a := [], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 6 }], acc := none })],
-    labelRegs := [(7, { a := [], hl := [], acc := none }), (6, { a := [IR.Opd.tmp 1], hl := [], acc := none }), (2, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "sg", off := 0 }) }), (3, { a := [], hl := [], acc := none }), (4, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "sg", off := 0 }) }), (0, { a := [], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 6 }], acc := none }), (1, { a := [], hl := [], acc := none })] }
-
-def s1_tcp_segment_60 : GS :=
-  { out := ⟨p1code_tcp_segment.take 132⟩,
-    regs := { a := [IR.Opd.slot { area := IR.Area.frame "tcp_emit", off := 19 }, IR.Opd.const 0], hl := [IR.Opd.slot { area := IR.Area.frame "tcp_emit", off := 20 }, IR.Opd.slot { area := IR.Area.frame "tcp_emit", off := 17 }, IR.Opd.const 0], acc := some (4, IR.Opd.slot { area := IR.Area.frame "tcp_emit", off := 12 }) },
-    missed := #[false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false], lits := #[(4, 167772161), (4, 4294967295), (4, 0), (4, 1), (4, 65536)], labels := 0,
-    atLabel := [(9, { a := [IR.Opd.tmp 6], hl := [], acc := none }), (8, { a := [IR.Opd.tmp 5], hl := [], acc := none }), (7, { a := [], hl := [], acc := none }), (6, { a := [IR.Opd.tmp 1], hl := [], acc := none }), (5, { a := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 0 }], hl := [], acc := none }), (2, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "sg", off := 0 }) }), (4, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "sg", off := 0 }) }), (3, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 6 }], acc := none }), (1, { a := [IR.Opd.tmp 0], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 6 }], acc := none }), (0, { a := [], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 6 }], acc := none })],
-    dead := false, reads := #[false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false], addrTaken := false,
-    jumps := [(9, { a := [IR.Opd.tmp 6], hl := [], acc := none }), (8, { a := [IR.Opd.tmp 5], hl := [], acc := none }), (7, { a := [], hl := [], acc := some (4, IR.Opd.tmp 4) }), (7, { a := [IR.Opd.tmp 3], hl := [], acc := none }), (7, { a := [IR.Opd.tmp 2], hl := [], acc := none }), (7, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [], acc := none }), (6, { a := [IR.Opd.tmp 1], hl := [], acc := none }), (5, { a := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 0 }], hl := [], acc := none }), (3, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "sg", off := 0 }) }), (4, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "sg", off := 0 }) }), (2, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "sg", off := 0 }) }), (4, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "sg", off := 0 }) }), (3, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 6 }], acc := none }), (1, { a := [], hl := [], acc := none }), (1, { a := [IR.Opd.tmp 0], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 6 }], acc := none }), (0, { a := [], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 6 }], acc := none })],
-    labelRegs := [(8, { a := [IR.Opd.tmp 5], hl := [], acc := none }), (5, { a := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 0 }], hl := [], acc := none }), (7, { a := [], hl := [], acc := none }), (6, { a := [IR.Opd.tmp 1], hl := [], acc := none }), (2, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "sg", off := 0 }) }), (3, { a := [], hl := [], acc := none }), (4, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "sg", off := 0 }) }), (0, { a := [], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 6 }], acc := none }), (1, { a := [], hl := [], acc := none })] }
-
-def s1_tcp_segment_80 : GS :=
-  { out := ⟨p1code_tcp_segment.take 167⟩,
-    regs := { a := [IR.Opd.slot { area := IR.Area.global "t", off := 31 }, IR.Opd.slot { area := IR.Area.global "t", off := 30 }, IR.Opd.const 0], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "t", off := 7 }) },
-    missed := #[false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false], lits := #[(4, 167772161), (4, 4294967295), (4, 0), (4, 1), (4, 65536)], labels := 0,
-    atLabel := [(12, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "sg", off := 12 }) }), (11, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [], acc := none }), (10, { a := [IR.Opd.tmp 7], hl := [], acc := none }), (9, { a := [IR.Opd.tmp 6], hl := [], acc := none }), (8, { a := [IR.Opd.tmp 5], hl := [], acc := none }), (7, { a := [], hl := [], acc := none }), (6, { a := [IR.Opd.tmp 1], hl := [], acc := none }), (5, { a := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 0 }], hl := [], acc := none }), (2, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "sg", off := 0 }) }), (4, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "sg", off := 0 }) }), (3, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 6 }], acc := none }), (1, { a := [IR.Opd.tmp 0], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 6 }], acc := none }), (0, { a := [], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 6 }], acc := none })],
-    dead := false, reads := #[false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false], addrTaken := false,
-    jumps := [(12, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "sg", off := 12 }) }), (11, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [], acc := none }), (10, { a := [IR.Opd.tmp 7], hl := [], acc := none }), (9, { a := [IR.Opd.tmp 6], hl := [], acc := none }), (8, { a := [IR.Opd.tmp 5], hl := [], acc := none }), (7, { a := [], hl := [], acc := some (4, IR.Opd.tmp 4) }), (7, { a := [IR.Opd.tmp 3], hl := [], acc := none }), (7, { a := [IR.Opd.tmp 2], hl := [], acc := none }), (7, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [], acc := none }), (6, { a := [IR.Opd.tmp 1], hl := [], acc := none }), (5, { a := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 0 }], hl := [], acc := none }), (3, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "sg", off := 0 }) }), (4, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "sg", off := 0 }) }), (2, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "sg", off := 0 }) }), (4, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "sg", off := 0 }) }), (3, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 6 }], acc := none }), (1, { a := [], hl := [], acc := none }), (1, { a := [IR.Opd.tmp 0], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 6 }], acc := none }), (0, { a := [], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 6 }], acc := none })],
-    labelRegs := [(12, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "sg", off := 12 }) }), (10, { a := [IR.Opd.tmp 7], hl := [], acc := none }), (9, { a := [IR.Opd.tmp 6], hl := [], acc := none }), (8, { a := [IR.Opd.tmp 5], hl := [], acc := none }), (5, { a := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 0 }], hl := [], acc := none }), (7, { a := [], hl := [], acc := none }), (6, { a := [IR.Opd.tmp 1], hl := [], acc := none }), (2, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "sg", off := 0 }) }), (3, { a := [], hl := [], acc := none }), (4, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "sg", off := 0 }) }), (0, { a := [], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 6 }], acc := none }), (1, { a := [], hl := [], acc := none })] }
-
-def s1_tcp_segment_100 : GS :=
-  { out := ⟨p1code_tcp_segment.take 216⟩,
-    regs := { a := [], hl := [IR.Opd.slot { area := IR.Area.frame "send_seg", off := 7 }, IR.Opd.slot { area := IR.Area.frame "send_seg", off := 5 }, IR.Opd.const 0], acc := some (4, IR.Opd.slot { area := IR.Area.frame "send_seg", off := 1 }) },
-    missed := #[false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false], lits := #[(4, 167772161), (4, 4294967295), (4, 0), (4, 1), (4, 65536), (4, 2147483648)], labels := 1,
-    atLabel := [(15, { a := [], hl := [], acc := none }), (16, { a := [], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 22 }], acc := none }), (14, { a := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 1 }], hl := [], acc := none }), (13, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 31 }, IR.Opd.slot { area := IR.Area.global "t", off := 30 }, IR.Opd.const 0], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "t", off := 7 }) }), (12, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "sg", off := 12 }) }), (11, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [], acc := none }), (10, { a := [IR.Opd.tmp 7], hl := [], acc := none }), (9, { a := [IR.Opd.tmp 6], hl := [], acc := none }), (8, { a := [IR.Opd.tmp 5], hl := [], acc := none }), (7, { a := [], hl := [], acc := none }), (6, { a := [IR.Opd.tmp 1], hl := [], acc := none }), (5, { a := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 0 }], hl := [], acc := none }), (2, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "sg", off := 0 }) }), (4, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "sg", off := 0 }) }), (3, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 6 }], acc := none }), (1, { a := [IR.Opd.tmp 0], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 6 }], acc := none }), (0, { a := [], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 6 }], acc := none })],
-    dead := false, reads := #[false, false, false, true, false, false, false, false, false, false, false, false, false, false, false, false, false, false], addrTaken := false,
-    jumps := [(15, { a := [], hl := [], acc := some (4, IR.Opd.tmp 9) }), (16, { a := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 3 }], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 22 }], acc := none }), (15, { a := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 3 }], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 22 }], acc := none }), (16, { a := [], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 22 }], acc := none }), (13, { a := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 1 }], hl := [], acc := none }), (14, { a := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 1 }], hl := [], acc := none }), (13, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 31 }, IR.Opd.slot { area := IR.Area.global "t", off := 30 }, IR.Opd.const 0], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "t", off := 7 }) }), (12, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "sg", off := 12 }) }), (11, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [], acc := none }), (10, { a := [IR.Opd.tmp 7], hl := [], acc := none }), (9, { a := [IR.Opd.tmp 6], hl := [], acc := none }), (8, { a := [IR.Opd.tmp 5], hl := [], acc := none }), (7, { a := [], hl := [], acc := some (4, IR.Opd.tmp 4) }), (7, { a := [IR.Opd.tmp 3], hl := [], acc := none }), (7, { a := [IR.Opd.tmp 2], hl := [], acc := none }), (7, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [], acc := none }), (6, { a := [IR.Opd.tmp 1], hl := [], acc := none }), (5, { a := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 0 }], hl := [], acc := none }), (3, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "sg", off := 0 }) }), (4, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "sg", off := 0 }) }), (2, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "sg", off := 0 }) }), (4, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "sg", off := 0 }) }), (3, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 6 }], acc := none }), (1, { a := [], hl := [], acc := none }), (1, { a := [IR.Opd.tmp 0], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 6 }], acc := none }), (0, { a := [], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 6 }], acc := none })],
-    labelRegs := [(16, { a := [], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 22 }], acc := none }), (13, { a := [], hl := [], acc := none }), (14, { a := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 1 }], hl := [], acc := none }), (11, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [], acc := none }), (12, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "sg", off := 12 }) }), (10, { a := [IR.Opd.tmp 7], hl := [], acc := none }), (9, { a := [IR.Opd.tmp 6], hl := [], acc := none }), (8, { a := [IR.Opd.tmp 5], hl := [], acc := none }), (5, { a := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 0 }], hl := [], acc := none }), (7, { a := [], hl := [], acc := none }), (6, { a := [IR.Opd.tmp 1], hl := [], acc := none }), (2, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "sg", off := 0 }) }), (3, { a := [], hl := [], acc := none }), (4, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "sg", off := 0 }) }), (0, { a := [], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 6 }], acc := none }), (1, { a := [], hl := [], acc := none })] }
-
-def s1_tcp_segment_120 : GS :=
-  { out := ⟨p1code_tcp_segment.take 269⟩,
-    regs := { a := [], hl := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 12 }, IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 10 }], acc := none },
-    missed := #[false, false, false, false, false, false, false, false, false, false, true, false, false, false, false, false, false, false], lits := #[(4, 167772161), (4, 4294967295), (4, 0), (4, 1), (4, 65536), (4, 2147483648)], labels := 1,
-    atLabel := [(22, { a := [], hl := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 10 }], acc := none }), (21, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 4 }) }), (18, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 22 }], acc := none }), (20, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 22 }], acc := none }), (19, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 22 }], acc := none }), (17, { a := [], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 22 }], acc := none }), (15, { a := [], hl := [], acc := none }), (16, { a := [], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 22 }], acc := none }), (14, { a := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 1 }], hl := [], acc := none }), (13, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 31 }, IR.Opd.slot { area := IR.Area.global "t", off := 30 }, IR.Opd.const 0], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "t", off := 7 }) }), (12, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "sg", off := 12 }) }), (11, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [], acc := none }), (10, { a := [IR.Opd.tmp 7], hl := [], acc := none }), (9, { a := [IR.Opd.tmp 6], hl := [], acc := none }), (8, { a := [IR.Opd.tmp 5], hl := [], acc := none }), (7, { a := [], hl := [], acc := none }), (6, { a := [IR.Opd.tmp 1], hl := [], acc := none }), (5, { a := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 0 }], hl := [], acc := none }), (2, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "sg", off := 0 }) }), (4, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "sg", off := 0 }) }), (3, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 6 }], acc := none }), (1, { a := [IR.Opd.tmp 0], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 6 }], acc := none }), (0, { a := [], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 6 }], acc := none })],
-    dead := false, reads := #[false, false, false, true, true, false, false, false, true, false, true, false, false, false, false, false, false, false], addrTaken := false,
-    jumps := [(22, { a := [], hl := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 10 }], acc := none }), (21, { a := [], hl := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 8 }], acc := some (4, IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 4 }) }), (21, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 4 }) }), (19, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 22 }], acc := none }), (20, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 22 }], acc := none }), (18, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 22 }], acc := none }), (20, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 22 }], acc := none }), (19, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 22 }], acc := none }), (17, { a := [], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 22 }], acc := none }), (15, { a := [], hl := [], acc := some (4, IR.Opd.tmp 9) }), (16, { a := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 3 }], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 22 }], acc := none }), (15, { a := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 3 }], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 22 }], acc := none }), (16, { a := [], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 22 }], acc := none }), (13, { a := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 1 }], hl := [], acc := none }), (14, { a := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 1 }], hl := [], acc := none }), (13, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 31 }, IR.Opd.slot { area := IR.Area.global "t", off := 30 }, IR.Opd.const 0], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "t", off := 7 }) }), (12, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "sg", off := 12 }) }), (11, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [], acc := none }), (10, { a := [IR.Opd.tmp 7], hl := [], acc := none }), (9, { a := [IR.Opd.tmp 6], hl := [], acc := none }), (8, { a := [IR.Opd.tmp 5], hl := [], acc := none }), (7, { a := [], hl := [], acc := some (4, IR.Opd.tmp 4) }), (7, { a := [IR.Opd.tmp 3], hl := [], acc := none }), (7, { a := [IR.Opd.tmp 2], hl := [], acc := none }), (7, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [], acc := none }), (6, { a := [IR.Opd.tmp 1], hl := [], acc := none }), (5, { a := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 0 }], hl := [], acc := none }), (3, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "sg", off := 0 }) }), (4, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "sg", off := 0 }) }), (2, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "sg", off := 0 }) }), (4, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "sg", off := 0 }) }), (3, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 6 }], acc := none }), (1, { a := [], hl := [], acc := none }), (1, { a := [IR.Opd.tmp 0], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 6 }], acc := none }), (0, { a := [], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 6 }], acc := none })],
-    labelRegs := [(21, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 4 }) }), (19, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 22 }], acc := none }), (20, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 22 }], acc := none }), (15, { a := [], hl := [], acc := none }), (16, { a := [], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 22 }], acc := none }), (13, { a := [], hl := [], acc := none }), (14, { a := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 1 }], hl := [], acc := none }), (11, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [], acc := none }), (12, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "sg", off := 12 }) }), (10, { a := [IR.Opd.tmp 7], hl := [], acc := none }), (9, { a := [IR.Opd.tmp 6], hl := [], acc := none }), (8, { a := [IR.Opd.tmp 5], hl := [], acc := none }), (5, { a := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 0 }], hl := [], acc := none }), (7, { a := [], hl := [], acc := none }), (6, { a := [IR.Opd.tmp 1], hl := [], acc := none }), (2, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "sg", off := 0 }) }), (3, { a := [], hl := [], acc := none }), (4, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "sg", off := 0 }) }), (0, { a := [], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 6 }], acc := none }), (1, { a := [], hl := [], acc := none })] }
-
-def s1_tcp_segment_140 : GS :=
-  { out := ⟨p1code_tcp_segment.take 336⟩,
-    regs := { a := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 2 }], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "t", off := 15 }) },
-    missed := #[false, false, false, false, false, false, false, false, false, false, true, false, false, false, false, false, false, false], lits := #[(4, 167772161), (4, 4294967295), (4, 0), (4, 1), (4, 65536), (4, 2147483648)], labels := 2,
-    atLabel := [(24, { a := [IR.Opd.tmp 13], hl := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 14 }], acc := none }), (25, { a := [], hl := [], acc := none }), (23, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 10 }], acc := none }), (22, { a := [], hl := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 10 }], acc := none }), (21, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 4 }) }), (18, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 22 }], acc := none }), (20, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 22 }], acc := none }), (19, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 22 }], acc := none }), (17, { a := [], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 22 }], acc := none }), (15, { a := [], hl := [], acc := none }), (16, { a := [], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 22 }], acc := none }), (14, { a := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 1 }], hl := [], acc := none }), (13, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 31 }, IR.Opd.slot { area := IR.Area.global "t", off := 30 }, IR.Opd.const 0], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "t", off := 7 }) }), (12, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "sg", off := 12 }) }), (11, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [], acc := none }), (10, { a := [IR.Opd.tmp 7], hl := [], acc := none }), (9, { a := [IR.Opd.tmp 6], hl := [], acc := none }), (8, { a := [IR.Opd.tmp 5], hl := [], acc := none }), (7, { a := [], hl := [], acc := none }), (6, { a := [IR.Opd.tmp 1], hl := [], acc := none }), (5, { a := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 0 }], hl := [], acc := none }), (2, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "sg", off := 0 }) }), (4, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "sg", off := 0 }) }), (3, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 6 }], acc := none }), (1, { a := [IR.Opd.tmp 0], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 6 }], acc := none }), (0, { a := [], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 6 }], acc := none })],
-    dead := false, reads := #[false, false, false, true, true, false, false, false, true, false, true, false, true, false, true, false, true, false], addrTaken := false,
-    jumps := [(23, { a := [], hl := [IR.Opd.slot { area := IR.Area.global "t", off := 19 }], acc := none }), (24, { a := [IR.Opd.tmp 13], hl := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 14 }], acc := none }), (25, { a := [], hl := [], acc := none }), (24, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 16 }, IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 12 }], acc := none }), (23, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 10 }], acc := none }), (22, { a := [], hl := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 12 }, IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 10 }], acc := none }), (22, { a := [], hl := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 10 }], acc := none }), (21, { a := [], hl := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 8 }], acc := some (4, IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 4 }) }), (21, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 4 }) }), (19, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 22 }], acc := none }), (20, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 22 }], acc := none }), (18, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 22 }], acc := none }), (20, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 22 }], acc := none }), (19, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 22 }], acc := none }), (17, { a := [], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 22 }], acc := none }), (15, { a := [], hl := [], acc := some (4, IR.Opd.tmp 9) }), (16, { a := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 3 }], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 22 }], acc := none }), (15, { a := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 3 }], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 22 }], acc := none }), (16, { a := [], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 22 }], acc := none }), (13, { a := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 1 }], hl := [], acc := none }), (14, { a := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 1 }], hl := [], acc := none }), (13, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 31 }, IR.Opd.slot { area := IR.Area.global "t", off := 30 }, IR.Opd.const 0], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "t", off := 7 }) }), (12, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "sg", off := 12 }) }), (11, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [], acc := none }), (10, { a := [IR.Opd.tmp 7], hl := [], acc := none }), (9, { a := [IR.Opd.tmp 6], hl := [], acc := none }), (8, { a := [IR.Opd.tmp 5], hl := [], acc := none }), (7, { a := [], hl := [], acc := some (4, IR.Opd.tmp 4) }), (7, { a := [IR.Opd.tmp 3], hl := [], acc := none }), (7, { a := [IR.Opd.tmp 2], hl := [], acc := none }), (7, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [], acc := none }), (6, { a := [IR.Opd.tmp 1], hl := [], acc := none }), (5, { a := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 0 }], hl := [], acc := none }), (3, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "sg", off := 0 }) }), (4, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "sg", off := 0 }) }), (2, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "sg", off := 0 }) }), (4, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "sg", off := 0 }) }), (3, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 6 }], acc := none }), (1, { a := [], hl := [], acc := none }), (1, { a := [IR.Opd.tmp 0], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 6 }], acc := none }), (0, { a := [], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 6 }], acc := none })],
-    labelRegs := [(23, { a := [], hl := [], acc := none }), (25, { a := [], hl := [], acc := none }), (24, { a := [], hl := [], acc := none }), (22, { a := [], hl := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 10 }], acc := none }), (21, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 4 }) }), (19, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 22 }], acc := none }), (20, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 22 }], acc := none }), (15, { a := [], hl := [], acc := none }), (16, { a := [], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 22 }], acc := none }), (13, { a := [], hl := [], acc := none }), (14, { a := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 1 }], hl := [], acc := none }), (11, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [], acc := none }), (12, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "sg", off := 12 }) }), (10, { a := [IR.Opd.tmp 7], hl := [], acc := none }), (9, { a := [IR.Opd.tmp 6], hl := [], acc := none }), (8, { a := [IR.Opd.tmp 5], hl := [], acc := none }), (5, { a := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 0 }], hl := [], acc := none }), (7, { a := [], hl := [], acc := none }), (6, { a := [IR.Opd.tmp 1], hl := [], acc := none }), (2, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "sg", off := 0 }) }), (3, { a := [], hl := [], acc := none }), (4, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "sg", off := 0 }) }), (0, { a := [], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 6 }], acc := none }), (1, { a := [], hl := [], acc := none })] }
-
-def s1_tcp_segment_160 : GS :=
-  { out := ⟨p1code_tcp_segment.take 386⟩,
-    regs := { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [], acc := some (4, IR.Opd.tmp 16) },
-    missed := #[false, false, false, false, false, false, false, false, false, false, true, false, false, false, false, false, false, false], lits := #[(4, 167772161), (4, 4294967295), (4, 0), (4, 1), (4, 65536), (4, 2147483648)], labels := 2,
-    atLabel := [(31, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [], acc := some (4, IR.Opd.tmp 16) }), (30, { a := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 1 }, IR.Opd.const 1], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "t", off := 15 }) }), (29, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [], acc := some (4, IR.Opd.tmp 16) }), (28, { a := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 1 }, IR.Opd.const 1], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "t", off := 15 }) }), (27, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [], acc := some (4, IR.Opd.tmp 16) }), (26, { a := [], hl := [], acc := none }), (24, { a := [IR.Opd.tmp 13], hl := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 14 }], acc := none }), (25, { a := [], hl := [], acc := none }), (23, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 10 }], acc := none }), (22, { a := [], hl := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 10 }], acc := none }), (21, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 4 }) }), (18, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 22 }], acc := none }), (20, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 22 }], acc := none }), (19, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 22 }], acc := none }), (17, { a := [], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 22 }], acc := none }), (15, { a := [], hl := [], acc := none }), (16, { a := [], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 22 }], acc := none }), (14, { a := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 1 }], hl := [], acc := none }), (13, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 31 }, IR.Opd.slot { area := IR.Area.global "t", off := 30 }, IR.Opd.const 0], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "t", off := 7 }) }), (12, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "sg", off := 12 }) }), (11, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [], acc := none }), (10, { a := [IR.Opd.tmp 7], hl := [], acc := none }), (9, { a := [IR.Opd.tmp 6], hl := [], acc := none }), (8, { a := [IR.Opd.tmp 5], hl := [], acc := none }), (7, { a := [], hl := [], acc := none }), (6, { a := [IR.Opd.tmp 1], hl := [], acc := none }), (5, { a := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 0 }], hl := [], acc := none }), (2, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "sg", off := 0 }) }), (4, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "sg", off := 0 }) }), (3, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 6 }], acc := none }), (1, { a := [IR.Opd.tmp 0], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 6 }], acc := none }), (0, { a := [], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 6 }], acc := none })],
-    dead := false, reads := #[false, false, true, true, true, false, false, false, true, false, true, false, true, false, true, false, true, false], addrTaken := false,
-    jumps := [(31, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [], acc := some (4, IR.Opd.tmp 16) }), (30, { a := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 1 }, IR.Opd.const 1], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "t", off := 15 }) }), (29, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [], acc := some (4, IR.Opd.tmp 16) }), (28, { a := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 1 }, IR.Opd.const 1], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "t", off := 15 }) }), (27, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [], acc := some (4, IR.Opd.tmp 16) }), (26, { a := [], hl := [], acc := some (4, IR.Opd.tmp 16) }), (26, { a := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 2 }], hl := [], acc := none }), (26, { a := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 3 }], hl := [], acc := none }), (17, { a := [], hl := [], acc := none }), (18, { a := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 2 }], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "t", off := 15 }) }), (23, { a := [], hl := [IR.Opd.slot { area := IR.Area.global "t", off := 19 }], acc := none }), (24, { a := [IR.Opd.tmp 13], hl := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 14 }], acc := none }), (25, { a := [], hl := [], acc := none }), (24, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 16 }, IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 12 }], acc := none }), (23, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 10 }], acc := none }), (22, { a := [], hl := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 12 }, IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 10 }], acc := none }), (22, { a := [], hl := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 10 }], acc := none }), (21, { a := [], hl := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 8 }], acc := some (4, IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 4 }) }), (21, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 4 }) }), (19, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 22 }], acc := none }), (20, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 22 }], acc := none }), (18, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 22 }], acc := none }), (20, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 22 }], acc := none }), (19, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 22 }], acc := none }), (17, { a := [], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 22 }], acc := none }), (15, { a := [], hl := [], acc := some (4, IR.Opd.tmp 9) }), (16, { a := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 3 }], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 22 }], acc := none }), (15, { a := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 3 }], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 22 }], acc := none }), (16, { a := [], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 22 }], acc := none }), (13, { a := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 1 }], hl := [], acc := none }), (14, { a := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 1 }], hl := [], acc := none }), (13, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 31 }, IR.Opd.slot { area := IR.Area.global "t", off := 30 }, IR.Opd.const 0], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "t", off := 7 }) }), (12, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "sg", off := 12 }) }), (11, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [], acc := none }), (10, { a := [IR.Opd.tmp 7], hl := [], acc := none }), (9, { a := [IR.Opd.tmp 6], hl := [], acc := none }), (8, { a := [IR.Opd.tmp 5], hl := [], acc := none }), (7, { a := [], hl := [], acc := some (4, IR.Opd.tmp 4) }), (7, { a := [IR.Opd.tmp 3], hl := [], acc := none }), (7, { a := [IR.Opd.tmp 2], hl := [], acc := none }), (7, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [], acc := none }), (6, { a := [IR.Opd.tmp 1], hl := [], acc := none }), (5, { a := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 0 }], hl := [], acc := none }), (3, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "sg", off := 0 }) }), (4, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "sg", off := 0 }) }), (2, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "sg", off := 0 }) }), (4, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "sg", off := 0 }) }), (3, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 6 }], acc := none }), (1, { a := [], hl := [], acc := none }), (1, { a := [IR.Opd.tmp 0], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 6 }], acc := none }), (0, { a := [], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 6 }], acc := none })],
-    labelRegs := [(29, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [], acc := some (4, IR.Opd.tmp 16) }), (27, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [], acc := some (4, IR.Opd.tmp 16) }), (17, { a := [], hl := [], acc := none }), (18, { a := [], hl := [], acc := none }), (23, { a := [], hl := [], acc := none }), (25, { a := [], hl := [], acc := none }), (24, { a := [], hl := [], acc := none }), (22, { a := [], hl := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 10 }], acc := none }), (21, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 4 }) }), (19, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 22 }], acc := none }), (20, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 22 }], acc := none }), (15, { a := [], hl := [], acc := none }), (16, { a := [], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 22 }], acc := none }), (13, { a := [], hl := [], acc := none }), (14, { a := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 1 }], hl := [], acc := none }), (11, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [], acc := none }), (12, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "sg", off := 12 }) }), (10, { a := [IR.Opd.tmp 7], hl := [], acc := none }), (9, { a := [IR.Opd.tmp 6], hl := [], acc := none }), (8, { a := [IR.Opd.tmp 5], hl := [], acc := none }), (5, { a := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 0 }], hl := [], acc := none }), (7, { a := [], hl := [], acc := none }), (6, { a := [IR.Opd.tmp 1], hl := [], acc := none }), (2, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "sg", off := 0 }) }), (3, { a := [], hl := [], acc := none }), (4, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "sg", off := 0 }) }), (0, { a := [], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 6 }], acc := none }), (1, { a := [], hl := [], acc := none })] }
-
-def s1_tcp_segment_170 : GS :=
-  { out := ⟨p1code_tcp_segment.take 405⟩,
-    regs := { a := [], hl := [], acc := none },
-    missed := #[false, false, false, false, false, false, false, false, false, false, true, false, false, false, false, false, false, false], lits := #[(4, 167772161), (4, 4294967295), (4, 0), (4, 1), (4, 65536), (4, 2147483648)], labels := 2,
-    atLabel := [(31, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [], acc := some (4, IR.Opd.tmp 16) }), (30, { a := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 1 }, IR.Opd.const 1], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "t", off := 15 }) }), (29, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [], acc := some (4, IR.Opd.tmp 16) }), (28, { a := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 1 }, IR.Opd.const 1], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "t", off := 15 }) }), (27, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [], acc := some (4, IR.Opd.tmp 16) }), (26, { a := [], hl := [], acc := none }), (24, { a := [IR.Opd.tmp 13], hl := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 14 }], acc := none }), (25, { a := [], hl := [], acc := none }), (23, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 10 }], acc := none }), (22, { a := [], hl := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 10 }], acc := none }), (21, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 4 }) }), (18, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 22 }], acc := none }), (20, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 22 }], acc := none }), (19, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 22 }], acc := none }), (17, { a := [], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 22 }], acc := none }), (15, { a := [], hl := [], acc := none }), (16, { a := [], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 22 }], acc := none }), (14, { a := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 1 }], hl := [], acc := none }), (13, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 31 }, IR.Opd.slot { area := IR.Area.global "t", off := 30 }, IR.Opd.const 0], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "t", off := 7 }) }), (12, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "sg", off := 12 }) }), (11, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [], acc := none }), (10, { a := [IR.Opd.tmp 7], hl := [], acc := none }), (9, { a := [IR.Opd.tmp 6], hl := [], acc := none }), (8, { a := [IR.Opd.tmp 5], hl := [], acc := none }), (7, { a := [], hl := [], acc := none }), (6, { a := [IR.Opd.tmp 1], hl := [], acc := none }), (5, { a := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 0 }], hl := [], acc := none }), (2, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "sg", off := 0 }) }), (4, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "sg", off := 0 }) }), (3, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 6 }], acc := none }), (1, { a := [IR.Opd.tmp 0], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 6 }], acc := none }), (0, { a := [], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 6 }], acc := none })],
-    dead := true, reads := #[false, true, true, true, true, false, false, false, true, false, true, false, true, false, true, false, true, false], addrTaken := false,
-    jumps := [(26, { a := [], hl := [], acc := none }), (28, { a := [], hl := [], acc := none }), (30, { a := [], hl := [], acc := none }), (31, { a := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 1 }, IR.Opd.const 1], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "t", off := 15 }) }), (31, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [], acc := some (4, IR.Opd.tmp 16) }), (30, { a := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 1 }, IR.Opd.const 1], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "t", off := 15 }) }), (29, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [], acc := some (4, IR.Opd.tmp 16) }), (28, { a := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 1 }, IR.Opd.const 1], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "t", off := 15 }) }), (27, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [], acc := some (4, IR.Opd.tmp 16) }), (26, { a := [], hl := [], acc := some (4, IR.Opd.tmp 16) }), (26, { a := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 2 }], hl := [], acc := none }), (26, { a := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 3 }], hl := [], acc := none }), (17, { a := [], hl := [], acc := none }), (18, { a := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 2 }], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "t", off := 15 }) }), (23, { a := [], hl := [IR.Opd.slot { area := IR.Area.global "t", off := 19 }], acc := none }), (24, { a := [IR.Opd.tmp 13], hl := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 14 }], acc := none }), (25, { a := [], hl := [], acc := none }), (24, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 16 }, IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 12 }], acc := none }), (23, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 10 }], acc := none }), (22, { a := [], hl := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 12 }, IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 10 }], acc := none }), (22, { a := [], hl := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 10 }], acc := none }), (21, { a := [], hl := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 8 }], acc := some (4, IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 4 }) }), (21, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 4 }) }), (19, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 22 }], acc := none }), (20, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 22 }], acc := none }), (18, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 22 }], acc := none }), (20, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 22 }], acc := none }), (19, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 22 }], acc := none }), (17, { a := [], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 22 }], acc := none }), (15, { a := [], hl := [], acc := some (4, IR.Opd.tmp 9) }), (16, { a := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 3 }], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 22 }], acc := none }), (15, { a := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 3 }], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 22 }], acc := none }), (16, { a := [], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 22 }], acc := none }), (13, { a := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 1 }], hl := [], acc := none }), (14, { a := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 1 }], hl := [], acc := none }), (13, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 31 }, IR.Opd.slot { area := IR.Area.global "t", off := 30 }, IR.Opd.const 0], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "t", off := 7 }) }), (12, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "sg", off := 12 }) }), (11, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [], acc := none }), (10, { a := [IR.Opd.tmp 7], hl := [], acc := none }), (9, { a := [IR.Opd.tmp 6], hl := [], acc := none }), (8, { a := [IR.Opd.tmp 5], hl := [], acc := none }), (7, { a := [], hl := [], acc := some (4, IR.Opd.tmp 4) }), (7, { a := [IR.Opd.tmp 3], hl := [], acc := none }), (7, { a := [IR.Opd.tmp 2], hl := [], acc := none }), (7, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [], acc := none }), (6, { a := [IR.Opd.tmp 1], hl := [], acc := none }), (5, { a := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 0 }], hl := [], acc := none }), (3, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "sg", off := 0 }) }), (4, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "sg", off := 0 }) }), (2, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "sg", off := 0 }) }), (4, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "sg", off := 0 }) }), (3, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 6 }], acc := none }), (1, { a := [], hl := [], acc := none }), (1, { a := [IR.Opd.tmp 0], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 6 }], acc := none }), (0, { a := [], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 6 }], acc := none })],
-    labelRegs := [(26, { a := [], hl := [], acc := none }), (28, { a := [], hl := [], acc := none }), (30, { a := [], hl := [], acc := none }), (31, { a := [], hl := [], acc := none }), (29, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [], acc := some (4, IR.Opd.tmp 16) }), (27, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [], acc := some (4, IR.Opd.tmp 16) }), (17, { a := [], hl := [], acc := none }), (18, { a := [], hl := [], acc := none }), (23, { a := [], hl := [], acc := none }), (25, { a := [], hl := [], acc := none }), (24, { a := [], hl := [], acc := none }), (22, { a := [], hl := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 10 }], acc := none }), (21, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 4 }) }), (19, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 22 }], acc := none }), (20, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 22 }], acc := none }), (15, { a := [], hl := [], acc := none }), (16, { a := [], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 22 }], acc := none }), (13, { a := [], hl := [], acc := none }), (14, { a := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 1 }], hl := [], acc := none }), (11, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [], acc := none }), (12, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "sg", off := 12 }) }), (10, { a := [IR.Opd.tmp 7], hl := [], acc := none }), (9, { a := [IR.Opd.tmp 6], hl := [], acc := none }), (8, { a := [IR.Opd.tmp 5], hl := [], acc := none }), (5, { a := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 0 }], hl := [], acc := none }), (7, { a := [], hl := [], acc := none }), (6, { a := [IR.Opd.tmp 1], hl := [], acc := none }), (2, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "sg", off := 0 }) }), (3, { a := [], hl := [], acc := none }), (4, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "sg", off := 0 }) }), (0, { a := [], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 6 }], acc := none }), (1, { a := [], hl := [], acc := none })] }
-
-theorem pre1_tcp_segment : runG (genPre Stack.fn_tcp_segment false) e1_tcp_segment (fnStart Stack.fn_tcp_segment #[(4, 167772161), (4, 4294967295), (4, 0), (4, 1), (4, 65536)]) = .ok ((), s1_tcp_segment_pre) := by
-  decide +kernel
-theorem c1_tcp_segment_0 : runG (genBody Stack.fn_tcp_segment false 0 ((Stack.fn_tcp_segment.body.toList.drop 0).take 20)) e1_tcp_segment s1_tcp_segment_pre =
-    .ok ((), s1_tcp_segment_20) := by
-  decide +kernel
-theorem c1_tcp_segment_20 : runG (genBody Stack.fn_tcp_segment false 20 ((Stack.fn_tcp_segment.body.toList.drop 20).take 20)) e1_tcp_segment s1_tcp_segment_20 =
-    .ok ((), s1_tcp_segment_40) := by
-  decide +kernel
-theorem c1_tcp_segment_40 : runG (genBody Stack.fn_tcp_segment false 40 ((Stack.fn_tcp_segment.body.toList.drop 40).take 20)) e1_tcp_segment s1_tcp_segment_40 =
-    .ok ((), s1_tcp_segment_60) := by
-  decide +kernel
-theorem c1_tcp_segment_60 : runG (genBody Stack.fn_tcp_segment false 60 ((Stack.fn_tcp_segment.body.toList.drop 60).take 20)) e1_tcp_segment s1_tcp_segment_60 =
-    .ok ((), s1_tcp_segment_80) := by
-  decide +kernel
-theorem c1_tcp_segment_80 : runG (genBody Stack.fn_tcp_segment false 80 ((Stack.fn_tcp_segment.body.toList.drop 80).take 20)) e1_tcp_segment s1_tcp_segment_80 =
-    .ok ((), s1_tcp_segment_100) := by
-  decide +kernel
-theorem c1_tcp_segment_100 : runG (genBody Stack.fn_tcp_segment false 100 ((Stack.fn_tcp_segment.body.toList.drop 100).take 20)) e1_tcp_segment s1_tcp_segment_100 =
-    .ok ((), s1_tcp_segment_120) := by
-  decide +kernel
-theorem c1_tcp_segment_120 : runG (genBody Stack.fn_tcp_segment false 120 ((Stack.fn_tcp_segment.body.toList.drop 120).take 20)) e1_tcp_segment s1_tcp_segment_120 =
-    .ok ((), s1_tcp_segment_140) := by
-  decide +kernel
-theorem c1_tcp_segment_140 : runG (genBody Stack.fn_tcp_segment false 140 ((Stack.fn_tcp_segment.body.toList.drop 140).take 20)) e1_tcp_segment s1_tcp_segment_140 =
-    .ok ((), s1_tcp_segment_160) := by
-  decide +kernel
-theorem c1_tcp_segment_160 : runG (genBody Stack.fn_tcp_segment false 160 ((Stack.fn_tcp_segment.body.toList.drop 160).take 10)) e1_tcp_segment s1_tcp_segment_160 =
-    .ok ((), s1_tcp_segment_170) := by
-  decide +kernel
-theorem body1_tcp_segment : runG (genBody Stack.fn_tcp_segment false 0 (Stack.fn_tcp_segment.body.toList.drop 0)) e1_tcp_segment s1_tcp_segment_pre = .ok ((), s1_tcp_segment_170) :=
-  body_step _ _ _ _ 0 20 _ _ _ (by decide +kernel) c1_tcp_segment_0
-    (body_step _ _ _ _ 20 20 _ _ _ (by decide +kernel) c1_tcp_segment_20
-    (body_step _ _ _ _ 40 20 _ _ _ (by decide +kernel) c1_tcp_segment_40
-    (body_step _ _ _ _ 60 20 _ _ _ (by decide +kernel) c1_tcp_segment_60
-    (body_step _ _ _ _ 80 20 _ _ _ (by decide +kernel) c1_tcp_segment_80
-    (body_step _ _ _ _ 100 20 _ _ _ (by decide +kernel) c1_tcp_segment_100
-    (body_step _ _ _ _ 120 20 _ _ _ (by decide +kernel) c1_tcp_segment_120
-    (body_step _ _ _ _ 140 20 _ _ _ (by decide +kernel) c1_tcp_segment_140
-    (body_step _ _ _ _ 160 10 _ _ _ (by decide +kernel) c1_tcp_segment_160
-    (body_end _ _ _ _ 170 _ (by decide +kernel))))))))))
-theorem jumps1_tcp_segment : jumpsOk s1_tcp_segment_170 = true := by decide +kernel
-theorem gen1_tcp_segment : genFn Stack.fn_tcp_segment (Array.replicate Stack.fn_tcp_segment.tmps.size true) #[(4, 167772161), (4, 4294967295), (4, 0), (4, 1), (4, 65536)] false none false =
-    .ok (s1_tcp_segment_170.out, s1_tcp_segment_170.missed, s1_tcp_segment_170.lits, (tmpLayout Stack.fn_tcp_segment (Array.replicate Stack.fn_tcp_segment.tmps.size true)).2,
-      if s1_tcp_segment_170.addrTaken then none else some s1_tcp_segment_170.reads) :=
-  genFn_of _ _ _ _ _ _ _ _ pre1_tcp_segment body1_tcp_segment jumps1_tcp_segment
 
 def e2_tcp_segment : GEnv := fnEnv Stack.fn_tcp_segment g_tcp_segment.missed g_tcp_segment.live
 
@@ -569,6 +20,8 @@ def s2_tcp_segment_pre : GS :=
     jumps := [],
     labelRegs := [] }
 
+theorem pre2_tcp_segment : runG (genPre Stack.fn_tcp_segment false) e2_tcp_segment (fnStart Stack.fn_tcp_segment #[(4, 167772161), (4, 4294967295), (4, 0), (4, 1), (4, 65536)]) = .ok ((), s2_tcp_segment_pre) := by
+  decide +kernel
 def s2_tcp_segment_20 : GS :=
   { out := ⟨(items.drop 1803).take 42⟩,
     regs := { a := [IR.Opd.tmp 1], hl := [], acc := none },
@@ -577,6 +30,10 @@ def s2_tcp_segment_20 : GS :=
     dead := false, reads := #[false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false], addrTaken := false,
     jumps := [(5, { a := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 0 }], hl := [], acc := none }), (3, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "sg", off := 0 }) }), (4, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "sg", off := 0 }) }), (2, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "sg", off := 0 }) }), (4, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "sg", off := 0 }) }), (3, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 6 }], acc := none }), (1, { a := [], hl := [], acc := none }), (1, { a := [IR.Opd.tmp 0], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 6 }], acc := none }), (0, { a := [], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 6 }], acc := none })],
     labelRegs := [(2, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "sg", off := 0 }) }), (3, { a := [], hl := [], acc := none }), (4, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "sg", off := 0 }) }), (0, { a := [], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 6 }], acc := none }), (1, { a := [], hl := [], acc := none })] }
+
+theorem c2_tcp_segment_0 : runG (genBody Stack.fn_tcp_segment false 0 ((Stack.fn_tcp_segment.body.toList.drop 0).take 20)) e2_tcp_segment s2_tcp_segment_pre =
+    .ok ((), s2_tcp_segment_20) := by
+  decide +kernel
 
 def s2_tcp_segment_40 : GS :=
   { out := ⟨(items.drop 1803).take 82⟩,
@@ -587,6 +44,10 @@ def s2_tcp_segment_40 : GS :=
     jumps := [(7, { a := [], hl := [], acc := some (4, IR.Opd.tmp 4) }), (7, { a := [IR.Opd.tmp 3], hl := [], acc := none }), (7, { a := [IR.Opd.tmp 2], hl := [], acc := none }), (7, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [], acc := none }), (6, { a := [IR.Opd.tmp 1], hl := [], acc := none }), (5, { a := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 0 }], hl := [], acc := none }), (3, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "sg", off := 0 }) }), (4, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "sg", off := 0 }) }), (2, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "sg", off := 0 }) }), (4, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "sg", off := 0 }) }), (3, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 6 }], acc := none }), (1, { a := [], hl := [], acc := none }), (1, { a := [IR.Opd.tmp 0], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 6 }], acc := none }), (0, { a := [], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 6 }], acc := none })],
     labelRegs := [(7, { a := [], hl := [], acc := none }), (6, { a := [IR.Opd.tmp 1], hl := [], acc := none }), (2, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "sg", off := 0 }) }), (3, { a := [], hl := [], acc := none }), (4, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "sg", off := 0 }) }), (0, { a := [], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 6 }], acc := none }), (1, { a := [], hl := [], acc := none })] }
 
+theorem c2_tcp_segment_20 : runG (genBody Stack.fn_tcp_segment false 20 ((Stack.fn_tcp_segment.body.toList.drop 20).take 20)) e2_tcp_segment s2_tcp_segment_20 =
+    .ok ((), s2_tcp_segment_40) := by
+  decide +kernel
+
 def s2_tcp_segment_60 : GS :=
   { out := ⟨(items.drop 1803).take 124⟩,
     regs := { a := [IR.Opd.slot { area := IR.Area.frame "tcp_emit", off := 19 }, IR.Opd.const 0], hl := [IR.Opd.slot { area := IR.Area.frame "tcp_emit", off := 20 }, IR.Opd.slot { area := IR.Area.frame "tcp_emit", off := 17 }, IR.Opd.const 0], acc := some (4, IR.Opd.slot { area := IR.Area.frame "tcp_emit", off := 12 }) },
@@ -595,6 +56,10 @@ def s2_tcp_segment_60 : GS :=
     dead := false, reads := #[false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false], addrTaken := false,
     jumps := [(9, { a := [IR.Opd.tmp 6], hl := [], acc := none }), (8, { a := [IR.Opd.tmp 5], hl := [], acc := none }), (7, { a := [], hl := [], acc := some (4, IR.Opd.tmp 4) }), (7, { a := [IR.Opd.tmp 3], hl := [], acc := none }), (7, { a := [IR.Opd.tmp 2], hl := [], acc := none }), (7, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [], acc := none }), (6, { a := [IR.Opd.tmp 1], hl := [], acc := none }), (5, { a := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 0 }], hl := [], acc := none }), (3, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "sg", off := 0 }) }), (4, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "sg", off := 0 }) }), (2, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "sg", off := 0 }) }), (4, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "sg", off := 0 }) }), (3, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 6 }], acc := none }), (1, { a := [], hl := [], acc := none }), (1, { a := [IR.Opd.tmp 0], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 6 }], acc := none }), (0, { a := [], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 6 }], acc := none })],
     labelRegs := [(8, { a := [IR.Opd.tmp 5], hl := [], acc := none }), (5, { a := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 0 }], hl := [], acc := none }), (7, { a := [], hl := [], acc := none }), (6, { a := [IR.Opd.tmp 1], hl := [], acc := none }), (2, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "sg", off := 0 }) }), (3, { a := [], hl := [], acc := none }), (4, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "sg", off := 0 }) }), (0, { a := [], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 6 }], acc := none }), (1, { a := [], hl := [], acc := none })] }
+
+theorem c2_tcp_segment_40 : runG (genBody Stack.fn_tcp_segment false 40 ((Stack.fn_tcp_segment.body.toList.drop 40).take 20)) e2_tcp_segment s2_tcp_segment_40 =
+    .ok ((), s2_tcp_segment_60) := by
+  decide +kernel
 
 def s2_tcp_segment_80 : GS :=
   { out := ⟨(items.drop 1803).take 158⟩,
@@ -605,6 +70,10 @@ def s2_tcp_segment_80 : GS :=
     jumps := [(12, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "sg", off := 12 }) }), (11, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [], acc := none }), (10, { a := [IR.Opd.tmp 7], hl := [], acc := none }), (9, { a := [IR.Opd.tmp 6], hl := [], acc := none }), (8, { a := [IR.Opd.tmp 5], hl := [], acc := none }), (7, { a := [], hl := [], acc := some (4, IR.Opd.tmp 4) }), (7, { a := [IR.Opd.tmp 3], hl := [], acc := none }), (7, { a := [IR.Opd.tmp 2], hl := [], acc := none }), (7, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [], acc := none }), (6, { a := [IR.Opd.tmp 1], hl := [], acc := none }), (5, { a := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 0 }], hl := [], acc := none }), (3, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "sg", off := 0 }) }), (4, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "sg", off := 0 }) }), (2, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "sg", off := 0 }) }), (4, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "sg", off := 0 }) }), (3, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 6 }], acc := none }), (1, { a := [], hl := [], acc := none }), (1, { a := [IR.Opd.tmp 0], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 6 }], acc := none }), (0, { a := [], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 6 }], acc := none })],
     labelRegs := [(12, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "sg", off := 12 }) }), (10, { a := [IR.Opd.tmp 7], hl := [], acc := none }), (9, { a := [IR.Opd.tmp 6], hl := [], acc := none }), (8, { a := [IR.Opd.tmp 5], hl := [], acc := none }), (5, { a := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 0 }], hl := [], acc := none }), (7, { a := [], hl := [], acc := none }), (6, { a := [IR.Opd.tmp 1], hl := [], acc := none }), (2, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "sg", off := 0 }) }), (3, { a := [], hl := [], acc := none }), (4, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "sg", off := 0 }) }), (0, { a := [], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 6 }], acc := none }), (1, { a := [], hl := [], acc := none })] }
 
+theorem c2_tcp_segment_60 : runG (genBody Stack.fn_tcp_segment false 60 ((Stack.fn_tcp_segment.body.toList.drop 60).take 20)) e2_tcp_segment s2_tcp_segment_60 =
+    .ok ((), s2_tcp_segment_80) := by
+  decide +kernel
+
 def s2_tcp_segment_100 : GS :=
   { out := ⟨(items.drop 1803).take 204⟩,
     regs := { a := [], hl := [IR.Opd.slot { area := IR.Area.frame "send_seg", off := 7 }, IR.Opd.slot { area := IR.Area.frame "send_seg", off := 5 }, IR.Opd.const 0], acc := some (4, IR.Opd.slot { area := IR.Area.frame "send_seg", off := 1 }) },
@@ -613,6 +82,10 @@ def s2_tcp_segment_100 : GS :=
     dead := false, reads := #[false, false, false, true, false, false, false, false, false, false, false, false, false, false, false, false, false, false], addrTaken := false,
     jumps := [(15, { a := [], hl := [], acc := some (4, IR.Opd.tmp 9) }), (16, { a := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 3 }], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 22 }], acc := none }), (15, { a := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 3 }], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 22 }], acc := none }), (16, { a := [], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 22 }], acc := none }), (13, { a := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 1 }], hl := [], acc := none }), (14, { a := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 1 }], hl := [], acc := none }), (13, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 31 }, IR.Opd.slot { area := IR.Area.global "t", off := 30 }, IR.Opd.const 0], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "t", off := 7 }) }), (12, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "sg", off := 12 }) }), (11, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [], acc := none }), (10, { a := [IR.Opd.tmp 7], hl := [], acc := none }), (9, { a := [IR.Opd.tmp 6], hl := [], acc := none }), (8, { a := [IR.Opd.tmp 5], hl := [], acc := none }), (7, { a := [], hl := [], acc := some (4, IR.Opd.tmp 4) }), (7, { a := [IR.Opd.tmp 3], hl := [], acc := none }), (7, { a := [IR.Opd.tmp 2], hl := [], acc := none }), (7, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [], acc := none }), (6, { a := [IR.Opd.tmp 1], hl := [], acc := none }), (5, { a := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 0 }], hl := [], acc := none }), (3, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "sg", off := 0 }) }), (4, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "sg", off := 0 }) }), (2, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "sg", off := 0 }) }), (4, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "sg", off := 0 }) }), (3, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 6 }], acc := none }), (1, { a := [], hl := [], acc := none }), (1, { a := [IR.Opd.tmp 0], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 6 }], acc := none }), (0, { a := [], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 6 }], acc := none })],
     labelRegs := [(16, { a := [], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 22 }], acc := none }), (13, { a := [], hl := [], acc := none }), (14, { a := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 1 }], hl := [], acc := none }), (11, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [], acc := none }), (12, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "sg", off := 12 }) }), (10, { a := [IR.Opd.tmp 7], hl := [], acc := none }), (9, { a := [IR.Opd.tmp 6], hl := [], acc := none }), (8, { a := [IR.Opd.tmp 5], hl := [], acc := none }), (5, { a := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 0 }], hl := [], acc := none }), (7, { a := [], hl := [], acc := none }), (6, { a := [IR.Opd.tmp 1], hl := [], acc := none }), (2, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "sg", off := 0 }) }), (3, { a := [], hl := [], acc := none }), (4, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "sg", off := 0 }) }), (0, { a := [], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 6 }], acc := none }), (1, { a := [], hl := [], acc := none })] }
+
+theorem c2_tcp_segment_80 : runG (genBody Stack.fn_tcp_segment false 80 ((Stack.fn_tcp_segment.body.toList.drop 80).take 20)) e2_tcp_segment s2_tcp_segment_80 =
+    .ok ((), s2_tcp_segment_100) := by
+  decide +kernel
 
 def s2_tcp_segment_120 : GS :=
   { out := ⟨(items.drop 1803).take 257⟩,
@@ -623,6 +96,10 @@ def s2_tcp_segment_120 : GS :=
     jumps := [(22, { a := [], hl := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 10 }], acc := none }), (21, { a := [], hl := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 8 }], acc := some (4, IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 4 }) }), (21, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 4 }) }), (19, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 22 }], acc := none }), (20, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 22 }], acc := none }), (18, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 22 }], acc := none }), (20, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 22 }], acc := none }), (19, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 22 }], acc := none }), (17, { a := [], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 22 }], acc := none }), (15, { a := [], hl := [], acc := some (4, IR.Opd.tmp 9) }), (16, { a := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 3 }], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 22 }], acc := none }), (15, { a := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 3 }], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 22 }], acc := none }), (16, { a := [], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 22 }], acc := none }), (13, { a := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 1 }], hl := [], acc := none }), (14, { a := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 1 }], hl := [], acc := none }), (13, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 31 }, IR.Opd.slot { area := IR.Area.global "t", off := 30 }, IR.Opd.const 0], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "t", off := 7 }) }), (12, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "sg", off := 12 }) }), (11, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [], acc := none }), (10, { a := [IR.Opd.tmp 7], hl := [], acc := none }), (9, { a := [IR.Opd.tmp 6], hl := [], acc := none }), (8, { a := [IR.Opd.tmp 5], hl := [], acc := none }), (7, { a := [], hl := [], acc := some (4, IR.Opd.tmp 4) }), (7, { a := [IR.Opd.tmp 3], hl := [], acc := none }), (7, { a := [IR.Opd.tmp 2], hl := [], acc := none }), (7, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [], acc := none }), (6, { a := [IR.Opd.tmp 1], hl := [], acc := none }), (5, { a := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 0 }], hl := [], acc := none }), (3, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "sg", off := 0 }) }), (4, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "sg", off := 0 }) }), (2, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "sg", off := 0 }) }), (4, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "sg", off := 0 }) }), (3, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 6 }], acc := none }), (1, { a := [], hl := [], acc := none }), (1, { a := [IR.Opd.tmp 0], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 6 }], acc := none }), (0, { a := [], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 6 }], acc := none })],
     labelRegs := [(21, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 4 }) }), (19, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 22 }], acc := none }), (20, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 22 }], acc := none }), (15, { a := [], hl := [], acc := none }), (16, { a := [], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 22 }], acc := none }), (13, { a := [], hl := [], acc := none }), (14, { a := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 1 }], hl := [], acc := none }), (11, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [], acc := none }), (12, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "sg", off := 12 }) }), (10, { a := [IR.Opd.tmp 7], hl := [], acc := none }), (9, { a := [IR.Opd.tmp 6], hl := [], acc := none }), (8, { a := [IR.Opd.tmp 5], hl := [], acc := none }), (5, { a := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 0 }], hl := [], acc := none }), (7, { a := [], hl := [], acc := none }), (6, { a := [IR.Opd.tmp 1], hl := [], acc := none }), (2, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "sg", off := 0 }) }), (3, { a := [], hl := [], acc := none }), (4, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "sg", off := 0 }) }), (0, { a := [], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 6 }], acc := none }), (1, { a := [], hl := [], acc := none })] }
 
+theorem c2_tcp_segment_100 : runG (genBody Stack.fn_tcp_segment false 100 ((Stack.fn_tcp_segment.body.toList.drop 100).take 20)) e2_tcp_segment s2_tcp_segment_100 =
+    .ok ((), s2_tcp_segment_120) := by
+  decide +kernel
+
 def s2_tcp_segment_140 : GS :=
   { out := ⟨(items.drop 1803).take 318⟩,
     regs := { a := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 2 }], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "t", off := 15 }) },
@@ -631,6 +108,10 @@ def s2_tcp_segment_140 : GS :=
     dead := false, reads := #[false, false, false, true, true, false, false, false, true, false, true, false, true, false, true, false, true, false], addrTaken := false,
     jumps := [(23, { a := [], hl := [IR.Opd.slot { area := IR.Area.global "t", off := 19 }], acc := none }), (24, { a := [IR.Opd.tmp 13], hl := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 14 }], acc := none }), (25, { a := [], hl := [], acc := none }), (24, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 16 }, IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 12 }], acc := none }), (23, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 10 }], acc := none }), (22, { a := [], hl := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 12 }, IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 10 }], acc := none }), (22, { a := [], hl := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 10 }], acc := none }), (21, { a := [], hl := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 8 }], acc := some (4, IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 4 }) }), (21, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 4 }) }), (19, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 22 }], acc := none }), (20, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 22 }], acc := none }), (18, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 22 }], acc := none }), (20, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 22 }], acc := none }), (19, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 22 }], acc := none }), (17, { a := [], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 22 }], acc := none }), (15, { a := [], hl := [], acc := some (4, IR.Opd.tmp 9) }), (16, { a := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 3 }], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 22 }], acc := none }), (15, { a := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 3 }], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 22 }], acc := none }), (16, { a := [], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 22 }], acc := none }), (13, { a := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 1 }], hl := [], acc := none }), (14, { a := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 1 }], hl := [], acc := none }), (13, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 31 }, IR.Opd.slot { area := IR.Area.global "t", off := 30 }, IR.Opd.const 0], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "t", off := 7 }) }), (12, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "sg", off := 12 }) }), (11, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [], acc := none }), (10, { a := [IR.Opd.tmp 7], hl := [], acc := none }), (9, { a := [IR.Opd.tmp 6], hl := [], acc := none }), (8, { a := [IR.Opd.tmp 5], hl := [], acc := none }), (7, { a := [], hl := [], acc := some (4, IR.Opd.tmp 4) }), (7, { a := [IR.Opd.tmp 3], hl := [], acc := none }), (7, { a := [IR.Opd.tmp 2], hl := [], acc := none }), (7, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [], acc := none }), (6, { a := [IR.Opd.tmp 1], hl := [], acc := none }), (5, { a := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 0 }], hl := [], acc := none }), (3, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "sg", off := 0 }) }), (4, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "sg", off := 0 }) }), (2, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "sg", off := 0 }) }), (4, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "sg", off := 0 }) }), (3, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 6 }], acc := none }), (1, { a := [], hl := [], acc := none }), (1, { a := [IR.Opd.tmp 0], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 6 }], acc := none }), (0, { a := [], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 6 }], acc := none })],
     labelRegs := [(23, { a := [], hl := [], acc := none }), (25, { a := [], hl := [], acc := none }), (24, { a := [], hl := [], acc := none }), (22, { a := [], hl := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 10 }], acc := none }), (21, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 4 }) }), (19, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 22 }], acc := none }), (20, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 22 }], acc := none }), (15, { a := [], hl := [], acc := none }), (16, { a := [], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 22 }], acc := none }), (13, { a := [], hl := [], acc := none }), (14, { a := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 1 }], hl := [], acc := none }), (11, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [], acc := none }), (12, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "sg", off := 12 }) }), (10, { a := [IR.Opd.tmp 7], hl := [], acc := none }), (9, { a := [IR.Opd.tmp 6], hl := [], acc := none }), (8, { a := [IR.Opd.tmp 5], hl := [], acc := none }), (5, { a := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 0 }], hl := [], acc := none }), (7, { a := [], hl := [], acc := none }), (6, { a := [IR.Opd.tmp 1], hl := [], acc := none }), (2, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "sg", off := 0 }) }), (3, { a := [], hl := [], acc := none }), (4, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "sg", off := 0 }) }), (0, { a := [], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 6 }], acc := none }), (1, { a := [], hl := [], acc := none })] }
+
+theorem c2_tcp_segment_120 : runG (genBody Stack.fn_tcp_segment false 120 ((Stack.fn_tcp_segment.body.toList.drop 120).take 20)) e2_tcp_segment s2_tcp_segment_120 =
+    .ok ((), s2_tcp_segment_140) := by
+  decide +kernel
 
 def s2_tcp_segment_160 : GS :=
   { out := ⟨(items.drop 1803).take 364⟩,
@@ -641,6 +122,10 @@ def s2_tcp_segment_160 : GS :=
     jumps := [(31, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [], acc := some (4, IR.Opd.tmp 16) }), (30, { a := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 1 }, IR.Opd.const 1], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "t", off := 15 }) }), (29, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [], acc := some (4, IR.Opd.tmp 16) }), (28, { a := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 1 }, IR.Opd.const 1], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "t", off := 15 }) }), (27, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [], acc := some (4, IR.Opd.tmp 16) }), (26, { a := [], hl := [], acc := some (4, IR.Opd.tmp 16) }), (26, { a := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 2 }], hl := [], acc := none }), (26, { a := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 3 }], hl := [], acc := none }), (17, { a := [], hl := [], acc := none }), (18, { a := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 2 }], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "t", off := 15 }) }), (23, { a := [], hl := [IR.Opd.slot { area := IR.Area.global "t", off := 19 }], acc := none }), (24, { a := [IR.Opd.tmp 13], hl := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 14 }], acc := none }), (25, { a := [], hl := [], acc := none }), (24, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 16 }, IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 12 }], acc := none }), (23, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 10 }], acc := none }), (22, { a := [], hl := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 12 }, IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 10 }], acc := none }), (22, { a := [], hl := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 10 }], acc := none }), (21, { a := [], hl := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 8 }], acc := some (4, IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 4 }) }), (21, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 4 }) }), (19, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 22 }], acc := none }), (20, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 22 }], acc := none }), (18, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 22 }], acc := none }), (20, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 22 }], acc := none }), (19, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 22 }], acc := none }), (17, { a := [], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 22 }], acc := none }), (15, { a := [], hl := [], acc := some (4, IR.Opd.tmp 9) }), (16, { a := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 3 }], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 22 }], acc := none }), (15, { a := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 3 }], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 22 }], acc := none }), (16, { a := [], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 22 }], acc := none }), (13, { a := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 1 }], hl := [], acc := none }), (14, { a := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 1 }], hl := [], acc := none }), (13, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 31 }, IR.Opd.slot { area := IR.Area.global "t", off := 30 }, IR.Opd.const 0], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "t", off := 7 }) }), (12, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "sg", off := 12 }) }), (11, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [], acc := none }), (10, { a := [IR.Opd.tmp 7], hl := [], acc := none }), (9, { a := [IR.Opd.tmp 6], hl := [], acc := none }), (8, { a := [IR.Opd.tmp 5], hl := [], acc := none }), (7, { a := [], hl := [], acc := some (4, IR.Opd.tmp 4) }), (7, { a := [IR.Opd.tmp 3], hl := [], acc := none }), (7, { a := [IR.Opd.tmp 2], hl := [], acc := none }), (7, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [], acc := none }), (6, { a := [IR.Opd.tmp 1], hl := [], acc := none }), (5, { a := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 0 }], hl := [], acc := none }), (3, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "sg", off := 0 }) }), (4, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "sg", off := 0 }) }), (2, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "sg", off := 0 }) }), (4, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "sg", off := 0 }) }), (3, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 6 }], acc := none }), (1, { a := [], hl := [], acc := none }), (1, { a := [IR.Opd.tmp 0], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 6 }], acc := none }), (0, { a := [], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 6 }], acc := none })],
     labelRegs := [(29, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [], acc := some (4, IR.Opd.tmp 16) }), (27, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [], acc := some (4, IR.Opd.tmp 16) }), (17, { a := [], hl := [], acc := none }), (18, { a := [], hl := [], acc := none }), (23, { a := [], hl := [], acc := none }), (25, { a := [], hl := [], acc := none }), (24, { a := [], hl := [], acc := none }), (22, { a := [], hl := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 10 }], acc := none }), (21, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 4 }) }), (19, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 22 }], acc := none }), (20, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 22 }], acc := none }), (15, { a := [], hl := [], acc := none }), (16, { a := [], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 22 }], acc := none }), (13, { a := [], hl := [], acc := none }), (14, { a := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 1 }], hl := [], acc := none }), (11, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [], acc := none }), (12, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "sg", off := 12 }) }), (10, { a := [IR.Opd.tmp 7], hl := [], acc := none }), (9, { a := [IR.Opd.tmp 6], hl := [], acc := none }), (8, { a := [IR.Opd.tmp 5], hl := [], acc := none }), (5, { a := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 0 }], hl := [], acc := none }), (7, { a := [], hl := [], acc := none }), (6, { a := [IR.Opd.tmp 1], hl := [], acc := none }), (2, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "sg", off := 0 }) }), (3, { a := [], hl := [], acc := none }), (4, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "sg", off := 0 }) }), (0, { a := [], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 6 }], acc := none }), (1, { a := [], hl := [], acc := none })] }
 
+theorem c2_tcp_segment_140 : runG (genBody Stack.fn_tcp_segment false 140 ((Stack.fn_tcp_segment.body.toList.drop 140).take 20)) e2_tcp_segment s2_tcp_segment_140 =
+    .ok ((), s2_tcp_segment_160) := by
+  decide +kernel
+
 def s2_tcp_segment_170 : GS :=
   { out := ⟨(items.drop 1803).take 383⟩,
     regs := { a := [], hl := [], acc := none },
@@ -650,35 +135,10 @@ def s2_tcp_segment_170 : GS :=
     jumps := [(26, { a := [], hl := [], acc := none }), (28, { a := [], hl := [], acc := none }), (30, { a := [], hl := [], acc := none }), (31, { a := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 1 }, IR.Opd.const 1], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "t", off := 15 }) }), (31, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [], acc := some (4, IR.Opd.tmp 16) }), (30, { a := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 1 }, IR.Opd.const 1], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "t", off := 15 }) }), (29, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [], acc := some (4, IR.Opd.tmp 16) }), (28, { a := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 1 }, IR.Opd.const 1], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "t", off := 15 }) }), (27, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [], acc := some (4, IR.Opd.tmp 16) }), (26, { a := [], hl := [], acc := some (4, IR.Opd.tmp 16) }), (26, { a := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 2 }], hl := [], acc := none }), (26, { a := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 3 }], hl := [], acc := none }), (17, { a := [], hl := [], acc := none }), (18, { a := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 2 }], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "t", off := 15 }) }), (23, { a := [], hl := [IR.Opd.slot { area := IR.Area.global "t", off := 19 }], acc := none }), (24, { a := [IR.Opd.tmp 13], hl := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 14 }], acc := none }), (25, { a := [], hl := [], acc := none }), (24, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 16 }, IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 12 }], acc := none }), (23, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 10 }], acc := none }), (22, { a := [], hl := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 12 }, IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 10 }], acc := none }), (22, { a := [], hl := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 10 }], acc := none }), (21, { a := [], hl := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 8 }], acc := some (4, IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 4 }) }), (21, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 4 }) }), (19, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 22 }], acc := none }), (20, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 22 }], acc := none }), (18, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 22 }], acc := none }), (20, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 22 }], acc := none }), (19, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 22 }], acc := none }), (17, { a := [], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 22 }], acc := none }), (15, { a := [], hl := [], acc := some (4, IR.Opd.tmp 9) }), (16, { a := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 3 }], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 22 }], acc := none }), (15, { a := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 3 }], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 22 }], acc := none }), (16, { a := [], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 22 }], acc := none }), (13, { a := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 1 }], hl := [], acc := none }), (14, { a := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 1 }], hl := [], acc := none }), (13, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 31 }, IR.Opd.slot { area := IR.Area.global "t", off := 30 }, IR.Opd.const 0], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "t", off := 7 }) }), (12, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "sg", off := 12 }) }), (11, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [], acc := none }), (10, { a := [IR.Opd.tmp 7], hl := [], acc := none }), (9, { a := [IR.Opd.tmp 6], hl := [], acc := none }), (8, { a := [IR.Opd.tmp 5], hl := [], acc := none }), (7, { a := [], hl := [], acc := some (4, IR.Opd.tmp 4) }), (7, { a := [IR.Opd.tmp 3], hl := [], acc := none }), (7, { a := [IR.Opd.tmp 2], hl := [], acc := none }), (7, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [], acc := none }), (6, { a := [IR.Opd.tmp 1], hl := [], acc := none }), (5, { a := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 0 }], hl := [], acc := none }), (3, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "sg", off := 0 }) }), (4, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "sg", off := 0 }) }), (2, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "sg", off := 0 }) }), (4, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "sg", off := 0 }) }), (3, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 6 }], acc := none }), (1, { a := [], hl := [], acc := none }), (1, { a := [IR.Opd.tmp 0], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 6 }], acc := none }), (0, { a := [], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 6 }], acc := none })],
     labelRegs := [(26, { a := [], hl := [], acc := none }), (28, { a := [], hl := [], acc := none }), (30, { a := [], hl := [], acc := none }), (31, { a := [], hl := [], acc := none }), (29, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [], acc := some (4, IR.Opd.tmp 16) }), (27, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [], acc := some (4, IR.Opd.tmp 16) }), (17, { a := [], hl := [], acc := none }), (18, { a := [], hl := [], acc := none }), (23, { a := [], hl := [], acc := none }), (25, { a := [], hl := [], acc := none }), (24, { a := [], hl := [], acc := none }), (22, { a := [], hl := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 10 }], acc := none }), (21, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 4 }) }), (19, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 22 }], acc := none }), (20, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 22 }], acc := none }), (15, { a := [], hl := [], acc := none }), (16, { a := [], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 22 }], acc := none }), (13, { a := [], hl := [], acc := none }), (14, { a := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 1 }], hl := [], acc := none }), (11, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [], acc := none }), (12, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "sg", off := 12 }) }), (10, { a := [IR.Opd.tmp 7], hl := [], acc := none }), (9, { a := [IR.Opd.tmp 6], hl := [], acc := none }), (8, { a := [IR.Opd.tmp 5], hl := [], acc := none }), (5, { a := [IR.Opd.slot { area := IR.Area.frame "tcp_segment", off := 0 }], hl := [], acc := none }), (7, { a := [], hl := [], acc := none }), (6, { a := [IR.Opd.tmp 1], hl := [], acc := none }), (2, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "sg", off := 0 }) }), (3, { a := [], hl := [], acc := none }), (4, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "sg", off := 0 }) }), (0, { a := [], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 6 }], acc := none }), (1, { a := [], hl := [], acc := none })] }
 
-theorem pre2_tcp_segment : runG (genPre Stack.fn_tcp_segment false) e2_tcp_segment (fnStart Stack.fn_tcp_segment #[(4, 167772161), (4, 4294967295), (4, 0), (4, 1), (4, 65536)]) = .ok ((), s2_tcp_segment_pre) := by
-  decide +kernel
-theorem c2_tcp_segment_0 : runG (genBody Stack.fn_tcp_segment false 0 ((Stack.fn_tcp_segment.body.toList.drop 0).take 20)) e2_tcp_segment s2_tcp_segment_pre =
-    .ok ((), s2_tcp_segment_20) := by
-  decide +kernel
-theorem c2_tcp_segment_20 : runG (genBody Stack.fn_tcp_segment false 20 ((Stack.fn_tcp_segment.body.toList.drop 20).take 20)) e2_tcp_segment s2_tcp_segment_20 =
-    .ok ((), s2_tcp_segment_40) := by
-  decide +kernel
-theorem c2_tcp_segment_40 : runG (genBody Stack.fn_tcp_segment false 40 ((Stack.fn_tcp_segment.body.toList.drop 40).take 20)) e2_tcp_segment s2_tcp_segment_40 =
-    .ok ((), s2_tcp_segment_60) := by
-  decide +kernel
-theorem c2_tcp_segment_60 : runG (genBody Stack.fn_tcp_segment false 60 ((Stack.fn_tcp_segment.body.toList.drop 60).take 20)) e2_tcp_segment s2_tcp_segment_60 =
-    .ok ((), s2_tcp_segment_80) := by
-  decide +kernel
-theorem c2_tcp_segment_80 : runG (genBody Stack.fn_tcp_segment false 80 ((Stack.fn_tcp_segment.body.toList.drop 80).take 20)) e2_tcp_segment s2_tcp_segment_80 =
-    .ok ((), s2_tcp_segment_100) := by
-  decide +kernel
-theorem c2_tcp_segment_100 : runG (genBody Stack.fn_tcp_segment false 100 ((Stack.fn_tcp_segment.body.toList.drop 100).take 20)) e2_tcp_segment s2_tcp_segment_100 =
-    .ok ((), s2_tcp_segment_120) := by
-  decide +kernel
-theorem c2_tcp_segment_120 : runG (genBody Stack.fn_tcp_segment false 120 ((Stack.fn_tcp_segment.body.toList.drop 120).take 20)) e2_tcp_segment s2_tcp_segment_120 =
-    .ok ((), s2_tcp_segment_140) := by
-  decide +kernel
-theorem c2_tcp_segment_140 : runG (genBody Stack.fn_tcp_segment false 140 ((Stack.fn_tcp_segment.body.toList.drop 140).take 20)) e2_tcp_segment s2_tcp_segment_140 =
-    .ok ((), s2_tcp_segment_160) := by
-  decide +kernel
 theorem c2_tcp_segment_160 : runG (genBody Stack.fn_tcp_segment false 160 ((Stack.fn_tcp_segment.body.toList.drop 160).take 10)) e2_tcp_segment s2_tcp_segment_160 =
     .ok ((), s2_tcp_segment_170) := by
   decide +kernel
+
 theorem body2_tcp_segment : runG (genBody Stack.fn_tcp_segment false 0 (Stack.fn_tcp_segment.body.toList.drop 0)) e2_tcp_segment s2_tcp_segment_pre = .ok ((), s2_tcp_segment_170) :=
   body_step _ _ _ _ 0 20 _ _ _ (by decide +kernel) c2_tcp_segment_0
     (body_step _ _ _ _ 20 20 _ _ _ (by decide +kernel) c2_tcp_segment_20

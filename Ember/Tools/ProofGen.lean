@@ -296,7 +296,7 @@ def stretch : Nat := 20
 
 /-- The states of one pass at the cuts. -/
 def cutsOf (f : IR.Fn) (spilled : Array Bool) (lits : Array (Nat × Nat)) (isEntry : Bool)
-    (live : Option (Array Bool)) : Except String Cuts := do
+    (live : Option (Array Bool)) (n : Nat := stretch) : Except String Cuts := do
   let env : GEnv := { fn := f, spilled, tmpOff := (tmpLayout f spilled).1, live }
   let s0 : GS := { missed := Array.replicate f.tmps.size false, lits, reads := Array.replicate f.frame false }
   let ((), pre) ← ((genPre f isEntry).run env).run s0
@@ -305,14 +305,14 @@ def cutsOf (f : IR.Fn) (spilled : Array Bool) (lits : Array (Nat × Nat)) (isEnt
   let mut out := #[]
   let mut k := 0
   while k < body.length do
-    let ((), st') ← ((genBody f false k ((body.drop k).take stretch)).run env).run st
-    k := min (k + stretch) body.length
+    let ((), st') ← ((genBody f false k ((body.drop k).take n)).run env).run st
+    k := min (k + n) body.length
     st := st'
     out := out.push (k, st)
   return { pre, stops := out.toList }
 
 /-- The two passes of the generator on each function, as `genFns` runs them. -/
-def parts (ir : IR.Prog) (genOff : Nat) : Except String (List Part) := do
+def parts (ir : IR.Prog) (genOff : Nat) (n : Nat := stretch) : Except String (List Part) := do
   let mut out := #[]
   let mut lits : Array (Nat × Nat) := #[]
   let mut off := genOff
@@ -322,8 +322,8 @@ def parts (ir : IR.Prog) (genOff : Nat) : Except String (List Part) := do
     let live := keepShared (sharedBytes ir f.name) live
     let (code, _, lits2, size, _) ← genFn f missed lits (f.name == ir.entry) live false
     let big := f.body.size > cutAbove
-    let cuts1 ← if big then some <$> cutsOf f (Array.replicate f.tmps.size true) lits false none else pure none
-    let cuts2 ← if big then some <$> cutsOf f missed lits (f.name == ir.entry) live else pure none
+    let cuts1 ← if big then some <$> cutsOf f (Array.replicate f.tmps.size true) lits false none n else pure none
+    let cuts2 ← if big then some <$> cutsOf f missed lits (f.name == ir.entry) live n else pure none
     out := out.push { name := f.name, instrs := f.body.size, cuts1, cuts2, missed, live, off, len := code.size,
                       litsIn := lits, lits := lits2, size }
     off := off + code.size
@@ -342,8 +342,15 @@ def gsText (s : GS) (out : String) : String :=
   s!"reads := {boolsText s.reads}, addrTaken := {boolText s.addrTaken},\n    jumps := {regsListText s.jumps},\n" ++
   s!"    labelRegs := {regsListText s.labelRegs} }"
 
-/-- The stretches of pass `j` of `g`: states, a theorem a stretch, the pass from them. -/
-def cutsText (items : List Item) (g : Part) (j : Nat) (c : Cuts) (isEntry : Bool) : Except String String := do
+/-- Stretches checked in one module (a pass can be spread over modules;
+measured, it does not lower the peak: each stretch's check compares the
+generator's whole output so far, and costs about the same wherever it
+is checked — so a pass is one module). -/
+def stretchesAModule : Nat := 1000
+
+/-- The stretches of pass `j` of `g` — states, a theorem a stretch, the
+pass from them — in the modules they are spread over. -/
+def cutsText (items : List Item) (g : Part) (j : Nat) (c : Cuts) (isEntry : Bool) : Except String (List String) := do
   let f := s!"Stack.fn_{g.name}"
   let tag := s!"{j}_{g.name}"
   let last := (c.stops.getLast?.map (·.2)).getD c.pre
@@ -360,15 +367,20 @@ def cutsText (items : List Item) (g : Part) (j : Nat) (c : Cuts) (isEntry : Bool
     t := t ++ s!"def p1code_{g.name} : List Item := [\n" ++ ",\n".intercalate (last.out.toList.map fun it => "  " ++ itemText it) ++ "]\n\n"
   t := t ++ s!"def e{tag} : GEnv := {env}\n\n"
   t := t ++ s!"def s{tag}_pre : GS :=\n  {gsText c.pre (← outOf c.pre)}\n\n"
-  for (k, st) in c.stops do
-    t := t ++ s!"def s{tag}_{k} : GS :=\n  {gsText st (← outOf st)}\n\n"
   t := t ++ s!"theorem pre{tag} : runG (genPre {f} {boolText isEntry}) e{tag} (fnStart {f} {litsText g.litsIn}) = .ok ((), s{tag}_pre) := by\n  decide +kernel\n"
+  let mut groups : Array String := #[]
   let mut prev := s!"s{tag}_pre"
   let mut k0 := 0
-  for (k, _) in c.stops do
-    t := t ++ s!"theorem c{tag}_{k0} : runG (genBody {f} false {k0} (({f}.body.toList.drop {k0}).take {k - k0})) e{tag} {prev} =\n    .ok ((), s{tag}_{k}) := by\n  decide +kernel\n"
+  let mut n := 0
+  for (k, st) in c.stops do
+    if n > 0 && n % stretchesAModule == 0 then
+      groups := groups.push t
+      t := ""
+    t := t ++ s!"def s{tag}_{k} : GS :=\n  {gsText st (← outOf st)}\n\n"
+    t := t ++ s!"theorem c{tag}_{k0} : runG (genBody {f} false {k0} (({f}.body.toList.drop {k0}).take {k - k0})) e{tag} {prev} =\n    .ok ((), s{tag}_{k}) := by\n  decide +kernel\n\n"
     prev := s!"s{tag}_{k}"
     k0 := k
+    n := n + 1
   -- the body from its stretches
   let mut proof := s!"body_end _ _ _ _ {g.instrs} _ (by decide +kernel)"
   let mut k1 := g.instrs
@@ -383,30 +395,32 @@ def cutsText (items : List Item) (g : Part) (j : Nat) (c : Cuts) (isEntry : Bool
     s!"    .ok ({prev}.out, {prev}.missed, {prev}.lits, (tmpLayout {f} {spilled}).2,\n" ++
     s!"      if {prev}.addrTaken then none else some {prev}.reads) :=\n" ++
     s!"  genFn_of _ _ _ _ _ _ _ _ pre{tag} body{tag} jumps{tag}\n\n"
-  return t
+  return (groups.push t).toList
 
-def partText (items : List Item) (entry : String) (g : Part) : Except String String := do
+def partText (items : List Item) (entry : String) (g : Part) : Except String (List String) := do
   let live := match g.live with
     | some l => s!"some {boolsText l}"
     | none => "none"
   let isEntry := g.name == entry
-  let mut t := s!"def g_{g.name} : FnPart :=\n" ++
+  let gdef := s!"def g_{g.name} : FnPart :=\n" ++
     s!"  \{ f := Stack.fn_{g.name}, missed := {boolsText g.missed}, live := {live},\n" ++
-    s!"    code := (items.drop {g.off}).take {g.len}, lits := {litsText g.lits}, size := {g.size} }\n"
+    s!"    code := (items.drop {g.off}).take {g.len}, lits := {litsText g.lits}, size := {g.size} }\n\n"
   match g.cuts1, g.cuts2 with
   | some c1, some c2 =>
-    t := t ++ "\n" ++ (← cutsText items g 1 c1 false) ++ (← cutsText items g 2 c2 isEntry)
-    t := t ++ s!"theorem p1_{g.name} : pass1B Stack.ir {litsText g.litsIn} g_{g.name} = true :=\n" ++
-      s!"  pass1B_of gen1_{g.name} (by rw [shared_eq]; decide +kernel)\n"
-    t := t ++ s!"theorem entry_{g.name} : (Stack.fn_{g.name}.name == Stack.ir.entry) = {boolText isEntry} := by decide +kernel\n"
-    t := t ++ s!"theorem p2_{g.name} : pass2B Stack.ir {litsText g.litsIn} g_{g.name} = true :=\n" ++
+    let m := (← cutsText items g 1 c1 false) ++ (← cutsText items g 2 c2 isEntry)
+    let last := s!"theorem p1_{g.name} : pass1B Stack.ir {litsText g.litsIn} g_{g.name} = true :=\n" ++
+      s!"  pass1B_of gen1_{g.name} (by rw [shared_eq]; decide +kernel)\n" ++
+      s!"theorem entry_{g.name} : (Stack.fn_{g.name}.name == Stack.ir.entry) = {boolText isEntry} := by decide +kernel\n" ++
+      s!"theorem p2_{g.name} : pass2B Stack.ir {litsText g.litsIn} g_{g.name} = true :=\n" ++
       s!"  pass2B_of (g := g_{g.name}) rfl\n" ++
       s!"    ((congrArg (fun b => genFn Stack.fn_{g.name} g_{g.name}.missed {litsText g.litsIn} b g_{g.name}.live false)\n" ++
       s!"      entry_{g.name}).trans gen2_{g.name}) (by decide +kernel)\n"
+    let n := m.length
+    return (List.range n).zip m |>.map fun (i, t) =>
+      (if i == 0 then gdef else "") ++ t ++ (if i + 1 == n then last else "")
   | _, _ =>
-    t := t ++ s!"theorem p1_{g.name} : pass1B Stack.ir {litsText g.litsIn} g_{g.name} = true := by\n  unfold pass1B\n  rw [shared_eq]\n  decide +kernel\n" ++
-      s!"theorem p2_{g.name} : pass2B Stack.ir {litsText g.litsIn} g_{g.name} = true := by decide +kernel\n"
-  return t
+    return [gdef ++ s!"theorem p1_{g.name} : pass1B Stack.ir {litsText g.litsIn} g_{g.name} = true := by\n  unfold pass1B\n  rw [shared_eq]\n  decide +kernel\n" ++
+      s!"theorem p2_{g.name} : pass2B Stack.ir {litsText g.litsIn} g_{g.name} = true := by decide +kernel\n"]
 
 /-- The module of one function: the next in the chain of imports, so
 that the kernel checks one function at a time (no two at once). -/
@@ -468,7 +482,27 @@ theorem gens_ok : Gens Stack.ir #[] gens :=
 end Ember.Proof.Z80Gen.StackH
 "
 
-def planFile (gs : List Part) : String :=
+/-- Labels of the plan checked in the items at a time. -/
+def labelStretch : Nat := 40
+
+/-- `on_labels`, a stretch of the plan's labels at a time. -/
+def labelsText (n : Nat) : String := Id.run do
+  let p := "fun l => img.items.any (ImgIn.isLab l)"
+  let mut t := ""
+  let mut a := 0
+  while a < n do
+    t := t ++ s!"theorem on_labels_{a} : ((plan.labels.drop {a}).take {labelStretch}).all ({p}) = true := by\n  decide +kernel\n"
+    a := a + labelStretch
+  t := t ++ s!"theorem on_labels_len : plan.labels.length ≤ {a} := by decide +kernel\n"
+  let mut proof := s!"all_drop_end _ _ {a} on_labels_len"
+  let mut k := a
+  while k > 0 do
+    k := k - labelStretch
+    proof := s!"all_drop_step _ _ {k} {labelStretch} on_labels_{k}\n    ({proof})"
+  t := t ++ s!"theorem on_labels : (plan.labels.all {p}) = true := by\n  have h := {proof}\n  simpa using h\n"
+  return t
+
+def planFile (gs : List Part) (nLabels : Nat) : String :=
   "import Ember.Proof.Z80StackHGen
 import Ember.Proof.Z80StackHAsm
 
@@ -507,7 +541,7 @@ theorem plan_static : ∀ g, g ∈ gens → fnStaticB plan (genEnv g.f g.missed 
 /-- The plan of the image, without the kernel running the generator over the program. -/
 theorem img_plan : img.plan = plan := img.plan_parts gens fns_eq gens_ok
 
-theorem on_labels : (plan.labels.all fun l => img.items.any (ImgIn.isLab l)) = true := by decide +kernel
+" ++ labelsText nLabels ++ "
 theorem on_lits : plan.lits.all (ImgIn.litB asm img.ramStart) = true := by decide +kernel
 theorem on_globals :
     (img.layout.globals.all fun e => asm.labels.reverse.lookup (areaSym (.global e.1)) == some e.2) = true := by
@@ -566,7 +600,7 @@ end Ember.Proof.Z80Gen.StackH
 "
 
 /-- Write the five files into `dir`. -/
-def write (dir : System.FilePath) : IO UInt32 := do
+def write (dir : System.FilePath) (n : Nat := stretch) : IO UInt32 := do
   let fail (e : String) : IO UInt32 := do IO.eprintln s!"proof-files: {e}"; return 1
   let q ← match Net.prog.check with
     | .ok q => pure q
@@ -588,7 +622,7 @@ def write (dir : System.FilePath) : IO UInt32 := do
     | return ← fail "the generated items are not in the image"
   let some acc := img.items.findSome? fun it => match it with | .equ "rt_acc" v => some v | _ => none
     | return ← fail "no rt_acc"
-  let gs ← match parts ir genOff with
+  let gs ← match parts ir genOff n with
     | .ok gs => pure gs
     | .error e => return ← fail e
   IO.FS.createDirAll dir
@@ -599,13 +633,17 @@ def write (dir : System.FilePath) : IO UInt32 := do
   IO.FS.writeFile (dir / "Z80StackHGen" / "Shared.lean") (sharedFile ir)
   let mut prev := ["Ember.Proof.Z80StackHGen.Shared"]
   for g in gs do
-    let body ← match partText img.items ir.entry g with
+    let mods ← match partText img.items ir.entry g with
       | .ok t => pure t
       | .error e => return ← fail e
-    IO.FS.writeFile (dir / "Z80StackHGen" / s!"F_{g.name}.lean") (fnFile prev body g.name)
-    prev := [s!"Ember.Proof.Z80StackHGen.F_{g.name}"]
+    -- the modules of a function: `F_<name>_<i>`, the last `F_<name>`
+    for (i, body) in (List.range mods.length).zip mods do
+      let m := if i + 1 == mods.length then s!"F_{g.name}" else s!"F_{g.name}_{i}"
+      IO.FS.writeFile (dir / "Z80StackHGen" / s!"{m}.lean") (fnFile prev body g.name)
+      prev := [s!"Ember.Proof.Z80StackHGen.{m}"]
   IO.FS.writeFile (dir / "Z80StackHGen.lean") (genFile img q.dropReasons q.notes gs genOff acc (prev.headD ""))
-  IO.FS.writeFile (dir / "Z80StackHPlan.lean") (planFile gs)
+  let nLabels := 1 + ir.fns.foldl (fun n f => n + 1 + (f.body.toList.filter fun i => match i with | .label _ => true | _ => false).length) 0
+  IO.FS.writeFile (dir / "Z80StackHPlan.lean") (planFile gs nLabels)
   IO.println s!"proof-files: {ir.fns.length} functions, {img.items.length} items, {a.bytes.size} bytes -> {dir}"
   return 0
 

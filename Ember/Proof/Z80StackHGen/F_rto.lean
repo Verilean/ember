@@ -12,6 +12,7 @@ set_option Elab.async false
 def g_rto : FnPart :=
   { f := Stack.fn_rto, missed := #[], live := some #[true, true, true, true, true],
     code := (items.drop 928).take 30, lits := #[(4, 167772161), (4, 4294967295)], size := 0 }
+
 theorem p1_rto : pass1B Stack.ir #[(4, 167772161), (4, 4294967295)] g_rto = true := by
   unfold pass1B
   rw [shared_eq]

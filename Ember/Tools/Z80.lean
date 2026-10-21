@@ -844,7 +844,10 @@ def main (args : List String) : IO UInt32 := do
       if let some f := t.first then IO.println s!"FAIL {f}"
       IO.println s!"z80 runtime routines vs their specifications: {t.cases} cases, {t.bad} failures"
       return if t.bad == 0 then 0 else 1
-  | ["proof-files"] => ProofGen.write (o.out.getD "Ember/Proof")
+  | ["proof-files"] => do
+    -- EMBER_STRETCH: instructions in a stretch (for measuring; the files use the default)
+    let n := ((← IO.getEnv "EMBER_STRETCH").bind String.toNat?).getD ProofGen.stretch
+    ProofGen.write (o.out.getD "Ember/Proof") n
   | ["trap-note", image] => trapNote image true
   | ["trap-note-terse", image] => trapNote image false
   | ["profile", image] => profile image

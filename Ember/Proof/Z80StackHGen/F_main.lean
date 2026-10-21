@@ -12,6 +12,7 @@ set_option Elab.async false
 def g_main : FnPart :=
   { f := Stack.fn_main, missed := #[], live := some #[false, false],
     code := (items.drop 2513).take 59, lits := #[(4, 167772161), (4, 4294967295), (4, 0), (4, 1), (4, 65536), (4, 2147483648)], size := 0 }
+
 theorem p1_main : pass1B Stack.ir #[(4, 167772161), (4, 4294967295), (4, 0), (4, 1), (4, 65536), (4, 2147483648)] g_main = true := by
   unfold pass1B
   rw [shared_eq]

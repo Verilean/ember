@@ -12,6 +12,7 @@ set_option Elab.async false
 def g_send_reset : FnPart :=
   { f := Stack.fn_send_reset, missed := #[false], live := some #[true, true, true, true],
     code := (items.drop 1226).take 63, lits := #[(4, 167772161), (4, 4294967295), (4, 0), (4, 1)], size := 0 }
+
 theorem p1_send_reset : pass1B Stack.ir #[(4, 167772161), (4, 4294967295), (4, 0), (4, 1)] g_send_reset = true := by
   unfold pass1B
   rw [shared_eq]

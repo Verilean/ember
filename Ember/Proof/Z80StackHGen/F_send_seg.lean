@@ -12,6 +12,7 @@ set_option Elab.async false
 def g_send_seg : FnPart :=
   { f := Stack.fn_send_seg, missed := #[], live := some #[true, true, true, false, false, true, false, true, false, true, true, false],
     code := (items.drop 1179).take 33, lits := #[(4, 167772161), (4, 4294967295), (4, 0), (4, 1)], size := 0 }
+
 theorem p1_send_seg : pass1B Stack.ir #[(4, 167772161), (4, 4294967295), (4, 0), (4, 1)] g_send_seg = true := by
   unfold pass1B
   rw [shared_eq]

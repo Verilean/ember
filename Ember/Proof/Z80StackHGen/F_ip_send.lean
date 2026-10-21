@@ -12,6 +12,7 @@ set_option Elab.async false
 def g_ip_send : FnPart :=
   { f := Stack.fn_ip_send, missed := #[false, false, false], live := some #[true, true, true, true, true, true, true, true, true],
     code := (items.drop 359).take 68, lits := #[(4, 167772161)], size := 0 }
+
 theorem p1_ip_send : pass1B Stack.ir #[] g_ip_send = true := by
   unfold pass1B
   rw [shared_eq]

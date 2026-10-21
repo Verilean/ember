@@ -12,6 +12,7 @@ set_option Elab.async false
 def g_verifies : FnPart :=
   { f := Stack.fn_verifies, missed := #[false, true, false], live := some #[true, true],
     code := (items.drop 290).take 19, lits := #[], size := 1 }
+
 theorem p1_verifies : pass1B Stack.ir #[] g_verifies = true := by
   unfold pass1B
   rw [shared_eq]

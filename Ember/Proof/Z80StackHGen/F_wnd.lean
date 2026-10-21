@@ -12,6 +12,7 @@ set_option Elab.async false
 def g_wnd : FnPart :=
   { f := Stack.fn_wnd, missed := #[false], live := some #[true, true],
     code := (items.drop 1007).take 7, lits := #[(4, 167772161), (4, 4294967295), (4, 0)], size := 0 }
+
 theorem p1_wnd : pass1B Stack.ir #[(4, 167772161), (4, 4294967295), (4, 0)] g_wnd = true := by
   unfold pass1B
   rw [shared_eq]

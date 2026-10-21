@@ -12,6 +12,7 @@ set_option Elab.async false
 def g_csum : FnPart :=
   { f := Stack.fn_csum, missed := #[false, false, false, false, false, false, false, false], live := some #[true, true, true, true, true, true, true, true, true, true, true, false, true, false],
     code := (items.drop 183).take 61, lits := #[], size := 0 }
+
 theorem p1_csum : pass1B Stack.ir #[] g_csum = true := by
   unfold pass1B
   rw [shared_eq]

@@ -12,6 +12,7 @@ set_option Elab.async false
 def g_csum_update : FnPart :=
   { f := Stack.fn_csum_update, missed := #[false, false], live := some #[true, true, true, true, true, true, true, true],
     code := (items.drop 275).take 15, lits := #[], size := 0 }
+
 theorem p1_csum_update : pass1B Stack.ir #[] g_csum_update = true := by
   unfold pass1B
   rw [shared_eq]

@@ -12,6 +12,7 @@ set_option Elab.async false
 def g_get16 : FnPart :=
   { f := Stack.fn_get16, missed := #[false, false, false, true, false, false, false], live := some #[true, true],
     code := (items.drop 86).take 31, lits := #[], size := 2 }
+
 theorem p1_get16 : pass1B Stack.ir #[] g_get16 = true := by
   unfold pass1B
   rw [shared_eq]

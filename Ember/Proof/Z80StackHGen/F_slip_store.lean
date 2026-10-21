@@ -12,6 +12,7 @@ set_option Elab.async false
 def g_slip_store : FnPart :=
   { f := Stack.fn_slip_store, missed := #[], live := some #[true],
     code := (items.drop 840).take 32, lits := #[(4, 167772161), (4, 4294967295)], size := 0 }
+
 theorem p1_slip_store : pass1B Stack.ir #[(4, 167772161), (4, 4294967295)] g_slip_store = true := by
   unfold pass1B
   rw [shared_eq]

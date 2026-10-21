@@ -126,6 +126,17 @@ theorem pass2B_of {p : IR.Prog} {lits : Array (Nat × Nat)} {g : FnPart}
   rw [hd, h]
   exact hc
 
+/-- `List.all` a stretch at a time. -/
+theorem all_drop_step {α : Type} (l : List α) (p : α → Bool) (a m : Nat)
+    (h1 : ((l.drop a).take m).all p = true) (h2 : (l.drop (a + m)).all p = true) : (l.drop a).all p = true := by
+  rw [← List.take_append_drop m (l.drop a), List.all_append, h1, Bool.true_and, List.drop_drop]
+  exact h2
+
+theorem all_drop_end {α : Type} (l : List α) (p : α → Bool) (a : Nat) (h : l.length ≤ a) :
+    (l.drop a).all p = true := by
+  rw [List.drop_eq_nil_of_le h]
+  rfl
+
 /-- `sharedBytes`, from the frames of the layout it computes. -/
 def sharedOf (p : IR.Prog) (frames : List (String × Nat)) : String → Nat → Bool :=
   let frameSize (f : String) : Nat := ((p.fn? f).map (·.frame)).getD 0

@@ -70,7 +70,29 @@ theorem plan_static : ∀ g, g ∈ gens → fnStaticB plan (genEnv g.f g.missed 
 /-- The plan of the image, without the kernel running the generator over the program. -/
 theorem img_plan : img.plan = plan := img.plan_parts gens fns_eq gens_ok
 
-theorem on_labels : (plan.labels.all fun l => img.items.any (ImgIn.isLab l)) = true := by decide +kernel
+theorem on_labels_0 : ((plan.labels.drop 0).take 40).all (fun l => img.items.any (ImgIn.isLab l)) = true := by
+  decide +kernel
+theorem on_labels_40 : ((plan.labels.drop 40).take 40).all (fun l => img.items.any (ImgIn.isLab l)) = true := by
+  decide +kernel
+theorem on_labels_80 : ((plan.labels.drop 80).take 40).all (fun l => img.items.any (ImgIn.isLab l)) = true := by
+  decide +kernel
+theorem on_labels_120 : ((plan.labels.drop 120).take 40).all (fun l => img.items.any (ImgIn.isLab l)) = true := by
+  decide +kernel
+theorem on_labels_160 : ((plan.labels.drop 160).take 40).all (fun l => img.items.any (ImgIn.isLab l)) = true := by
+  decide +kernel
+theorem on_labels_200 : ((plan.labels.drop 200).take 40).all (fun l => img.items.any (ImgIn.isLab l)) = true := by
+  decide +kernel
+theorem on_labels_len : plan.labels.length ≤ 240 := by decide +kernel
+theorem on_labels : (plan.labels.all fun l => img.items.any (ImgIn.isLab l)) = true := by
+  have h := all_drop_step _ _ 0 40 on_labels_0
+    (all_drop_step _ _ 40 40 on_labels_40
+    (all_drop_step _ _ 80 40 on_labels_80
+    (all_drop_step _ _ 120 40 on_labels_120
+    (all_drop_step _ _ 160 40 on_labels_160
+    (all_drop_step _ _ 200 40 on_labels_200
+    (all_drop_end _ _ 240 on_labels_len))))))
+  simpa using h
+
 theorem on_lits : plan.lits.all (ImgIn.litB asm img.ramStart) = true := by decide +kernel
 theorem on_globals :
     (img.layout.globals.all fun e => asm.labels.reverse.lookup (areaSym (.global e.1)) == some e.2) = true := by

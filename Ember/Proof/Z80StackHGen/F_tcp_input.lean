@@ -12,6 +12,7 @@ set_option Elab.async false
 def g_tcp_input : FnPart :=
   { f := Stack.fn_tcp_input, missed := #[false, false, false, false, false, false], live := some #[true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true],
     code := (items.drop 2293).take 95, lits := #[(4, 167772161), (4, 4294967295), (4, 0), (4, 1), (4, 65536), (4, 2147483648)], size := 0 }
+
 theorem p1_tcp_input : pass1B Stack.ir #[(4, 167772161), (4, 4294967295), (4, 0), (4, 1), (4, 65536), (4, 2147483648)] g_tcp_input = true := by
   unfold pass1B
   rw [shared_eq]

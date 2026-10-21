@@ -12,6 +12,7 @@ set_option Elab.async false
 def g_pseudo : FnPart :=
   { f := Stack.fn_pseudo, missed := #[false, false], live := some #[true, true, true, true, true, true, true, true, true, true, true, true, true],
     code := (items.drop 244).take 31, lits := #[], size := 0 }
+
 theorem p1_pseudo : pass1B Stack.ir #[] g_pseudo = true := by
   unfold pass1B
   rw [shared_eq]

@@ -12,6 +12,7 @@ set_option Elab.async false
 def g_slip_send : FnPart :=
   { f := Stack.fn_slip_send, missed := #[], live := some #[true, true, true, true, true, true, true],
     code := (items.drop 309).take 50, lits := #[], size := 0 }
+
 theorem p1_slip_send : pass1B Stack.ir #[] g_slip_send = true := by
   unfold pass1B
   rw [shared_eq]

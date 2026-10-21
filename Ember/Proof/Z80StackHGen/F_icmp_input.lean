@@ -12,6 +12,7 @@ set_option Elab.async false
 def g_icmp_input : FnPart :=
   { f := Stack.fn_icmp_input, missed := #[], live := some #[true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true],
     code := (items.drop 427).take 61, lits := #[(4, 167772161)], size := 0 }
+
 theorem p1_icmp_input : pass1B Stack.ir #[(4, 167772161)] g_icmp_input = true := by
   unfold pass1B
   rw [shared_eq]

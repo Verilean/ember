@@ -12,6 +12,7 @@ set_option Elab.async false
 def g_rexmit : FnPart :=
   { f := Stack.fn_rexmit, missed := #[], live := some #[true],
     code := (items.drop 1444).take 37, lits := #[(4, 167772161), (4, 4294967295), (4, 0), (4, 1)], size := 0 }
+
 theorem p1_rexmit : pass1B Stack.ir #[(4, 167772161), (4, 4294967295), (4, 0), (4, 1)] g_rexmit = true := by
   unfold pass1B
   rw [shared_eq]

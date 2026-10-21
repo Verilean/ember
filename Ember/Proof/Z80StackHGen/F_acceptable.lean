@@ -12,6 +12,7 @@ set_option Elab.async false
 def g_acceptable : FnPart :=
   { f := Stack.fn_acceptable, missed := #[false, false, true, false, false, false, true, true, false, true], live := some #[true, true, true, true, true, true, true, true, true, true, true, true, true, true],
     code := (items.drop 1481).take 77, lits := #[(4, 167772161), (4, 4294967295), (4, 0), (4, 1)], size := 13 }
+
 theorem p1_acceptable : pass1B Stack.ir #[(4, 167772161), (4, 4294967295), (4, 0), (4, 1)] g_acceptable = true := by
   unfold pass1B
   rw [shared_eq]

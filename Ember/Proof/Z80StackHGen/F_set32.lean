@@ -12,6 +12,7 @@ set_option Elab.async false
 def g_set32 : FnPart :=
   { f := Stack.fn_set32, missed := #[], live := some #[true, true, true, true, true, true],
     code := (items.drop 158).take 12, lits := #[], size := 0 }
+
 theorem p1_set32 : pass1B Stack.ir #[] g_set32 = true := by
   unfold pass1B
   rw [shared_eq]
