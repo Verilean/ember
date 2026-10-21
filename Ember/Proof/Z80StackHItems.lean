@@ -12,7 +12,7 @@ the assembly.  That it is what `build` gives, and the layout what
 `build` computes, are `#guard`s — evaluated when this file is built,
 not proved.
 
-Generated: `repr` of the items of the image.
+Written by `ember-z80 proof-files` (`Ember.Tools.ProofGen`).
 -/
 
 namespace Ember.Proof.Z80Gen.StackH

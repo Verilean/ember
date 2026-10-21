@@ -121,17 +121,14 @@ def runCheck : Bool :=
   decide ((items.drop 2572).take initItems.length = initItems) &&
   decide ((items.drop 2771).take zeroItems.length = zeroItems) &&
   decide ((items.drop 2589).take mainLoopItems.length = mainLoopItems) &&
-  (match assemble items with
-   | .ok a =>
-     a.labels.reverse.lookup "rt_ram" == some 32768 && a.labels.reverse.lookup "rt_ram_size" == some 797 &&
-     a.labels.reverse.lookup "rt_idle" == some 32776 &&
-     a.labels.reverse.lookup "init_iss" == some 6102 && a.labels.reverse.lookup "g_iss" == some 33068 &&
-     a.labels.reverse.lookup "init_ip_id" == some 6106 && a.labels.reverse.lookup "g_ip_id" == some 33072 &&
-     decide ((List.range 6).map (fun j => a.bytes.data[6102 + j]?) = [some 0, some 0, some 1, some 0, some 1, some 0]) &&
-     (match a.labels.reverse.lookup "f_entry" with
-      | some e => a.labels.reverse.lookup (fnLabel "main") == some e && decide (e < 65536)
-      | none => false)
-   | .error _ => false) &&
+  (asm.labels.reverse.lookup "rt_ram" == some 32768 && asm.labels.reverse.lookup "rt_ram_size" == some 797 &&
+   asm.labels.reverse.lookup "rt_idle" == some 32776 &&
+   asm.labels.reverse.lookup "init_iss" == some 6102 && asm.labels.reverse.lookup "g_iss" == some 33068 &&
+   asm.labels.reverse.lookup "init_ip_id" == some 6106 && asm.labels.reverse.lookup "g_ip_id" == some 33072 &&
+   decide ((List.range 6).map (fun j => asm.bytes.data[6102 + j]?) = [some 0, some 0, some 1, some 0, some 1, some 0]) &&
+   (match asm.labels.reverse.lookup "f_entry" with
+    | some e => asm.labels.reverse.lookup (fnLabel "main") == some e && decide (e < 65536)
+    | none => false)) &&
   !plan.wrB "main" 32776 &&
   decide (plan.stackLo + plan.depthOf "main" ≤ 65534) && decide (plan.stackLo ≤ 65532) &&
   (plan.data.all fun iv => decide (32777 ≤ iv.1) && decide (iv.2 ≤ 33565)) &&
@@ -168,9 +165,14 @@ structure Facts (a : Assembled) : Prop where
   consts : ∀ p, p ∈ (initsOf layout Stack.ir.globals).take 61 → p.1 + p.2.length ≤ 32768
 
 theorem facts {a : Assembled} (ha : assemble items = .ok a) : Facts a := by
+  have haa : a = asm := by
+    have h := assemble_items
+    rw [ha] at h
+    cases h
+    rfl
+  subst haa
   have hbc := runCheck_true
   unfold runCheck at hbc
-  rw [ha] at hbc
   simp only [Bool.and_eq_true, decide_eq_true_eq, beq_iff_eq, List.all_eq_true, Bool.not_eq_true'] at hbc
   obtain ⟨⟨⟨⟨⟨⟨⟨⟨⟨⟨⟨⟨hhead, hjump⟩, hstart⟩, hinit⟩, hzero⟩, hloop⟩, hlab⟩, hnowr⟩, hdep⟩, hslo⟩, hdata⟩, hinits⟩,
     hconsts⟩ := hbc
@@ -178,7 +180,7 @@ theorem facts {a : Assembled} (ha : assemble items = .ok a) : Facts a := by
   refine ⟨hhead, hjump, hstart, hinit, hzero, hloop, hram, hrsz, hidle, h1, h2, h3, h4, hrom, ?_,
     by rw [img_plan]; exact hnowr, by rw [img_plan]; exact hdep, by rw [img_plan]; exact hslo,
     by rw [img_plan]; exact hdata, hinits, hconsts⟩
-  cases he : a.labels.reverse.lookup "f_entry" with
+  cases he : asm.labels.reverse.lookup "f_entry" with
   | none => rw [he] at hentry; cases hentry
   | some e =>
     rw [he] at hentry

@@ -16,10 +16,10 @@ frame start, the items, the literals so far, the bytes of temporaries.
 program, and gives `progEnvs` and `genProg` of it (`Gens.envs`,
 `Gens.prog`).
 
-`ImgIn.ok_parts`: with `Gens`, `okB` of the plan, `fnStaticB` of each
-function and what `partsCheck` computes of the assembled items (labels,
-the literal pool, the symbols, the generated items in place, the size),
-the conclusion of `ImgIn.ok`.
+`ImgIn.ok_partsOn`: with `Gens`, `okB` of the plan, `fnStaticB` of each
+function and what `PartsOn` asks of the image the items assemble to
+(labels, the literal pool, the symbols, the generated items in place,
+the size), the conclusion of `ImgIn.ok`.
 -/
 
 namespace Ember.Proof.Z80Gen
@@ -164,24 +164,26 @@ theorem plan_parts (I : ImgIn) (gs : List FnPart) (hfns : I.ir.fns = gs.map (·.
   unfold plan
   rw [henvs]
 
-/-- What is computed of the assembled items, the functions being `gs`. -/
-def partsCheck (I : ImgIn) (gs : List FnPart) : Bool :=
-  match assemble I.items with
-  | .ok a =>
-    let P := mkPlan (I.planIn (envsOf gs))
-    (P.labels.all fun l => I.items.any (isLab l)) && P.lits.all (litB a I.ramStart) &&
-    (I.layout.globals.all fun e => a.labels.reverse.lookup (areaSym (.global e.1)) == some e.2) &&
-    (I.layout.frames.all fun e => a.labels.reverse.lookup (areaSym (.frame e.1)) == some e.2) &&
-    decide ((I.items.drop I.genOff).take (gs.flatMap (·.code)).length = gs.flatMap (·.code)) &&
-    (I.items.all noAcc || a.labels.reverse.lookup "rt_acc" == some I.acc) &&
-    decide (a.bytes.size < 65536)
-  | .error _ => false
+/-- What is computed of the image `a` the items assemble to, the
+functions being `gs`: each a check of its own, so that the kernel takes
+them one declaration at a time (in one evaluation it keeps what each
+computes: the labels looked up by name are most of it). -/
+structure PartsOn (I : ImgIn) (gs : List FnPart) (a : Assembled) : Prop where
+  asm : assemble I.items = .ok a
+  labels : ((mkPlan (I.planIn (envsOf gs))).labels.all fun l => I.items.any (isLab l)) = true
+  lits : (mkPlan (I.planIn (envsOf gs))).lits.all (litB a I.ramStart) = true
+  globals : (I.layout.globals.all fun e => a.labels.reverse.lookup (areaSym (.global e.1)) == some e.2) = true
+  frames : (I.layout.frames.all fun e => a.labels.reverse.lookup (areaSym (.frame e.1)) == some e.2) = true
+  code : decide ((I.items.drop I.genOff).take (gs.flatMap (·.code)).length = gs.flatMap (·.code)) = true
+  acc : (I.items.all noAcc || a.labels.reverse.lookup "rt_acc" == some I.acc) = true
+  size : decide (a.bytes.size < 65536) = true
 
 /-- **An image checked in parts.** -/
-theorem ok_parts (I : ImgIn) (gs : List FnPart) (hfns : I.ir.fns = gs.map (·.f)) (hgen : Gens I.ir #[] gs)
+theorem ok_partsOn (I : ImgIn) (gs : List FnPart) (a : Assembled) (hfns : I.ir.fns = gs.map (·.f))
+    (hgen : Gens I.ir #[] gs)
     (hplan : okB (mkPlan (I.planIn (envsOf gs))) = true)
     (hstat : ∀ g, g ∈ gs → fnStaticB (mkPlan (I.planIn (envsOf gs))) (genEnv g.f g.missed g.live) = true)
-    (h : I.partsCheck gs = true) :
+    (h : PartsOn I gs a) :
     ∃ (a : Assembled) (addrs : List Nat), assemble I.items = .ok a ∧ a.bytes.size < 65536 ∧
       ∀ (W : Type) (bus : W → UInt16 → UInt8) (dev : W → IoEvent → W) (wrel : Ember.Lang.World → W → Prop),
         (∀ w, dev w .none = w) →
@@ -189,49 +191,44 @@ theorem ok_parts (I : ImgIn) (gs : List FnPart) (hfns : I.ir.fns = gs.map (·.f)
         (RtOK (I.plan.toZ (I.around a addrs W bus dev wrel)) →
           ∀ k g st1, Callee (I.plan.toZ (I.around a addrs W bus dev wrel)) g st1 (IR.Sem.callF k I.ctx g st1)) := by
   obtain ⟨he, c, hg, hc⟩ := hgen.prog hfns
-  unfold partsCheck at h
-  cases ha : assemble I.items with
-  | error e => rw [ha] at h; cases h
-  | ok a =>
-    rw [ha] at h
-    simp only [Bool.and_eq_true, List.all_eq_true, decide_eq_true_eq, beq_iff_eq, Bool.or_eq_true] at h
-    obtain ⟨⟨⟨⟨⟨⟨hlab, hlits⟩, hglob⟩, hfr⟩, hsub⟩, hacc⟩, hsize⟩ := h
-    obtain ⟨addrs, hpl⟩ := placed_of_assemble ha
-    refine ⟨a, addrs, rfl, hsize, fun W bus dev wrel quiet => ?_⟩
-    rw [I.plan_parts gs hfns hgen]
-    have hpc : planCheck (I.planIn (envsOf gs)) = true := by
-      unfold planCheck
-      rw [hplan, Bool.true_and, List.all_eq_true]
-      intro e hemem
-      obtain ⟨g, hgm, rfl⟩ := List.mem_map.mp hemem
-      exact hstat g hgm
-    have hok : ((mkPlan (I.planIn (envsOf gs))).toZ (I.around a addrs W bus dev wrel)).OK := by
-      refine plan_ok (planCheck_ok hpc) _ hpl quiet (fun ar ad har => ?_) (fun href => ?_)
-      · cases ar with
-        | global g => exact hglob (g, ad) (lookup_mem har)
-        | frame f => exact hfr (f, ad) (lookup_mem har)
-      · rcases hacc with hacc | hacc
-        · obtain ⟨k, i, off, hk, hi⟩ := href
-          have := hacc _ (List.mem_of_getElem? hk)
-          simp [noAcc, hi] at this
-        · exact hacc
-    refine ⟨hok, fun hrt => ?_⟩
-    have hitems : ∀ (j : Nat) it, c.items[j]? = some it → I.items[I.genOff + j]? = some it := by
-      intro j it hj
-      rw [hc] at hj
-      have hlt : j < (gs.flatMap (·.code)).length := by
-        rcases Nat.lt_or_ge j (gs.flatMap (·.code)).length with h' | h'
-        · exact h'
-        · rw [List.getElem?_eq_none h'] at hj; cases hj
-      rw [← hsub, List.getElem?_take_of_lt hlt, List.getElem?_drop] at hj
-      exact hj
-    have hram : (mkPlan (I.planIn (envsOf gs))).ramStart = I.ramStart := rfl
-    have hLits : Lits (mkPlan (I.planIn (envsOf gs))) (I.around a addrs W bus dev wrel) := by
-      intro n v hv
-      have h1 : litB a I.ramStart (n, v) = true := hlits (n, v) hv
-      exact litB_sound (mkPlan (I.planIn (envsOf gs))) (I.around a addrs W bus dev wrel) hram n v h1
-    exact prog_ok (Z := (mkPlan (I.planIn (envsOf gs))).toZ (I.around a addrs W bus dev wrel)) hok hrt (ann := false)
-      hg hitems he (planCheck_static hpc _ (fun l hl => mem_label (hlab l hl)) hLits)
+  obtain ⟨ha, hlab, hlits, hglob, hfr, hsub, hacc, hsize⟩ := h
+  simp only [List.all_eq_true, decide_eq_true_eq, beq_iff_eq, Bool.or_eq_true] at hlab hlits hglob hfr hsub hacc hsize
+  obtain ⟨addrs, hpl⟩ := placed_of_assemble ha
+  refine ⟨a, addrs, ha, hsize, fun W bus dev wrel quiet => ?_⟩
+  rw [I.plan_parts gs hfns hgen]
+  have hpc : planCheck (I.planIn (envsOf gs)) = true := by
+    unfold planCheck
+    rw [hplan, Bool.true_and, List.all_eq_true]
+    intro e hemem
+    obtain ⟨g, hgm, rfl⟩ := List.mem_map.mp hemem
+    exact hstat g hgm
+  have hok : ((mkPlan (I.planIn (envsOf gs))).toZ (I.around a addrs W bus dev wrel)).OK := by
+    refine plan_ok (planCheck_ok hpc) _ hpl quiet (fun ar ad har => ?_) (fun href => ?_)
+    · cases ar with
+      | global g => exact hglob (g, ad) (lookup_mem har)
+      | frame f => exact hfr (f, ad) (lookup_mem har)
+    · rcases hacc with hacc | hacc
+      · obtain ⟨k, i, off, hk, hi⟩ := href
+        have := hacc _ (List.mem_of_getElem? hk)
+        simp [noAcc, hi] at this
+      · exact hacc
+  refine ⟨hok, fun hrt => ?_⟩
+  have hitems : ∀ (j : Nat) it, c.items[j]? = some it → I.items[I.genOff + j]? = some it := by
+    intro j it hj
+    rw [hc] at hj
+    have hlt : j < (gs.flatMap (·.code)).length := by
+      rcases Nat.lt_or_ge j (gs.flatMap (·.code)).length with h' | h'
+      · exact h'
+      · rw [List.getElem?_eq_none h'] at hj; cases hj
+    rw [← hsub, List.getElem?_take_of_lt hlt, List.getElem?_drop] at hj
+    exact hj
+  have hram : (mkPlan (I.planIn (envsOf gs))).ramStart = I.ramStart := rfl
+  have hLits : Lits (mkPlan (I.planIn (envsOf gs))) (I.around a addrs W bus dev wrel) := by
+    intro n v hv
+    have h1 : litB a I.ramStart (n, v) = true := hlits (n, v) hv
+    exact litB_sound (mkPlan (I.planIn (envsOf gs))) (I.around a addrs W bus dev wrel) hram n v h1
+  exact prog_ok (Z := (mkPlan (I.planIn (envsOf gs))).toZ (I.around a addrs W bus dev wrel)) hok hrt (ann := false)
+    hg hitems he (planCheck_static hpc _ (fun l hl => mem_label (hlab l hl)) hLits)
 
 end ImgIn
 

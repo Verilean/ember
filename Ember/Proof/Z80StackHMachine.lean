@@ -32,8 +32,7 @@ open Ember.Trace (Input)
 
 set_option maxRecDepth 100000
 
-theorem rom_size : (match assemble items with | .ok a => decide (a.bytes.size ≤ 0x8000) | .error _ => false) = true := by
-  decide +kernel
+theorem rom_size : decide (asm.bytes.size ≤ 0x8000) = true := by decide +kernel
 
 /-- **The image of the stack, loaded and run as the tests do, processes
 all its input and stops, having transmitted and dropped what the Spec
@@ -51,10 +50,10 @@ theorem stackH_halts (p : Lang.Prog) (S : StackSrc p) :
         kept w'.1 = specKept inputs.toList 0 (Spec.State.init {}) := by
   obtain ⟨a, addrs, ha, hspec⟩ := stackH_spec_halt p S
   have hsz : a.bytes.size ≤ 0x8000 := by
-    have h := rom_size
-    have ha' : assemble items = .ok a := ha
-    rw [ha'] at h
-    simpa using h
+    have h := assemble_items
+    rw [ha] at h
+    cases h
+    simpa using rom_size
   refine ⟨a, ha, fun inputs => ?_⟩
   have R := harness_reset a inputs hsz
   have S0 : Sim img.ctx (harnessMachine a inputs) ((st0 inputs).world, 0, (0, 0), (0, 0)) :=

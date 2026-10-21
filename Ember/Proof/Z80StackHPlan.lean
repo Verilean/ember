@@ -1,17 +1,19 @@
 import Ember.Proof.Z80StackHGen
+import Ember.Proof.Z80StackHAsm
 
 /-!
 # Ember.Proof.Z80StackHPlan — the image of the stack for the harness: the plan, checked (plan M7.3)
 
 `okB` of the plan of the image, `fnStaticB` of each function in the
 environment it is generated in, and what is computed of the assembled
-items (`partsCheck`: the plan's labels, the literal pool, the symbols of
-the areas and of the accumulator, the generated items in place, the
-size) — by the kernel, a theorem each.  `img_ok`: so the setting of the
-proofs holds of the image, and given the routines of the runtime every
-function does what the IR's does (`ImgIn.ok_parts`).
+image `asm` (`PartsOn`: the plan's labels, the literal pool, the symbols
+of the areas and of the accumulator, the generated items in place, the
+size) — by the kernel, a theorem each (one declaration at a time, the
+kernel keeps less).  `img_ok`: so the setting of the proofs holds of the
+image, and given the routines of the runtime every function does what
+the IR's does (`ImgIn.ok_partsOn`).
 
-Generated (one theorem a function).
+Written by `ember-z80 proof-files` (`Ember.Tools.ProofGen`).
 -/
 
 namespace Ember.Proof.Z80Gen.StackH
@@ -19,6 +21,8 @@ open Ember.Z80 Ember.Z80.Cpu Ember.Z80.Asm Ember.Z80.Codegen
 open Ember.Proof.Z80Enc Ember.Proof.IRSim
 
 set_option maxRecDepth 100000
+-- one theorem at a time: checked at once, the kernel's work for each adds up
+set_option Elab.async false
 
 def plan : Plan := mkPlan (img.planIn (envsOf gens))
 
@@ -66,7 +70,20 @@ theorem plan_static : ∀ g, g ∈ gens → fnStaticB plan (genEnv g.f g.missed 
 /-- The plan of the image, without the kernel running the generator over the program. -/
 theorem img_plan : img.plan = plan := img.plan_parts gens fns_eq gens_ok
 
-theorem parts_check : img.partsCheck gens = true := by decide +kernel
+theorem on_labels : (plan.labels.all fun l => img.items.any (ImgIn.isLab l)) = true := by decide +kernel
+theorem on_lits : plan.lits.all (ImgIn.litB asm img.ramStart) = true := by decide +kernel
+theorem on_globals :
+    (img.layout.globals.all fun e => asm.labels.reverse.lookup (areaSym (.global e.1)) == some e.2) = true := by
+  decide +kernel
+theorem on_frames :
+    (img.layout.frames.all fun e => asm.labels.reverse.lookup (areaSym (.frame e.1)) == some e.2) = true := by
+  decide +kernel
+theorem on_code :
+    decide ((img.items.drop img.genOff).take (gens.flatMap (·.code)).length = gens.flatMap (·.code)) = true := by
+  decide +kernel
+theorem on_acc : (img.items.all ImgIn.noAcc || asm.labels.reverse.lookup "rt_acc" == some img.acc) = true := by
+  decide +kernel
+theorem on_size : decide (asm.bytes.size < 65536) = true := by decide +kernel
 
 /-- **The image of the stack for the harness, checked**: the setting of
 the proofs holds of it, and given the routines of the runtime it calls
@@ -78,7 +95,8 @@ theorem img_ok :
         (img.plan.toZ (img.around a addrs W bus dev wrel)).OK ∧
         (RtOK (img.plan.toZ (img.around a addrs W bus dev wrel)) →
           ∀ k g st1, Callee (img.plan.toZ (img.around a addrs W bus dev wrel)) g st1 (IR.Sem.callF k img.ctx g st1)) :=
-  img.ok_parts gens fns_eq gens_ok plan_okB plan_static parts_check
+  img.ok_partsOn gens asm fns_eq gens_ok plan_okB plan_static
+    ⟨assemble_items, on_labels, on_lits, on_globals, on_frames, on_code, on_acc, on_size⟩
 
 /-- info: 'Ember.Proof.Z80Gen.StackH.img_ok' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in #print axioms img_ok

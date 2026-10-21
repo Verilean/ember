@@ -10,7 +10,7 @@ checks of `Z80Check` on it, which it cannot on `IR.lower` itself.  That
 it is the lowering is a `#guard` — evaluated when this file is built,
 not proved.
 
-Generated: `repr` of the functions of the lowered program.
+Written by `ember-z80 proof-files` (`Ember.Tools.ProofGen`).
 -/
 
 namespace Ember.Proof.Z80Gen.Stack

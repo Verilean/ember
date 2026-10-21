@@ -322,10 +322,10 @@ theorem stackH_trace (p : Lang.Prog) (S : StackSrc p) :
         inputsOf tr = (List.range inputs.size).map fun i => (i, Target.inputEvent inputs[i]!) := by
   obtain ⟨a, ha, hall⟩ := stackH_halts p S
   have hsz : a.bytes.size ≤ 0x8000 := by
-    have h := rom_size
-    have ha' : assemble items = .ok a := ha
-    rw [ha'] at h
-    simpa using h
+    have h := assemble_items
+    rw [ha] at h
+    cases h
+    simpa using rom_size
   refine ⟨a, ha, fun h inputs => ?_⟩
   obtain ⟨_, _, n, w', _, _, hh, Sn, _, hk⟩ := hall inputs
   obtain ⟨n0, hle, hh0, hfirst⟩ := first_halt (harnessMachine a inputs) n hh

@@ -11,6 +11,7 @@ import Ember.Z80.RtCheck
 import Ember.Z80.Target
 import Ember.Tools.NetCheck
 import Ember.Tools.Fuzz
+import Ember.Tools.ProofGen
 import Ember.Util.Rand
 
 /-!
@@ -812,6 +813,7 @@ def usage : String :=
   "  ember-z80 own-build net|sliploop|trapnote [--trace 0|1|2] [--out DIR]    image, listing, symbols\n" ++
   "  ember-z80 own-size net|sliploop [--trace 0|1|2]      bytes per function\n" ++
   "  ember-z80 trap-note|trap-note-terse IMAGE.ihx                   the `trapnote` program: notes named like a trap, and a trap\n" ++
+  "  ember-z80 proof-files [--out DIR]                    the stack's image written out for the proofs (Ember/Proof)\n" ++
   "  --plain with own-fuzz, own-build, own-size: without the passes on the assembly (the image the proofs speak of)"
 
 def main (args : List String) : IO UInt32 := do
@@ -842,6 +844,7 @@ def main (args : List String) : IO UInt32 := do
       if let some f := t.first then IO.println s!"FAIL {f}"
       IO.println s!"z80 runtime routines vs their specifications: {t.cases} cases, {t.bad} failures"
       return if t.bad == 0 then 0 else 1
+  | ["proof-files"] => ProofGen.write (o.out.getD "Ember/Proof")
   | ["trap-note", image] => trapNote image true
   | ["trap-note-terse", image] => trapNote image false
   | ["profile", image] => profile image
