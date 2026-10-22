@@ -137,6 +137,25 @@ theorem all_drop_end {α : Type} (l : List α) (p : α → Bool) (a : Nat) (h : 
   rw [List.drop_eq_nil_of_le h]
   rfl
 
+/-- What `fnStaticB` asks of the instruction at `pc`. -/
+def needAtB (P : Plan) (E : GEnv) (pc : Nat) : Bool :=
+  match E.fn.body[pc]? with
+  | some i => needB P (envAt E pc i) (dtL E.fn.body pc) i
+  | none => true
+
+/-- `fnStaticB` with its instructions checked apart (a stretch at a time, `all_drop_step`). -/
+theorem fnStaticB_of (P : Plan) (E : GEnv) (hsh : shapeB E.fn = true)
+    (hneed : ((List.range E.fn.body.size).drop 0).all (needAtB P E) = true)
+    (hrest : (layB P E && decide (P.rtK + 2 ≤ P.depthOf E.fn.name) &&
+      (match E.fn.regParam with
+       | some (n, sl) => size12 n && wrSlotB P E n sl
+       | none => true)) = true) :
+    fnStaticB P E = true := by
+  unfold fnStaticB
+  simp only [Bool.and_eq_true] at hrest ⊢
+  obtain ⟨⟨hl, hd⟩, hr⟩ := hrest
+  exact ⟨⟨⟨⟨hsh, hneed⟩, hl⟩, hd⟩, hr⟩
+
 /-- `sharedBytes`, from the frames of the layout it computes. -/
 def sharedOf (p : IR.Prog) (frames : List (String × Nat)) : String → Nat → Bool :=
   let frameSize (f : String) : Nat := ((p.fn? f).map (·.frame)).getD 0

@@ -506,24 +506,40 @@ end Ember.Proof.Z80Gen.StackH
 /-- Labels of the plan checked in the items at a time. -/
 def labelStretch : Nat := 40
 
-/-- `on_labels`, a stretch of the plan's labels at a time. -/
-def labelsText (n : Nat) : String := Id.run do
-  let p := "fun l => img.items.any (ImgIn.isLab l)"
+/-- `name : (l.drop 0).all p = true`, a stretch of `m` at a time (`name_<a>`, `all_drop_step`), `l` of at most `n`. -/
+def allText (name l p : String) (n m : Nat) : String := Id.run do
   let mut t := ""
   let mut a := 0
   while a < n do
-    t := t ++ s!"theorem on_labels_{a} : ((plan.labels.drop {a}).take {labelStretch}).all ({p}) = true := by\n  decide +kernel\n"
-    a := a + labelStretch
-  t := t ++ s!"theorem on_labels_len : plan.labels.length ≤ {a} := by decide +kernel\n"
-  let mut proof := s!"all_drop_end _ _ {a} on_labels_len"
+    t := t ++ s!"theorem {name}_{a} : ((({l}).drop {a}).take {m}).all ({p}) = true := by\n  decide +kernel\n"
+    a := a + m
+  t := t ++ s!"theorem {name}_len : ({l}).length ≤ {a} := by decide +kernel\n"
+  let mut proof := s!"all_drop_end _ _ {a} {name}_len"
   let mut k := a
   while k > 0 do
-    k := k - labelStretch
-    proof := s!"all_drop_step _ _ {k} {labelStretch} on_labels_{k}\n    ({proof})"
-  t := t ++ s!"theorem on_labels : (plan.labels.all {p}) = true := by\n  have h := {proof}\n  simpa using h\n"
+    k := k - m
+    proof := s!"all_drop_step _ _ {k} {m} {name}_{k}\n    ({proof})"
+  t := t ++ s!"theorem {name} : ((({l}).drop 0).all ({p})) = true :=\n  {proof}\n"
   return t
 
-def planFile (gs : List Part) (nLabels : Nat) : String :=
+/-- `on_labels`, a stretch of the plan's labels at a time. -/
+def labelsText (n : Nat) : String :=
+  allText "on_labels_all" "plan.labels" "fun l => img.items.any (ImgIn.isLab l)" n labelStretch ++
+  "theorem on_labels : (plan.labels.all fun l => img.items.any (ImgIn.isLab l)) = true := by\n  have h := on_labels_all\n  simpa using h\n"
+
+/-- `fnStaticB` of a function, a stretch of its instructions at a time when it is long (`fnStaticB_of`). -/
+def staticText (g : Part) : String :=
+  let e := s!"(genEnv g_{g.name}.f g_{g.name}.missed g_{g.name}.live)"
+  if g.instrs > cutAbove then
+    allText s!"need_{g.name}" s!"List.range {e}.fn.body.size" s!"needAtB plan {e}" g.instrs stretch ++
+    s!"theorem st_{g.name} : fnStaticB plan {e} = true :=\n" ++
+    s!"  fnStaticB_of _ _ (by decide +kernel) need_{g.name} (by decide +kernel)\n"
+  else s!"theorem st_{g.name} : fnStaticB plan {e} = true := by decide +kernel\n"
+
+/-- Literals of the pool checked at a time (each looks its label up by a name the kernel builds, and reads the image: about 0.5 GB). -/
+def litStretch : Nat := 1
+
+def planFile (gs : List Part) (nLabels nLits : Nat) : String :=
   "import Ember.Proof.Z80StackHGen
 import Ember.Proof.Z80StackHAsm
 
@@ -554,8 +570,7 @@ def plan : Plan := mkPlan (img.planIn (envsOf gens))
 
 theorem plan_okB : okB plan = true := by decide +kernel
 
-" ++ String.join (gs.map fun g =>
-    s!"theorem st_{g.name} : fnStaticB plan (genEnv g_{g.name}.f g_{g.name}.missed g_{g.name}.live) = true := by decide +kernel\n") ++ "
+" ++ String.join (gs.map staticText) ++ "
 theorem plan_static : ∀ g, g ∈ gens → fnStaticB plan (genEnv g.f g.missed g.live) = true :=
   " ++ gs.foldr (fun g acc => s!"(List.forall_mem_cons.mpr ⟨st_{g.name}, {acc}⟩)") "(fun _ h => absurd h List.not_mem_nil)" ++ "
 
@@ -563,8 +578,7 @@ theorem plan_static : ∀ g, g ∈ gens → fnStaticB plan (genEnv g.f g.missed 
 theorem img_plan : img.plan = plan := img.plan_parts gens fns_eq gens_ok
 
 " ++ labelsText nLabels ++ "
-theorem on_lits : plan.lits.all (ImgIn.litB asm img.ramStart) = true := by decide +kernel
-theorem on_globals :
+" ++ allText "on_lits_all" "plan.lits" "ImgIn.litB asm img.ramStart" nLits litStretch ++ "theorem on_lits : plan.lits.all (ImgIn.litB asm img.ramStart) = true := by\n  have h := on_lits_all\n  simpa using h\ntheorem on_globals :
     (img.layout.globals.all fun e => asm.labels.reverse.lookup (areaSym (.global e.1)) == some e.2) = true := by
   decide +kernel
 theorem on_frames :
@@ -664,7 +678,7 @@ def write (dir : System.FilePath) (n : Nat := stretch) : IO UInt32 := do
       prev := [s!"Ember.Proof.Z80StackHGen.{m}"]
   IO.FS.writeFile (dir / "Z80StackHGen.lean") (genFile img q.dropReasons q.notes gs genOff acc (prev.headD ""))
   let nLabels := 1 + ir.fns.foldl (fun n f => n + 1 + (f.body.toList.filter fun i => match i with | .label _ => true | _ => false).length) 0
-  IO.FS.writeFile (dir / "Z80StackHPlan.lean") (planFile gs nLabels)
+  IO.FS.writeFile (dir / "Z80StackHPlan.lean") (planFile gs nLabels ((gs.getLast?.map (·.lits.size)).getD 0))
   IO.println s!"proof-files: {ir.fns.length} functions, {img.items.length} items, {a.bytes.size} bytes -> {dir}"
   return 0
 
