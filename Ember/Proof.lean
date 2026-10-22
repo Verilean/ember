@@ -132,6 +132,8 @@ import Ember.Proof.Z80StackHMachine
 import Ember.Proof.Z80StackHTrace
 import Ember.Proof.SemTrapped
 import Ember.Proof.Z80SimCheck
+import Ember.Proof.TcbCheckpoint
+import Ember.Proof.Z80StackHTcb
 import Ember.Proof.Z80World
 import Ember.Proof.Z80Image
 import Ember.Proof.Z80LoopHItems
@@ -284,7 +286,12 @@ The Z80 back end (M7, begun) — `Ember.Z80.IR.Sem` is the semantics of its IR:
   `Spec.run`'s, input by input, and the inputs as its input lines** (`stackH_trace`); **the whole trace
   is the inputs each followed by its events in the world the Ember semantics leaves, notes included, and
   nothing else** (`stackH_trace_lines`); **the harness records no trap** (`stackH_no_trap`; `SemTrapped`:
-  the Ember semantics never sets `World.trapped`; `Z80SimCheck`: `Sim` on small machines, `#guard`).
+  the Ember semantics never sets `World.trapped`; `Z80SimCheck`: `Sim` on small machines, `#guard`);
+* `TcbCheckpoint`, `Z80StackHTcb`: **between input items the connection record the program holds is the
+  Spec's control block after the same items** — in the Ember semantics (`tcb_checkpoint`), in the IR's
+  memory (`stackH_tcb_ir`) and in the RAM of the machine the tests run at the head of its loop
+  (`stackH_tcb_ram`); `RawTcb.describe` writes of it what the Spec's `tcb` lines write.  The lines
+  themselves are not written by the program.
 
 By-reference parameters and `inlineCalls` are outside M7.1; of `IR → Z80` (M7.3) not proved: the routines
 of the runtime the stack's image for the harness does not call; interrupts and the board's runtime and
