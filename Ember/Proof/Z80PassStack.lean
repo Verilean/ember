@@ -42,7 +42,7 @@ def hD : Dev := ⟨HW, hbus, hdev StackH.img.ctx, fun _ => rfl⟩
 theorem wrun_hD (a : Assembled) (addrs : List Nat) (μ : Nat × Nat) :
     ∀ (n : Nat) (x : Cpu × HW), wrun (StackH.img.ZH a addrs μ) n x = PassSim.mrun hD n x
   | 0, _ => rfl
-  | n + 1, x => wrun_hD a addrs μ n _
+  | n + 1, _ => wrun_hD a addrs μ n _
 
 /-- `StackH` as a `Code`. -/
 noncomputable def codeH : Code :=

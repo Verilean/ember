@@ -865,8 +865,7 @@ theorem tailOK_spec {c : Ctx} {as bs : List Item} {r : Row} (h : tailOK c as bs 
   unfold tailOK at h
   split at h
   · rename_i l a' opB l' b'
-    simp only [Bool.and_eq_true, beq_iff_eq, Bool.or_eq_true, decide_eq_true_eq, Bool.not_eq_true',
-      List.contains_iff_mem] at h
+    simp only [Bool.and_eq_true, beq_iff_eq, Bool.or_eq_true, decide_eq_true_eq, Bool.not_eq_true'] at h
     obtain ⟨⟨⟨⟨e, hop⟩, hseq⟩, htop⟩, h⟩ := h
     subst e
     split at h
@@ -942,12 +941,12 @@ theorem db_encode : ∀ (vs : List Val), numsOK vs = true → ∀ env, Item.enco
       | error e => simp [Except.map] at ih
       | ok bs =>
         simp only [Except.map, Except.ok.injEq] at ih
-        simp only [bind, ReaderT.bind, ReaderT.run, imm8_num env m hv.1 hv.2, Except.bind, pure, ReaderT.pure,
-          Except.pure, Except.map, List.flatten_cons, List.map_cons, dbByte]
+        simp only [bind, ReaderT.bind, ReaderT.run, Except.bind, pure, ReaderT.pure, Except.pure, Except.map,
+          List.map_cons, dbByte]
         have hi : imm8 (.num m) env = .ok [byteOf m] := imm8_num env m hv.1 hv.2
         have hm' : List.mapM imm8 vs env = .ok bs := hm
         rw [hi, hm']
-        simp [ih, dbByte]
+        simp [ih]
     | sym _ _ => simp at hv
 
 theorem litOK_spec {xs ys : List Item} {l : String} {n : Nat} (h : litOK (labTbl xs 0) (labTbl ys 0) l n = true) :
@@ -972,7 +971,7 @@ theorem labTbl_some : ∀ (xs : List Item) (k j : Nat) (l : String), xs[j]? = so
     | zero =>
       simp only [List.getElem?_cons_zero, Option.some.injEq] at h
       subst h
-      simp [labTbl, lookup_cons]
+      simp [labTbl]
     | succ j =>
       simp only [List.getElem?_cons_succ] at h
       have ih := labTbl_some r (k + 1) j l h
@@ -1095,7 +1094,7 @@ theorem tailBlkOK_spec {c : Ctx} {prev : Option Item} {as bs : List Item} {r : R
   unfold tailBlkOK at h
   split at h
   · rename_i f a' f' b'
-    simp only [Bool.and_eq_true, beq_iff_eq, Bool.or_eq_true, Bool.not_eq_true', List.contains_iff_mem] at h
+    simp only [Bool.and_eq_true, beq_iff_eq, Bool.or_eq_true, Bool.not_eq_true'] at h
     obtain ⟨⟨⟨⟨⟨⟨⟨e, hf⟩, hth⟩, htl⟩, hr⟩, hp⟩, hseq⟩, htop⟩ := h
     subst e
     exact ⟨f, a', b', rfl, rfl, hf, hth, htl, hr, hp, hseq, by simpa using htop⟩
