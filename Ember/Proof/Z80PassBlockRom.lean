@@ -928,3 +928,106 @@ theorem blkR_cmp32 (D : Dev) {A B : Code} {lo hi : Nat} (hhi : hi ≤ 65536) (hl
 
 /-- info: 'Ember.Proof.PassSim.blkR_cmp32' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in #print axioms blkR_cmp32
+
+/-! ## A literal of the ROM copied to the RAM -/
+
+set_option maxHeartbeats 4000000 in
+/-- **`ld hl,lit; ld de,dst; ld bc,n+1; ldir` in both machines** (the first values of `rt_init`): each
+image's literal (`.db`, the same `n + 1` bytes in both) to `dst` in the RAM; the relation at the item
+after the `ldir`, `H` and `L` free. -/
+theorem blkR_copy (D : Dev) {A B : Code} {lo hi : Nat} (hhi : hi ≤ 65536)
+    {G : List Frame} {kA kB dA dB dst n : Nat} {lit g : String} {vs : List Val} {bs : List UInt8} {th tl : Bool}
+    (hA0 : A.items[kA]? = some (.ins ⟨.ld, [.hl, .imm (.sym lit 0)]⟩))
+    (hB0 : B.items[kB]? = some (.ins ⟨.ld, [.hl, .imm (.sym lit 0)]⟩))
+    (hA1 : A.items[kA + 1]? = some (.ins (Form.ldDEI (.sym g 0)).instr))
+    (hB1 : B.items[kB + 1]? = some (.ins (Form.ldDEI (.sym g 0)).instr))
+    (hA2 : A.items[kA + 2]? = some (.ins (Form.ldBCI (.num (n + 1 : Nat))).instr))
+    (hB2 : B.items[kB + 2]? = some (.ins (Form.ldBCI (.num (n + 1 : Nat))).instr))
+    (hA3 : A.items[kA + 3]? = some (.ins ⟨.ldir, []⟩)) (hB3 : B.items[kB + 3]? = some (.ins ⟨.ldir, []⟩))
+    (hgA : ∀ pa, (A.a.env pa).val (.sym g 0) = Int.ofNat dst)
+    (hgB : ∀ pb, (B.a.env pb).val (.sym g 0) = Int.ofNat dst)
+    (hdst : lo ≤ dst ∧ dst + n + 1 ≤ hi) (hn : n + 1 < 65536)
+    (hlA : A.items[dA]? = some (.label lit)) (hdA : A.items[dA + 1]? = some (.db vs))
+    (hlB : B.items[dB]? = some (.label lit)) (hdB : B.items[dB + 1]? = some (.db vs))
+    (hencA : ∀ ad, Item.encode (.db vs) (A.a.env ad) = .ok bs)
+    (hencB : ∀ ad, Item.encode (.db vs) (B.a.env ad) = .ok bs) (hbs : bs.length = n + 1)
+    {x y : Cpu × D.W} (S : Sync D A B lo hi G kA kB th tl x y) :
+    Sync D A B lo hi G (kA + 4) (kB + 4) true true (mrun D (n + 4) x) (mrun D (n + 4) y) := by
+  obtain ⟨S0, _, g0A, g0B, hR⟩ := ldhl_lit D hhi hA0 hB0 hlA hdA hlB hdB hencA hencB S
+  rw [hbs] at g0A g0B hR
+  rw [show n + 4 = 1 + (1 + (1 + (n + 1))) by omega, mrun_add D 1 _ x, mrun_add D 1 _ y,
+    mrun_add D 1 _ (mrun D 1 x), mrun_add D 1 _ (mrun D 1 y),
+    mrun_add D 1 _ (mrun D 1 (mrun D 1 x)), mrun_add D 1 _ (mrun D 1 (mrun D 1 y))]
+  show Sync D A B lo hi G (kA + 3 + 1) (kB + 3 + 1) true true
+    (mrun D (n + 1) (mstep D (mstep D (mstep D x)))) (mrun D (n + 1) (mstep D (mstep D (mstep D y))))
+  generalize mstep D x = x' at S0 g0A g0B hR
+  generalize mstep D y = y' at S0 g0B hR
+  obtain ⟨s0, w⟩ := x'
+  obtain ⟨t0, w'⟩ := y'
+  have hw : w' = w := S0.w
+  subst hw
+  simp only at g0A g0B hR
+  -- `ld de,dst`
+  have S1 := seg_ord D hhi (Form.ldDEI (.sym g 0)) (by intro h; cases h) hA1 hB1
+    (imm_same _ _ rfl ⟨by simp [Form.instr], by simp [Form.instr]⟩ (fun pa pb => by rw [hgA, hgB])) (by simp [Form.readsH])
+    (by simp [Form.readsL]) S0
+    (by simp [Form.viaHL]) (by simp [Form.viaDE]) (fun _ h => by simp [Form.viaNN] at h)
+  have eA1 : mstep D (s0, w') = (ldRP s0 1 (Instr.immW (A.a.env 0) ⟨.ld, [.de, .imm (.sym g 0)]⟩), w') :=
+    mstep_exec D hA1 S0.LA S0.atA w' (fun pa inp => by
+      show exec (A.a.env pa) ⟨.ld, [.de, .imm (.sym g 0)]⟩ s0 inp = _
+      rw [exec_ld_rp _ .de 1 rfl (by decide)]
+      congr 2
+      apply UInt16.toNat_inj.mp
+      rw [immW_toNat _ _ _ dst rfl (hgA pa) (by omega), immW_toNat _ _ _ dst rfl (hgA 0) (by omega)]) rfl
+  have eB1 : mstep D (t0, w') = (ldRP t0 1 (Instr.immW (B.a.env 0) ⟨.ld, [.de, .imm (.sym g 0)]⟩), w') :=
+    mstep_exec D hB1 S0.LB S0.atB w' (fun pb inp => by
+      show exec (B.a.env pb) ⟨.ld, [.de, .imm (.sym g 0)]⟩ t0 inp = _
+      rw [exec_ld_rp _ .de 1 rfl (by decide)]
+      congr 2
+      apply UInt16.toNat_inj.mp
+      rw [immW_toNat _ _ _ dst rfl (hgB pb) (by omega), immW_toNat _ _ _ dst rfl (hgB 0) (by omega)]) rfl
+  have hd1 : (Instr.immW (A.a.env 0) ⟨.ld, [.de, .imm (.sym g 0)]⟩).toNat = dst :=
+    immW_toNat _ _ _ dst rfl (hgA 0) (by omega)
+  rw [eA1, eB1] at S1 ⊢
+  obtain ⟨de1, hl1, _⟩ := ldRP_de s0 (Instr.immW (A.a.env 0) ⟨.ld, [.de, .imm (.sym g 0)]⟩)
+  obtain ⟨_, hl1', _⟩ := ldRP_de t0 (Instr.immW (B.a.env 0) ⟨.ld, [.de, .imm (.sym g 0)]⟩)
+  simp only [Form.writesH, Form.writesL] at S1
+  generalize Instr.immW (A.a.env 0) ⟨.ld, [.de, .imm (.sym g 0)]⟩ = nd at S1 de1 hl1 hd1 ⊢
+  generalize Instr.immW (B.a.env 0) ⟨.ld, [.de, .imm (.sym g 0)]⟩ = nd' at S1 hl1' ⊢
+  generalize ldRP s0 1 nd = s1 at S1 de1 hl1 ⊢
+  generalize ldRP t0 1 nd' = t1 at S1 hl1' ⊢
+  -- `ld bc,n+1`
+  have S2 := seg_ord D hhi (Form.ldBCI (.num (n + 1 : Nat))) (by intro h; cases h) hA2 hB2
+    (imm_same _ _ rfl ⟨by simp [Form.instr], by simp [Form.instr]⟩ (val_num _)) (by simp [Form.readsH]) (by simp [Form.readsL]) S1
+    (by simp [Form.viaHL]) (by simp [Form.viaDE]) (fun _ h => by simp [Form.viaNN] at h)
+  have eA2 : mstep D (s1, w') = (ldRP s1 0 (Instr.immW (A.a.env 0) ⟨.ld, [.bc, .imm (.num (n + 1 : Nat))]⟩), w') :=
+    mstep_exec D hA2 S1.LA S1.atA w' (fun pa inp => by
+      show exec (A.a.env pa) ⟨.ld, [.bc, .imm (.num (n + 1 : Nat))]⟩ s1 inp = _
+      rw [exec_ld_rp _ .bc 0 rfl (by decide)]; rfl) rfl
+  have eB2 : mstep D (t1, w') = (ldRP t1 0 (Instr.immW (B.a.env 0) ⟨.ld, [.bc, .imm (.num (n + 1 : Nat))]⟩), w') :=
+    mstep_exec D hB2 S1.LB S1.atB w' (fun pb inp => by
+      show exec (B.a.env pb) ⟨.ld, [.bc, .imm (.num (n + 1 : Nat))]⟩ t1 inp = _
+      rw [exec_ld_rp _ .bc 0 rfl (by decide)]; rfl) rfl
+  have hc2 : (Instr.immW (A.a.env 0) ⟨.ld, [.bc, .imm (.num (n + 1 : Nat))]⟩).toNat = n + 1 :=
+    immW_toNat _ _ (.num (n + 1 : Nat)) (n + 1) rfl rfl hn
+  rw [eA2, eB2] at S2 ⊢
+  obtain ⟨bc2, hl2, de2⟩ := ldRP_bc s1 (Instr.immW (A.a.env 0) ⟨.ld, [.bc, .imm (.num (n + 1 : Nat))]⟩)
+  obtain ⟨_, hl2', _⟩ := ldRP_bc t1 (Instr.immW (B.a.env 0) ⟨.ld, [.bc, .imm (.num (n + 1 : Nat))]⟩)
+  simp only [Form.writesH, Form.writesL] at S2
+  generalize Instr.immW (A.a.env 0) ⟨.ld, [.bc, .imm (.num (n + 1 : Nat))]⟩ = nc at S2 bc2 hl2 de2 hc2 ⊢
+  generalize Instr.immW (B.a.env 0) ⟨.ld, [.bc, .imm (.num (n + 1 : Nat))]⟩ = nc' at S2 hl2' ⊢
+  generalize ldRP s1 0 nc = s2 at S2 bc2 hl2 de2 ⊢
+  generalize ldRP t1 0 nc' = t2 at S2 hl2' ⊢
+  -- `ldir`, all its rounds
+  have hxA : s2.hl.toNat = s0.hl.toNat := by rw [hl2, hl1]
+  have hxB : t2.hl.toNat = t0.hl.toNat := by rw [hl2', hl1']
+  have S3 := ldir_rom_rounds D hhi hA3 hB3 n _ _ S2 (by simp only; rw [bc2, hc2])
+    (by simp only; rw [hxA]; omega) (by simp only; rw [hxB]; omega)
+    (fun i hi' => by
+      simp only; rw [hxA, hxB]
+      exact hR s2 t2 S2.LA S2.LB i (by omega))
+    (by simp only; rw [de2, de1, hd1]; exact hdst.1) (by simp only; rw [de2, de1, hd1]; omega)
+  simpa only [Bool.not_false, Bool.and_self] using S3
+
+/-- info: 'Ember.Proof.PassSim.blkR_copy' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in #print axioms blkR_copy
