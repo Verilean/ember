@@ -209,7 +209,7 @@ theorem taken_eq {lo hi : Nat} {th tl : Bool} {s t : Cpu} (E : EqvT lo hi th tl 
     taken cc s = taken cc t := by
   cases cc with
   | none => rfl
-  | some c =>
+  | some _ =>
     simp only [taken, Cpu.cond]
     rw [show s.flag = t.flag by funext m; simp only [Cpu.flag, E.f]]
 
@@ -219,7 +219,7 @@ relation, both at their labels or both at the items after. -/
 theorem seg_jump (D : Dev) {A B : Code} {lo hi : Nat} {G : List Frame} {kA kB jA jB : Nat} {th tl : Bool}
     {opA opB : Op} {cc : Option Arg} {l : String}
     (hopA : opA = .jp ∨ opA = .jr) (hopB : opB = .jp ∨ opB = .jr)
-    (hcc : ∀ c, cc = some c → c = .nz ∨ c = .z ∨ c = .nc ∨ c = .c)
+    (hcc : ∀ cnd, cc = some cnd → cnd = .nz ∨ cnd = .z ∨ cnd = .nc ∨ cnd = .c)
     (hA : A.items[kA]? = some (.ins ⟨opA, cc.toList ++ [.imm (.sym l 0)]⟩)) (hjA : A.items[jA]? = some (.label l))
     (hB : B.items[kB]? = some (.ins ⟨opB, cc.toList ++ [.imm (.sym l 0)]⟩)) (hjB : B.items[jB]? = some (.label l))
     {x y : Cpu × D.W} (S : Sync D A B lo hi G kA kB th tl x y) :
@@ -229,9 +229,10 @@ theorem seg_jump (D : Dev) {A B : Code} {lo hi : Nat} {G : List Frame} {kA kB jA
   obtain ⟨sB, w'⟩ := y
   have hw : w' = w := S.w
   subst hw
-  have hcc1 : ∀ op : Op, ∀ c, cc = some c → op = .jr → c = .nz ∨ c = .z ∨ c = .nc ∨ c = .c := fun _ c h _ => hcc c h
-  have hcc2 : ∀ c, cc = some c → (cc? c).isSome := by
-    intro c h; rcases hcc c h with rfl | rfl | rfl | rfl <;> rfl
+  have hcc1 : ∀ op : Op, ∀ cnd, cc = some cnd → op = .jr → cnd = .nz ∨ cnd = .z ∨ cnd = .nc ∨ cnd = .c :=
+    fun _ cnd h _ => hcc cnd h
+  have hcc2 : ∀ cnd, cc = some cnd → (cc? cnd).isSome := by
+    intro cnd h; rcases hcc cnd h with rfl | rfl | rfl | rfl <;> rfl
   obtain ⟨pA, cA, eA, LA, atA⟩ := jump_mstep D hopA (hcc1 opA) hcc2 hA hjA S.LA S.atA w'
   obtain ⟨pB, cB, eB, LB, atB⟩ := jump_mstep D hopB (hcc1 opB) hcc2 hB hjB S.LB S.atB w'
   rw [eA, eB]
@@ -391,5 +392,93 @@ theorem seg_call (D : Dev) {A B : Code} {lo hi : Nat} (hhi : hi ≤ 65536) {G : 
 
 /-- info: 'Ember.Proof.PassSim.seg_call' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in #print axioms seg_call
+
+theorem rd16_word (s : Cpu) (h : s.sp.toNat + 1 < 65536) : (s.rd16 s.sp).toNat = word s.mem s.sp.toNat := by
+  have e1 : (s.sp + 1).toNat = s.sp.toNat + 1 := by
+    rw [UInt16.toNat_add]; simp only [UInt16.toNat_one]; omega
+  have : s.rd16 s.sp = mk16 (s.rd (s.sp + 1)) (s.rd s.sp) := by
+    simp only [Cpu.rd16, mk16, UInt16.or_comm]
+  rw [this, Ember.Proof.Z80Gen.mk16_toNat]
+  simp only [Cpu.rd, e1, word]
+  omega
+
+theorem top_add2 (sp : UInt16) (h : sp.toNat + 2 ≤ 65536) : top (sp + 2) = sp.toNat + 2 := by
+  by_cases e : sp.toNat + 2 = 65536
+  · have : sp + 2 = 0 := by
+      apply UInt16.toNat_inj.mp; rw [UInt16.toNat_add]; simp only [show (2 : UInt16).toNat = 2 from rfl]
+      rw [e]; rfl
+    simp only [top, this, if_true]; omega
+  · have h2 : (sp + 2).toNat = sp.toNat + 2 := by
+      rw [UInt16.toNat_add]; simp only [show (2 : UInt16).toNat = 2 from rfl]; omega
+    have : sp + 2 ≠ 0 := by intro e'; have := congrArg UInt16.toNat e'; rw [h2] at this; simp at this
+    simp only [top, this, if_false, h2]
+
+theorem Eqv.returned {lo hi : Nat} {s u : Cpu} (E : Eqv lo hi s u) (c d : UInt64) :
+    Eqv lo hi (returned s c) (returned u d) := by
+  obtain ⟨p', r', c', m', q', e⟩ := regs_ex E.regs
+  subst e
+  exact ⟨by cases s; rfl, E.mem, E.msz⟩
+
+theorem mask_returned (th tl : Bool) (s t : Cpu) (c d : UInt64) :
+    mask th tl (returned s c) (returned t d) = returned (mask th tl s t) d := by
+  cases s; cases t; rfl
+
+/-- **A return, in both machines**: at `kA` in `A` and `kB` in `B` a `ret` (with the same condition,
+or none), the frame on top of the stacks a call of both.  Taken, one step of each returns each to
+its own return point (`rA`, `rB`), the frame popped; not taken, both go on. -/
+theorem seg_ret (D : Dev) {A B : Code} {lo hi : Nat} {G : List Frame} {rA rB e kA kB : Nat} {th tl : Bool}
+    {cc : Option Arg} (hcc : ∀ cnd, cc = some cnd → (cc? cnd).isSome)
+    (hA : A.items[kA]? = some (.ins ⟨.ret, cc.toList⟩)) (hB : B.items[kB]? = some (.ins ⟨.ret, cc.toList⟩))
+    {x y : Cpu × D.W} (S : Sync D A B lo hi (.ret rA rB e :: G) kA kB th tl x y) :
+    if taken cc x.1 then Sync D A B lo hi G rA rB th tl (mstep D x) (mstep D y)
+    else Sync D A B lo hi (.ret rA rB e :: G) (kA + 1) (kB + 1) th tl (mstep D x) (mstep D y) := by
+  obtain ⟨sA, w⟩ := x
+  obtain ⟨sB, w'⟩ := y
+  have hw : w' = w := S.w
+  subst hw
+  have stA := ret_mstep D hcc hA S.LA S.atA w'
+  have stB := ret_mstep D hcc hB S.LB S.atB w'
+  have ht := taken_eq S.E cc
+  simp only at ht ⊢
+  have stk := S.stk
+  obtain ⟨hA1, hB1, wA, wB, rest⟩ := stk
+  have bnd := Stk.bounds G _ _ _ _ rest
+  simp only at hA1 hB1 wA wB rest bnd
+  by_cases hc : taken cc sA = true
+  · rw [if_pos hc] at stA ⊢
+    rw [ht] at hc
+    rw [if_pos hc] at stB
+    obtain ⟨cA, eA⟩ := stA
+    obtain ⟨cB, eB⟩ := stB
+    rw [eA, eB]
+    -- the frame's addresses, where each stack's top is
+    have hspA : sA.sp ≠ 0 := by intro h0; simp only [top, h0, if_true] at bnd; omega
+    have hspB : sB.sp ≠ 0 := by intro h0; simp only [top, h0, if_true] at bnd; omega
+    have tA : top sA.sp = sA.sp.toNat := by simp only [top, hspA, if_false]
+    have tB : top sB.sp = sB.sp.toNat := by simp only [top, hspB, if_false]
+    rw [tA] at wA bnd rest; rw [tB] at wB bnd rest
+    have pA : (returned sA cA).pc.toNat = word sA.mem sA.sp.toNat := by
+      rw [returned_pc]; exact rd16_word sA (by omega)
+    have pB : (returned sB cB).pc.toNat = word sB.mem sB.sp.toNat := by
+      rw [returned_pc]; exact rd16_word sB (by omega)
+    refine ⟨⟨_, wA, pA⟩, ⟨_, wB, pB⟩, ⟨S.LA.1.congr rfl (returned_mem _ _), S.LA.2⟩,
+      ⟨S.LB.1.congr rfl (returned_mem _ _), S.LB.2⟩, ?_, ?_, S.msz, S.rs, rfl⟩
+    · unfold EqvT; rw [mask_returned]; exact Eqv.returned S.E _ _
+    · show Stk A B hi G (top (returned sA cA).sp) (top (returned sB cB).sp) (returned sA cA).mem
+        (returned sB cB).mem
+      rw [returned_sp, returned_sp, returned_mem, returned_mem, top_add2 _ (by omega),
+        top_add2 _ (by omega)]
+      exact rest
+  · rw [if_neg hc] at stA ⊢
+    rw [ht] at hc
+    rw [if_neg hc] at stB
+    obtain ⟨pA, cA, eA, atA⟩ := stA
+    obtain ⟨pB, cB, eB, atB⟩ := stB
+    rw [eA, eB]
+    exact ⟨atA, atB, ⟨S.LA.1.congr rfl rfl, S.LA.2⟩, ⟨S.LB.1.congr rfl rfl, S.LB.2⟩, S.E.jumped _ _ _ _,
+      S.stk, S.msz, S.rs, rfl⟩
+
+/-- info: 'Ember.Proof.PassSim.seg_ret' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in #print axioms seg_ret
 
 end Ember.Proof.PassSim
