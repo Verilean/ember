@@ -182,6 +182,24 @@ theorem rows_of_walks (c : Ctx) (xs ys : List Item) (cert : List Row) (n : Nat) 
   rw [show p.1 + (k - p.1) = k by omega] at this
   exact this
 
+/-- **Rows checked in parts of `n` items one after another**: the `i`-th part starts at `n * i`, and the
+parts reach past the last item. -/
+theorem rows_of_walks' (c : Ctx) (xs ys : List Item) (cert : List Row) (n : Nat) (starts : List (Nat × Nat))
+    (hw : ∀ p, p ∈ starts → walk c n (prevOf xs p.1) (xs.drop p.1) (cert.drop p.1) (ys.drop p.2) p.2 = true)
+    (hst : ∀ i (h : i < starts.length), (starts[i]'h).1 = n * i) (hn : 0 < n)
+    (hreach : xs.length ≤ n * starts.length) (hlen : cert.length = xs.length) :
+    ∀ k r, cert[k]? = some r → r.tag ≠ .none →
+      rowOK c (prevOf xs k) (xs.drop k) (ys.drop r.kb) r (cert.drop (k + 1)) = true := by
+  refine rows_of_walks c xs ys cert n starts hw (fun k hk => ?_) hlen
+  have hi : k / n < starts.length := by
+    have := Nat.div_lt_iff_lt_mul hn |>.mpr (show k < starts.length * n by rw [Nat.mul_comm]; omega)
+    exact this
+  have h1 := Nat.div_add_mod k n
+  have h2 := Nat.mod_lt k hn
+  refine ⟨starts[k / n], List.getElem_mem hi, ?_, ?_⟩
+  · rw [hst _ hi]; omega
+  · rw [hst _ hi]; omega
+
 /-- info: 'Ember.Proof.PassSim.check_rows' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs in #print axioms check_rows
 

@@ -150,6 +150,8 @@ import Ember.Proof.Z80PassTail
 import Ember.Proof.Z80PassChk
 import Ember.Proof.Z80PassChkOK
 import Ember.Proof.Z80PassMaster
+import Ember.Proof.Z80PassCertGen
+import Ember.Proof.Z80PassCertDOK
 import Ember.Proof.Z80PassCheck
 import Ember.Proof.Z80StackDAsm
 import Ember.Proof.Z80World
@@ -381,6 +383,11 @@ The Z80 back end (M7, begun) — `Ember.Z80.IR.Sem` is the semantics of its IR:
   `past_zero`), and **`passes_halt`**: from a certificate the checker accepts, `SafeA`, and the two
   machines related at their first items, when `A`'s run halts so does `B`'s, with the same devices
   (for any two images: the stack's images and the certificate are not plugged in here);
+* `Z80PassCertGen`: making a certificate (the fixed point over the match of the two images) and the files
+  of it, written by `ember-passcert` (nothing in it is trusted);
+* `Z80PassCertD`, `Z80PassCertD0` … `Z80PassCertD6`, `Z80PassCertDOK`: the certificate for `StackH` and
+  `StackD` and its check by the kernel in parts (`decide +kernel` on the walk, 150 items a part), put
+  together in `certD_ok` (`RowsOK`, by `rows_of_walks'`);
 * `Z80PassRun`: two machines side by side to the end (`sim_halts`: a relation kept by segments of
   the two runs, the first machine taking at least one step, under which the first halted means the
   second halted with the same devices — then when the first halts so does the second);

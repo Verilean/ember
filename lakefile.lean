@@ -45,3 +45,6 @@ lean_exe «ember-gen» where
 
 lean_exe «ember-z80» where
   root := `Tests.Ember.Drivers.Z80Main
+
+lean_exe «ember-passcert» where
+  root := `Tests.Ember.Drivers.PassCertMain
