@@ -97,6 +97,11 @@ def sufOf (t : List (String × Nat × List Item)) (l : String) : Option (List It
 
 /-! ## What the walk checks at a row -/
 
+/-- A form that is not `halt`. -/
+def Form.notHalt : Form → Bool
+  | .halt => false
+  | _ => true
+
 /-- The return taint of a function: `H` and `L`. -/
 def trOf (tr : List (Nat × Bool × Bool)) (e : Nat) : Bool × Bool := (tr.lookup e).getD (false, false)
 
@@ -147,7 +152,7 @@ def routineOK (tA tB : List (String × Nat × List Item)) (f : String) : Bool :=
   match ptrRoutine f with
   | some (h, its) =>
     match sufOf tA h, sufOf tB h with
-    | some sa, some sb => its.isPrefixOf sa && its.isPrefixOf sb
+    | some sa, some sb => decide (its = sa.take its.length) && decide (its = sb.take its.length)
     | _, _ => false
   | none => false
 
@@ -155,7 +160,7 @@ def routineOK (tA tB : List (String × Nat × List Item)) (f : String) : Bool :=
 def litOK (tA tB : List (String × Nat × List Item)) (l : String) (n : Nat) : Bool :=
   match sufOf tA l, sufOf tB l with
   | some (_ :: .db vs :: _), some (_ :: .db vs' :: _) =>
-    vs == vs' && vs.length == n && vs.all fun v => match v with | .num m => decide (0 ≤ m ∧ m < 256) | _ => false
+    decide (vs = vs') && vs.length == n && vs.all fun v => match v with | .num m => decide (0 ≤ m ∧ m < 256) | _ => false
   | _, _ => false
 
 /-- A symbol that is not a label of `A` (an `equ`, or nothing): `ld hl` of it is no literal. -/
@@ -167,7 +172,7 @@ def symValL (la : List (String × Nat)) (s : String) : Option Int := (la.lookup 
 /-- An operand the same number in both images (`valSameB`), from their labels. -/
 def valSameL (la lb : List (String × Nat)) : Val → Bool
   | .num _ => true
-  | .sym s _ => symValL la s == symValL lb s
+  | .sym s _ => decide (symValL la s = symValL lb s)
 
 /-- The value of an operand in an image, when it is a number or a known symbol. -/
 def valOf (la : List (String × Nat)) : Val → Option Int
@@ -207,7 +212,7 @@ def retOK (tr : List (Nat × Bool × Bool)) (r : Row) : Bool :=
 
 def skipBothOK (as bs : List Item) (r : Row) (rs : List Row) : Bool :=
   match as, bs with
-  | a :: _, b :: _ => isZero a && a == b && succOK (nextRow rs) (r.kb + 1) r.th r.tl r.act
+  | a :: _, b :: _ => isZero a && decide (a = b) && succOK (nextRow rs) (r.kb + 1) r.th r.tl r.act
   | _, _ => false
 
 def skipAOK (as : List Item) (r : Row) (rs : List Row) : Bool :=
@@ -218,10 +223,10 @@ def skipAOK (as : List Item) (r : Row) (rs : List Row) : Bool :=
 def ordOK (c : Ctx) (as bs : List Item) (r : Row) (rs : List Row) : Bool :=
   match as, bs with
   | .ins i :: _, .ins j :: _ =>
-    i == j &&
+    decide (i = j) &&
     match (Form.cands (argVal i))[r.fi]? with
     | some f =>
-      decide (f.instr = i) && f != .halt && valSameL c.la c.lb (argVal f.instr) && (!r.th || !f.readsH) &&
+      decide (f.instr = i) && f.notHalt && valSameL c.la c.lb (argVal f.instr) && (!r.th || !f.readsH) &&
       (!r.tl || !f.readsL) && (!f.viaNN || nnOK c.la c.lo c.hi (argVal f.instr)) &&
       succOK (nextRow rs) (r.kb + 1) (r.th && !f.writesH) (r.tl && !f.writesL) r.act
     | none => false
@@ -230,7 +235,8 @@ def ordOK (c : Ctx) (as bs : List Item) (r : Row) (rs : List Row) : Bool :=
 def jumpOK (c : Ctx) (as bs : List Item) (r : Row) (rs : List Row) : Bool :=
   match as, bs with
   | .ins ⟨opA, argsA⟩ :: _, .ins ⟨opB, argsB⟩ :: _ =>
-    (opA == .jp || opA == .jr) && (opB == .jp || opB == .jr) && argsA == argsB &&
+    (decide (opA = .jp) || decide (opA = .jr)) && (decide (opB = .jp) || decide (opB = .jr)) &&
+      decide (argsA = argsB) &&
     match argsA with
     | [.imm (.sym l 0)] =>
       match lookupL c.t l with
@@ -267,7 +273,7 @@ def callOK (c : Ctx) (as bs : List Item) (r : Row) (rs : List Row) : Bool :=
 def retRowOK (c : Ctx) (as bs : List Item) (r : Row) (rs : List Row) : Bool :=
   match as, bs with
   | .ins ⟨.ret, cc⟩ :: _, .ins ⟨.ret, cc'⟩ :: _ =>
-    cc == cc' && retOK c.tr r &&
+    decide (cc = cc') && retOK c.tr r &&
     match cc with
     | [] => true
     | [x] => ccOK (some x) && succOK (nextRow rs) (r.kb + 1) r.th r.tl r.act
@@ -291,7 +297,7 @@ def ldirOK (as bs : List Item) (r : Row) (rs : List Row) : Bool :=
   | _, _ => false
 
 def packOK (as bs : List Item) (r : Row) (rs : List Row) : Bool :=
-  (packHighFrom.map Item.ins).isPrefixOf as && (packHighTo.map Item.ins).isPrefixOf bs &&
+  decide (packHighFrom.map Item.ins = as.take 4) && decide (packHighTo.map Item.ins = bs.take 2) &&
     succOK (rowN rs 4) (r.kb + 2) false false r.act
 
 def blkOK (c : Ctx) (prev : Option Item) (as bs : List Item) (r : Row) (rs : List Row) : Bool :=
@@ -316,7 +322,7 @@ def copyROK (c : Ctx) (as bs : List Item) (r : Row) (rs : List Row) : Bool :=
   match as with
   | .ins ⟨.ld, [.hl, .imm (.sym l 0)]⟩ :: .ins ⟨.ld, [.de, .imm (.sym g 0)]⟩ ::
         .ins ⟨.ld, [.bc, .imm (.num n)]⟩ :: .ins ⟨.ldir, []⟩ :: _ =>
-    as.take 4 == bs.take 4 &&
+    decide (as.take 4 = bs.take 4) &&
     decide (1 ≤ n ∧ n < 65536) && litOK c.tA c.tB l n.toNat && valSameL c.la c.lb (.sym g 0) &&
     (match valOf c.la (.sym g 0) with
       | some d => decide (0 ≤ d ∧ c.lo ≤ d.toNat ∧ d.toNat + n.toNat ≤ c.hi)
@@ -334,7 +340,7 @@ def retThrOK (c : Ctx) (as bs : List Item) (r : Row) (rs : List Row) : Bool :=
       | some sa => retAtB sa
       | none => false
     | [x, .imm (.sym l 0)], [x'] =>
-      x == x' && ccOK (some x) &&
+      decide (x = x') && ccOK (some x) &&
       match sufOf c.tA l with
       | some sa => retAtB sa && succOK (nextRow rs) (r.kb + 1) r.th r.tl r.act
       | none => false
@@ -344,7 +350,7 @@ def retThrOK (c : Ctx) (as bs : List Item) (r : Row) (rs : List Row) : Bool :=
 def condRetOK (c : Ctx) (as bs : List Item) (r : Row) : Bool :=
   match as, bs with
   | .ins ⟨.jp, [x, .imm (.sym l 0)]⟩ :: as', .ins ⟨.ret, [x']⟩ :: _ =>
-    retOK c.tr r && ccOK (some x) && Codegen.invert x == some x' && retSeqB c.tA as' &&
+    retOK c.tr r && ccOK (some x) && decide (Codegen.invert x = some x') && retSeqB c.tA as' &&
     match lookupL c.t l with
     | some li => succOK li.row (r.kb + 1) r.th r.tl r.act
     | none => false
@@ -353,7 +359,7 @@ def condRetOK (c : Ctx) (as bs : List Item) (r : Row) : Bool :=
 def tailOK (c : Ctx) (as bs : List Item) (r : Row) : Bool :=
   match as, bs with
   | .ins ⟨.call, [.imm (.sym l 0)]⟩ :: as', .ins ⟨opB, [.imm (.sym l' 0)]⟩ :: _ =>
-    l == l' && (opB == .jp || opB == .jr) && retSeqB c.tA as' && !(r.act.contains topE) &&
+    l == l' && (decide (opB = .jp) || decide (opB = .jr)) && retSeqB c.tA as' && !(r.act.contains topE) &&
     match lookupL c.t l with
     | some li =>
       succOK li.row li.ib r.th r.tl [li.ia] &&
