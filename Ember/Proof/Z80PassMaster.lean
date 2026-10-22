@@ -902,4 +902,183 @@ theorem step_tail {D : Dev} {A B : Code} {lo hi : Nat} {cert : List Row} {tr : L
 /-- info: 'Ember.Proof.PassSim.step_tail' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in #print axioms step_tail
 
+/-! ## Literals, routines of the runtime -/
+
+/-- The byte of a number of a `db`. -/
+def dbByte : Val → UInt8
+  | .num m => byteOf m
+  | _ => 0
+
+def numsOK (vs : List Val) : Bool := vs.all fun v => match v with | .num m => decide (0 ≤ m ∧ m < 256) | _ => false
+
+theorem imm8_num (env : Env) (m : Int) (h0 : 0 ≤ m) (h1 : m < 256) : (imm8 (.num m)).run env = .ok [byteOf m] := by
+  have hc : (!env.sizing && (decide (m < -128) || decide (m > 255))) = false := by
+    have : decide (m < -128) = false := by simp; omega
+    have : decide (m > 255) = false := by simp; omega
+    simp_all
+  simp only [imm8, value, bind, ReaderT.bind, ReaderT.run, pure, ReaderT.pure, read, readThe, MonadReaderOf.read,
+    ReaderT.read, Except.bind, Except.pure]
+  rw [hc]; rfl
+
+/-- **A `db` of numbers of 0 … 255**: its bytes, whatever the labels and the address. -/
+theorem db_encode : ∀ (vs : List Val), numsOK vs = true → ∀ env, Item.encode (.db vs) env = .ok (vs.map dbByte)
+  | [], _, env => rfl
+  | v :: vs, h, env => by
+    simp only [numsOK, List.all_cons, Bool.and_eq_true] at h
+    obtain ⟨hv, hvs⟩ := h
+    cases v with
+    | num m =>
+      simp only [decide_eq_true_eq] at hv
+      have ih := db_encode vs hvs env
+      simp only [Item.encode, List.mapM_cons] at ih ⊢
+      generalize hm : (List.mapM imm8 vs).run env = r at ih
+      cases r with
+      | error e => simp [Except.map] at ih
+      | ok bs =>
+        simp only [Except.map, Except.ok.injEq] at ih
+        simp only [bind, ReaderT.bind, ReaderT.run, imm8_num env m hv.1 hv.2, Except.bind, pure, ReaderT.pure,
+          Except.pure, Except.map, List.flatten_cons, List.map_cons, dbByte]
+        have hi : imm8 (.num m) env = .ok [byteOf m] := imm8_num env m hv.1 hv.2
+        have hm' : List.mapM imm8 vs env = .ok bs := hm
+        rw [hi, hm']
+        simp [ih, dbByte]
+    | sym _ _ => simp at hv
+
+theorem litOK_spec {xs ys : List Item} {l : String} {n : Nat} (h : litOK (labTbl xs 0) (labTbl ys 0) l n = true) :
+    ∃ dA dB vs, xs[dA]? = some (.label l) ∧ xs[dA + 1]? = some (.db vs) ∧ ys[dB]? = some (.label l) ∧
+      ys[dB + 1]? = some (.db vs) ∧ numsOK vs = true ∧ vs.length = n := by
+  unfold litOK at h
+  split at h
+  · rename_i a vs ra b vs' rb hA hB
+    simp only [Bool.and_eq_true, decide_eq_true_eq, beq_iff_eq] at h
+    obtain ⟨⟨e, hn⟩, hnums⟩ := h
+    subst e
+    obtain ⟨dA, hdA, hsA⟩ := sufOf_label hA
+    obtain ⟨dB, hdB, hsB⟩ := sufOf_label hB
+    exact ⟨dA, dB, vs, hdA, drop_cons2 hsA.symm, hdB, drop_cons2 hsB.symm, hnums, hn⟩
+  · cases h
+
+theorem labTbl_some : ∀ (xs : List Item) (k j : Nat) (l : String), xs[j]? = some (.label l) →
+    ((labTbl xs k).lookup l).isSome = true
+  | [], _, _, _, h => by simp at h
+  | it :: r, k, j, l, h => by
+    cases j with
+    | zero =>
+      simp only [List.getElem?_cons_zero, Option.some.injEq] at h
+      subst h
+      simp [labTbl, lookup_cons]
+    | succ j =>
+      simp only [List.getElem?_cons_succ] at h
+      have ih := labTbl_some r (k + 1) j l h
+      cases it with
+      | label l' =>
+        simp only [labTbl, lookup_cons]
+        split <;> simp_all
+      | _ => simpa [labTbl] using ih
+
+/-- A symbol the table of `A`'s labels has not is no label of `A`. -/
+theorem notLabel_spec {xs : List Item} {l : String} (h : notLabel (labTbl xs 0) l = true) :
+    ∀ j : Nat, xs[j]? ≠ some (Item.label l) := by
+  intro j hj
+  have := labTbl_some xs 0 j l hj
+  simp only [notLabel, Option.isNone_iff_eq_none] at h
+  rw [h] at this; cases this
+
+/-- **A routine of the runtime through `HL`**: its items in both images. -/
+theorem routineOK_spec {xs ys : List Item} {f : String} (h : routineOK (labTbl xs 0) (labTbl ys 0) f = true) :
+    ∃ hd its, ptrRoutine f = some (hd, its) ∧ ∃ i j, its = (xs.drop i).take its.length ∧
+      its = (ys.drop j).take its.length := by
+  unfold routineOK at h
+  split at h
+  · rename_i hd its hpr
+    split at h
+    · rename_i sa sb hsa hsb
+      simp only [Bool.and_eq_true, decide_eq_true_eq] at h
+      obtain ⟨i, _, rfl⟩ := sufOf_label hsa
+      obtain ⟨j, _, rfl⟩ := sufOf_label hsb
+      exact ⟨hd, its, hpr, i, j, h.1, h.2⟩
+    · cases h
+  · cases h
+
+/-- What the check of a call of a routine of the runtime says of the item before. -/
+def prevOK (tA : List (String × Nat × List Item)) (prev : Option Item) : Bool :=
+  match prev with
+  | some (.ins ⟨.ld, [.hl, .imm (.sym l 0)]⟩) => notLabel tA l
+  | _ => true
+
+theorem prevOK_spec {xs : List Item} {k : Nat} (h : prevOK (labTbl xs 0) (prevOf xs k) = true) :
+    ∀ l, 0 < k → xs[k - 1]? = some (.ins ⟨.ld, [.hl, .imm (.sym l 0)]⟩) → ∀ j : Nat, xs[j]? ≠ some (Item.label l) := by
+  intro l hk hp
+  have : prevOf xs k = some (.ins ⟨.ld, [.hl, .imm (.sym l 0)]⟩) := by
+    simp only [prevOf, show k ≠ 0 by omega, if_false]; exact hp
+  rw [this] at h
+  exact notLabel_spec h
+
+theorem blkOK_spec {c : Ctx} {prev : Option Item} {as bs : List Item} {r : Row} {rs : List Row}
+    (h : blkOK c prev as bs r rs = true) :
+    ∃ (f : String) (a' b' : List Item), as = .ins ⟨.call, [.imm (.sym f 0)]⟩ :: a' ∧
+      bs = .ins ⟨.call, [.imm (.sym f 0)]⟩ :: b' ∧ r.th = false ∧ r.tl = false ∧ routineOK c.tA c.tB f = true ∧
+      prevOK c.tA prev = true ∧ succOK (nextRow rs) (r.kb + 1) false false r.act = true := by
+  unfold blkOK at h
+  split at h
+  · rename_i f a' f' b'
+    simp only [Bool.and_eq_true, beq_iff_eq, Bool.not_eq_true'] at h
+    obtain ⟨⟨⟨⟨⟨e, hth⟩, htl⟩, hr⟩, hp⟩, hs⟩ := h
+    subst e
+    exact ⟨f, a', b', rfl, rfl, hth, htl, hr, hp, hs⟩
+  · cases h
+
+/-- The accumulator of the runtime, as `Glob` has it. -/
+theorem Glob.accs {D : Dev} {A B : Code} {lo hi : Nat} {cert : List Row} {tr : List (Nat × Bool × Bool)}
+    {x0 : Cpu × D.W} (Gl : Glob D A B lo hi cert tr x0) :
+    ∃ acc, (∀ pa, (A.a.env pa).val (.sym "rt_acc" 0) = Int.ofNat acc) ∧
+      (∀ pb, (B.a.env pb).val (.sym "rt_acc" 0) = Int.ofNat acc) ∧ lo ≤ acc ∧ acc + 4 ≤ hi := Gl.acc
+
+theorem step_blk {D : Dev} {A B : Code} {lo hi : Nat} {cert : List Row} {tr : List (Nat × Bool × Bool)}
+    {x0 : Cpu × D.W} (Gl : Glob D A B lo hi cert tr x0) {G : List Frame} {k : Nat} {x y : Cpu × D.W}
+    (htag : (rowAt cert k).tag = .blk)
+    (S : Sync D A B lo hi G k (rowAt cert k).kb (rowAt cert k).th (rowAt cert k).tl x y)
+    (hcur : cur G ∈ (rowAt cert k).act) (hF : FOK A cert tr G) (hx : ∃ n, x = mrun D n x0) :
+    ∃ a b, 0 < a ∧ Inv D A B lo hi cert tr x0 (mrun D a x) (mrun D b y) := by
+  have hrow := Gl.row (k := k) (by rw [htag]; intro h; cases h)
+  simp only [rowOK, htag] at hrow
+  obtain ⟨f, a', b', hA, hB, hth, htl, hr, hp, hs⟩ := blkOK_spec hrow
+  obtain ⟨hd, its, hpr, i, j, hiA, hjB⟩ := routineOK_spec hr
+  have hLA : Has A i its := has_of_take hiA
+  have hLB : Has B j its := has_of_take hjB
+  have nd := Gl.need S hx
+  have hfoot := (nd.2 _ (drop_cons hA)).2.2 f rfl (by rw [hpr]; rfl) (prevOK_spec hp)
+  have room := nd.1
+  obtain ⟨acc, haccA, haccB, hacc⟩ := Gl.accs
+  rw [hth, htl] at S
+  rw [nextRow_drop] at hs
+  obtain ⟨s1, s2, s3, s4, s5⟩ := succOK_spec hs
+  have hA' := drop_cons hA
+  have hB' := drop_cons hB
+  have fin : ∀ n, Sync D A B lo hi G (k + 1) ((rowAt cert k).kb + 1) false false (mrun D n x) (mrun D n y) → 0 < n →
+      ∃ a b, 0 < a ∧ Inv D A B lo hi cert tr x0 (mrun D a x) (mrun D b y) := by
+    intro n S' hn
+    refine ⟨n, n, hn, Or.inr ⟨G, k + 1, s1, ?_, s5 _ hcur, hF, reach_step hx n⟩⟩
+    rw [s2]; exact S'.mono (fun e => by cases e) (fun e => by cases e)
+  unfold ptrRoutine at hpr
+  split at hpr <;> (try cases hpr)
+  · exact fin 8 (blk_ld32 D Gl.hhi Gl.hlo Gl.h1 hA' hB' hLA hLB haccA haccB ⟨hacc.1, hacc.2⟩ S (by omega) hfoot)
+      (by decide)
+  · exact fin 9 (blk_st32 D Gl.hhi Gl.hlo Gl.h1 hA' hB' hLA hLB haccA haccB ⟨hacc.1, hacc.2⟩ S (by omega) hfoot)
+      (by decide)
+  · have S' := blk_bytes D Gl.hhi Gl.hlo Gl.h1 (name := "add") 1 (Or.inr rfl) exec_adc_a_m rfl hA' hB' hLA hLB
+      haccA haccB ⟨hacc.1, hacc.2⟩ S (by omega) hfoot
+    exact fin _ S' (by simp)
+  · have S' := blk_bytes D Gl.hhi Gl.hlo Gl.h1 (name := "sub") 3 (Or.inr rfl) exec_sbc_a_m rfl hA' hB' hLA hLB
+      haccA haccB ⟨hacc.1, hacc.2⟩ S (by omega) hfoot
+    exact fin _ S' (by simp)
+  · have S' := blk_bytes D Gl.hhi Gl.hlo Gl.h1 (name := "or") 6 (Or.inl rfl) exec_or_m rfl hA' hB' hLA hLB
+      haccA haccB ⟨hacc.1, hacc.2⟩ S (by omega) hfoot
+    exact fin _ S' (by simp)
+  · exact fin 44 (blk_cmp32 D Gl.hhi Gl.hlo Gl.h1 hA' hB' hLA hLB haccA haccB ⟨hacc.1, hacc.2⟩ S (by omega) hfoot)
+      (by decide)
+
+/-- info: 'Ember.Proof.PassSim.step_blk' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in #print axioms step_blk
+
 end Ember.Proof.PassSim
