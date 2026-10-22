@@ -778,20 +778,22 @@ it (`dev`), and `wrel` — the machine's state stands for the IR's world
 them but that an instruction without I/O leaves the machine as it is.
 
 **What the checks cost.**  The kernel's checks of the stack's image are
-cut so that a Lean process holds at most about 5.5 GB (measured building
-`Ember.Proof` from nothing in a pod limited to 16 GB: about 10 to 16
-minutes, by the machine; before the cuts one module took 35 GB): no check runs the generator over the
-program (`plan_parts`), a pass over a long function goes a stretch at a
-time, `sharedBytes` is not recomputed byte by byte (`sharedBytes_eq`),
-the assembler runs once and a stretch of items at a time, and the checks
-on the assembled image and the plan's labels are a theorem each (a
-stretch of 40 labels at a time, a literal of the pool at a time, the
-instructions of a long function a stretch of 20 at a time).  The passes over a long function: each stretch's theorem compared the
-generator's state with the one written out, its output so far included
-(for `tcp_segment` some 380 items, their names expanded by the kernel
-each time: about 2.4 GB whatever the stretch's length); the generator
-never reads its output (`Z80GenOut`), so each stretch is now checked
-from the state before it with no items, and compares its own.
+cut so that a Lean process holds at most about 3.6 GB (measured building
+`Ember.Proof` from nothing in a pod limited to 8 GB: about 16 minutes,
+the largest process `Z80StackHAsm`; before the cuts one module took
+35 GB): no check runs the generator over the program (`plan_parts`), a
+pass over a long function goes a stretch at a time, each stretch checked
+by its own items — the generator never reads its output (`Z80GenOut`),
+so a stretch's theorem does not compare the items before it (for
+`tcp_segment` some 380, about 2.4 GB a theorem before) — `sharedBytes`
+is not recomputed byte by byte (`sharedBytes_eq`), the assembler runs
+once and a stretch of items at a time, and the checks on the assembled
+image and the plan are a theorem each (a stretch of 40 labels at a time,
+a literal of the pool at a time, the instructions of a long function a
+stretch of 20 at a time; the start-up's facts in four parts).  The
+image's proofs import the refinement proofs (`StackSrc`): a change of
+what a function of the stack does needs its refinement proof changed,
+then rebuilds the image's modules from `Z80StackIR` on.
 
 **Assumed for now:** `RtOK` — the specifications of the runtime's
 routines (`rt_mul8`, `rt_div8`, …, `rt_not16`, `rt_neg16`, the shifts,
