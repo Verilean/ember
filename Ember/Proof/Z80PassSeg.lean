@@ -822,4 +822,136 @@ theorem seg_pop_af (D : Dev) {A B : Code} {lo hi : Nat} {G : List Frame} {kA kB 
 /-- info: 'Ember.Proof.PassSim.seg_pop_af' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in #print axioms seg_pop_af
 
+/-! ## `ldir` -/
+
+theorem ldirS_sp (s : Cpu) : (ldirS s).sp = s.sp ∧ (ldirS s).ramStart = s.ramStart ∧ (ldirS s).halted = s.halted := by
+  simp only [ldirS, ldirG]; split <;> exact ⟨rfl, rfl, rfl⟩
+
+theorem ldirS_mem (s : Cpu) (x : Nat) (hsz : s.mem.size = 65536) (hr : s.ramStart.toNat ≤ s.de.toNat) :
+    (ldirS s).mem.get! x = if x = s.de.toNat then s.mem.get! s.hl.toNat else s.mem.get! x := by
+  have hnl : ¬ s.de < s.ramStart := by rw [UInt16.lt_iff_toNat_lt]; omega
+  have hm : (ldirS s).mem = s.mem.set! s.de.toNat (s.mem.get! s.hl.toNat) := by
+    simp only [ldirS, ldirG]
+    have : (op2 s).de = s.de ∧ (op2 s).ramStart = s.ramStart ∧ (op2 s).mem = s.mem ∧ (op2 s).hl = s.hl :=
+      ⟨rfl, rfl, rfl, rfl⟩
+    rw [this.1, this.2.1, this.2.2.1, this.2.2.2, if_neg hnl]
+    split <;> rfl
+  rw [hm, Ember.Proof.IRSim.get_set, hsz]
+  by_cases hx : x = s.de.toNat
+  · subst hx; simp [s.de.toNat_lt]
+  · have : ¬ (s.de.toNat = x ∧ s.de.toNat < 65536) := fun h => hx h.1.symm
+    simp only [this, hx, if_false]
+
+theorem ldirS_size (s : Cpu) : (ldirS s).mem.size = s.mem.size := by
+  simp only [ldirS, ldirG]; split <;> (split <;> first | rfl | simp <;> rfl)
+
+/-- `ldirG` with the byte it moves given. -/
+def ldirR (x : Cpu) (v : UInt8) : Cpu :=
+  let m := if x.de < x.ramStart then x.mem else x.mem.set! x.de.toNat v
+  let bc' := x.bc - 1
+  let more : Bool := bc' != 0
+  let n : UInt8 := x.a + v
+  let f' : UInt8 := (x.f &&& (FS ||| FZ ||| FC)) ||| bit more FPV ||| (n &&& FX) ||| bit (n &&& 2 != 0) FY
+  let w : Cpu :=
+    { x with mem := m, h := hi (x.hl + 1), l := lo (x.hl + 1), d := hi (x.de + 1), e := lo (x.de + 1),
+             b := hi bc', c := lo bc', f := f' }
+  if more then { w with pc := x.pc - 2, cycles := x.cycles + 21 } else { w with cycles := x.cycles + 16 }
+
+theorem ldirS_R (s : Cpu) : ldirS s = ldirR (op2 s) (s.mem.get! s.hl.toNat) := rfl
+
+/-- The registers after a round of `ldir` from CPUs that agree, `H` and `L` free or not (both). -/
+theorem regsS_ldirS {lo hi : Nat} {τ : Bool} {s t : Cpu} (E : EqvT lo hi τ τ s t)
+    (hv : s.mem.get! s.hl.toNat = t.mem.get! t.hl.toNat) :
+    RegsS (ldirS s) (mask τ τ (ldirS s) (ldirS t)) := by
+  rw [ldirS_R, ldirS_R, ← hv]
+  generalize s.mem.get! s.hl.toNat = v
+  obtain ⟨p', r', c', m', q', e⟩ := regs_ex E.regs
+  cases τ
+  · rw [mask_ff] at e ⊢
+    subst e
+    cases s
+    simp only [RegsS, ldirR, op2, op1, skip, Cpu.bumpR, Cpu.hl, Cpu.de, Cpu.bc]
+    split <;> split <;> rfl
+  · revert e
+    cases s; cases t
+    simp only [mask, if_true, Cpu.mk.injEq]
+    intro e
+    obtain ⟨ea, ef, eb, ec, ed, ee, eh, el, ea', ef', eb', ec', ed', ee', eh', el', eix, eiy, esp, epc, ei, er, eiff1, eiff2,
+      eim, ehalted, eei, ecy, eio, ers, emem⟩ := e
+    subst ea ef eb ec ed ee ea' ef' eb' ec' ed' ee' eh' el' eix eiy ei eiff1 eiff2 eim ehalted eei eio ers
+    simp only [RegsS, ldirR, op2, op1, skip, Cpu.bumpR, Cpu.hl, Cpu.de, Cpu.bc]
+    split <;> split <;> rfl
+
+/-- **A round of `ldir` in both machines**: the byte each reads at its `HL` the same (in the RAM kept
+equal, or a literal of each image's ROM — then `H` and `L` free), written at `DE` in the RAM kept
+equal; both back at the `ldir` or both on, the relation kept. -/
+theorem seg_ldir (D : Dev) {A B : Code} {lo hi : Nat} (hhi : hi ≤ 65536) {G : List Frame} {kA kB : Nat}
+    {τ : Bool} (hA : A.items[kA]? = some (.ins ⟨.ldir, []⟩)) (hB : B.items[kB]? = some (.ins ⟨.ldir, []⟩))
+    {x y : Cpu × D.W} (S : Sync D A B lo hi G kA kB τ τ x y)
+    (hv : x.1.mem.get! x.1.hl.toNat = y.1.mem.get! y.1.hl.toNat)
+    (hde : lo ≤ x.1.de.toNat ∧ x.1.de.toNat < hi) :
+    if (x.1.bc - 1 != 0) = true then Sync D A B lo hi G kA kB τ τ (mstep D x) (mstep D y)
+    else Sync D A B lo hi G (kA + 1) (kB + 1) τ τ (mstep D x) (mstep D y) := by
+  obtain ⟨sA, w⟩ := x
+  obtain ⟨sB, w'⟩ := y
+  have hw : w' = w := S.w
+  subst hw
+  simp only at hv hde ⊢
+  obtain ⟨eA, atA⟩ := ldir_mstep D hA S.LA S.atA w'
+  obtain ⟨eB, atB⟩ := ldir_mstep D hB S.LB S.atB w'
+  rw [eA, eB]
+  have E := S.E
+  have hrsB : sB.ramStart = sA.ramStart := by
+    have := RegsS.ramStart E.regs; rw [mask_ramStart] at this; exact this.symm
+  have hdeB : sB.de = sA.de := by
+    have := RegsS.de E.regs; rw [mask_de] at this; exact this.symm
+  have hbc : sA.bc = sB.bc := by
+    obtain ⟨_, _, _, _, _, e⟩ := regs_ex E.regs
+    have : (mask τ τ sA sB).bc = sB.bc := by cases sB; rfl
+    rw [← this, e]; rfl
+  have hrsA : sA.ramStart.toNat ≤ lo := S.rs
+  have hszA : sA.mem.size = 65536 := S.msz
+  have hmszB : (mask τ τ sA sB).mem.size = sB.mem.size := by cases sB; rfl
+  have hszB : sB.mem.size = 65536 := by rw [← hmszB, ← E.msz]; exact hszA
+  have hmmem : (mask τ τ sA sB).mem = sB.mem := by cases sB; rfl
+  have rA : sA.ramStart.toNat ≤ sA.de.toNat := by omega
+  have rB : sB.ramStart.toNat ≤ sB.de.toNat := by rw [hrsB, hdeB]; omega
+  have hrsB' : sB.ramStart.toNat = sA.ramStart.toNat := by rw [hrsB]
+  have htop := (S.stk).top_ge hhi
+  simp only at htop
+  obtain ⟨spA, rsA', hA'⟩ := ldirS_sp sA
+  obtain ⟨spB, rsB', hB'⟩ := ldirS_sp sB
+  have keepA : ∀ z, ¬ (lo ≤ z ∧ z < hi) → (ldirS sA).mem.get! z = sA.mem.get! z := by
+    intro z hz; rw [ldirS_mem sA z hszA rA, if_neg (by omega)]
+  have keepB : ∀ z, ¬ (lo ≤ z ∧ z < hi) → (ldirS sB).mem.get! z = sB.mem.get! z := by
+    intro z hz; rw [ldirS_mem sB z hszB rB, if_neg (by rw [hdeB]; omega)]
+  have E' : EqvT lo hi τ τ (ldirS sA) (ldirS sB) := by
+    refine ⟨regsS_ldirS E hv, fun z h1 h2 => ?_, ?_⟩
+    · have hmm : (mask τ τ (ldirS sA) (ldirS sB)).mem = (ldirS sB).mem := by cases (ldirS sB); rfl
+      rw [hmm, ldirS_mem sA z hszA rA, ldirS_mem sB z hszB rB, hdeB, hv]
+      split
+      · rfl
+      · have := E.mem z h1 h2; rw [hmmem] at this; exact this
+    · have hmm : (mask τ τ (ldirS sA) (ldirS sB)).mem = (ldirS sB).mem := by cases (ldirS sB); rfl
+      rw [hmm, ldirS_size, ldirS_size, hszA, hszB]
+  have LA : Loaded A (ldirS sA) := S.LA.keep rsA' (fun z (hz : z < sA.ramStart.toNat) => keepA z (by omega))
+    (by rw [hA']; exact S.LA.2)
+  have LB : Loaded B (ldirS sB) := S.LB.keep rsB' (fun z (hz : z < sB.ramStart.toNat) => keepB z (by omega))
+    (by rw [hB']; exact S.LB.2)
+  have stk : Stk A B hi G (top (ldirS sA).sp) (top (ldirS sB).sp) (ldirS sA).mem (ldirS sB).mem := by
+    rw [spA, spB]
+    exact Stk.congr G _ _ _ _ _ _ S.stk (fun z hz => keepA z (by omega)) (fun z hz => keepB z (by omega))
+  have atA' : if (sA.bc - 1 != 0) = true then At A.addrs kA (ldirS sA) else At A.addrs (kA + 1) (ldirS sA) := atA
+  have atB' : if (sB.bc - 1 != 0) = true then At B.addrs kB (ldirS sB) else At B.addrs (kB + 1) (ldirS sB) := atB
+  clear atA atB
+  rw [hbc] at atA' ⊢
+  by_cases hc : (sB.bc - 1 != 0) = true
+  · rw [if_pos hc] at atA' atB' ⊢
+    exact ⟨atA', atB', LA, LB, E', stk, by rw [ldirS_size]; exact hszA, by rw [rsA']; exact hrsA, rfl⟩
+  · rw [if_neg hc] at atA' atB' ⊢
+    exact ⟨atA', atB', LA, LB, E', stk, by rw [ldirS_size]; exact hszA, by rw [rsA']; exact hrsA, rfl⟩
+
+/-- info: 'Ember.Proof.PassSim.seg_ldir' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in #print axioms seg_ldir
+
 end Ember.Proof.PassSim
