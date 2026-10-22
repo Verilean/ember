@@ -348,7 +348,8 @@ The Z80 back end (M7, begun) — `Ember.Z80.IR.Sem` is the semantics of its IR:
 * `Z80PassBlockRom`: a routine of the runtime reading a literal of the ROM (`ld hl,lit` before the
   call, each image's `HL` on its own literal, the same bytes: `H` and `L` free; `ldhl_lit`, `RomEq`):
   `blkR_ld32` (`rt_ld32`, nine steps of each), `blkR_bytes` (`rt_add32`, `rt_sub32`, `rt_or32`; the loop
-  `loop_rom_rounds`), `ldir_rom_rounds` (an `ldir` from the ROM to the RAM in both machines);
+  `loop_rom_rounds`), `blkR_cmp32` (`rt_cmp32`, `loopR_cmp_rounds`), `ldir_rom_rounds` (an `ldir`
+  from the ROM to the RAM in both machines);
 * `Z80PassRun`: two machines side by side to the end (`sim_halts`: a relation kept by segments of
   the two runs, the first machine taking at least one step, under which the first halted means the
   second halted with the same devices — then when the first halts so does the second);
