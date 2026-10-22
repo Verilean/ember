@@ -91,12 +91,10 @@ def prevOf (xs : List Item) (k : Nat) : Option Item := if k = 0 then none else x
 
 /-- **A walk that holds checks every row of a meeting point**: at each, `B`'s index not before the
 previous one, the check of the row with each image's items from the row on. -/
-theorem walk_rows (la lb : List (String × Nat)) (lo hi : Nat) (t : List (String × LInfo))
-    (tA tB : List (String × Nat × List Item)) (tr : List (Nat × Bool × Bool)) (xs ys : List Item)
-    (cert : List Row) :
-    ∀ (n k kb : Nat), walk la lb lo hi t tA tB tr n (prevOf xs k) (xs.drop k) (cert.drop k) (ys.drop kb) kb = true →
+theorem walk_rows (c : Ctx) (xs ys : List Item) (cert : List Row) :
+    ∀ (n k kb : Nat), walk c n (prevOf xs k) (xs.drop k) (cert.drop k) (ys.drop kb) kb = true →
       ∀ j r, j < n → k + j < xs.length → cert[k + j]? = some r → r.tag ≠ .none →
-        rowOK la lb lo hi t tA tB tr (prevOf xs (k + j)) (xs.drop (k + j)) (ys.drop r.kb) r (cert.drop (k + j + 1)) = true
+        rowOK c (prevOf xs (k + j)) (xs.drop (k + j)) (ys.drop r.kb) r (cert.drop (k + j + 1)) = true
   | 0, _, _, _, j, _, hj, _, _, _ => absurd hj (Nat.not_lt_zero _)
   | n + 1, k, kb, h, j, r, hj, hk, hr, ht => by
     have hxs : xs.drop k = xs[k]'(by omega) :: xs.drop (k + 1) := by simp
@@ -114,7 +112,7 @@ theorem walk_rows (la lb : List (String × Nat)) (lo hi : Nat) (t : List (String
         rw [List.getElem?_eq_getElem hc] at hr
         cases hr; exact absurd ht0 ht
       | succ j =>
-        have := walk_rows la lb lo hi t tA tB tr xs ys cert n (k + 1) kb h j r (by omega) (by omega)
+        have := walk_rows c xs ys cert n (k + 1) kb h j r (by omega) (by omega)
           (by rw [show k + 1 + j = k + (j + 1) by omega]; exact hr) ht
         rw [show k + 1 + j = k + (j + 1) by omega] at this
         exact this
@@ -133,7 +131,7 @@ theorem walk_rows (la lb : List (String × Nat)) (lo hi : Nat) (t : List (String
         exact hrow
       | succ j =>
         rw [← hpre] at hrest
-        have := walk_rows la lb lo hi t tA tB tr xs ys cert n (k + 1) cert[k].kb hrest j r (by omega) (by omega)
+        have := walk_rows c xs ys cert n (k + 1) cert[k].kb hrest j r (by omega) (by omega)
           (by rw [show k + 1 + j = k + (j + 1) by omega]; exact hr) ht
         rw [show k + 1 + j = k + (j + 1) by omega] at this
         exact this
@@ -145,8 +143,7 @@ theorem check_rows {xs ys : List Item} {a b : Assembled} {lo hi : Nat} {cert : L
     cert.length = xs.length ∧
       (∃ r rs, cert = r :: rs ∧ r.tag ≠ .none ∧ r.kb = 0 ∧ r.th = false ∧ r.tl = false ∧ topE ∈ r.act) ∧
       ∀ k r, cert[k]? = some r → r.tag ≠ .none →
-        rowOK a.labels.reverse b.labels.reverse lo hi (mkTbl xs cert 0) (labTbl xs 0) (labTbl ys 0) tr
-          (prevOf xs k) (xs.drop k) (ys.drop r.kb) r (cert.drop (k + 1)) = true := by
+        rowOK (mkCtx xs ys a b lo hi cert tr) (prevOf xs k) (xs.drop k) (ys.drop r.kb) r (cert.drop (k + 1)) = true := by
   simp only [check, Bool.and_eq_true, beq_iff_eq] at h
   obtain ⟨⟨hlen, hfirst⟩, hw⟩ := h
   refine ⟨hlen, ?_, ?_⟩
@@ -160,8 +157,8 @@ theorem check_rows {xs ys : List Item} {a b : Assembled} {lo hi : Nat} {cert : L
   · intro k r hr ht
     have hk : k < xs.length := by
       have := (List.getElem?_eq_some_iff.mp hr).1; omega
-    have := walk_rows a.labels.reverse b.labels.reverse lo hi (mkTbl xs cert 0) (labTbl xs 0) (labTbl ys 0) tr
-      xs ys cert xs.length 0 0 (by simpa [prevOf] using hw) k r hk (by omega) (by simpa using hr) ht
+    have := walk_rows (mkCtx xs ys a b lo hi cert tr) xs ys cert xs.length 0 0 (by simpa [prevOf] using hw) k r hk
+      (by omega) (by simpa using hr) ht
     simpa using this
 
 /-- info: 'Ember.Proof.PassSim.check_rows' depends on axioms: [propext, Quot.sound] -/

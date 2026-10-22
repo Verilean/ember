@@ -180,138 +180,244 @@ def nnOK (la : List (String × Nat)) (lo hi : Nat) (v : Val) : Bool :=
   | some n => decide (0 ≤ n ∧ lo ≤ n.toNat ∧ n.toNat + 1 < hi)
   | none => false
 
-/-- **The check at a row** (`as`, `bs`: the items of each image from the row on; `rs`: the rows; `prev`:
-`A`'s item before). -/
-def rowOK (la lb : List (String × Nat)) (lo hi : Nat) (t : List (String × LInfo)) (tA tB : List (String × Nat × List Item))
-    (tr : List (Nat × Bool × Bool)) (prev : Option Item) (as bs : List Item) (r : Row) (rs : List Row) : Bool :=
-  let next := (rs.head?).getD default
-  let rowAt (n : Nat) : Row := (rs.drop (n - 1)).head?.getD default
-  let retOK : Bool := !(r.act.contains topE) && r.act.all fun e =>
+/-- What the checks at the rows look things up in: each image's labels (latest first, as `Assembled.env`
+resolves them), the RAM kept equal `[lo, hi)`, the tables of labels, the return taints. -/
+structure Ctx where
+  la : List (String × Nat)
+  lb : List (String × Nat)
+  lo : Nat
+  hi : Nat
+  t : List (String × LInfo)
+  tA : List (String × Nat × List Item)
+  tB : List (String × Nat × List Item)
+  tr : List (Nat × Bool × Bool)
+
+/-- The row after (`rs`: the rows from the next on). -/
+def nextRow (rs : List Row) : Row := (rs.head?).getD default
+
+/-- The row `n` after. -/
+def rowN (rs : List Row) (n : Nat) : Row := (rs.drop (n - 1)).head?.getD default
+
+/-- A return there: not in the activation of no function; `H`, `L` free only where every function it
+may be in may return them so. -/
+def retOK (tr : List (Nat × Bool × Bool)) (r : Row) : Bool :=
+  !(r.act.contains topE) && r.act.all fun e =>
     let t' := trOf tr e
     (!r.th || t'.1) && (!r.tl || t'.2)
-  match r.tag, as, bs with
-  | .skipBoth, a :: _, b :: _ => isZero a && a == b && succOK next (r.kb + 1) r.th r.tl r.act
-  | .skipA, a :: _, _ => isZero a && succOK next r.kb r.th r.tl r.act
-  | .ord, .ins i :: _, .ins j :: _ =>
+
+def skipBothOK (as bs : List Item) (r : Row) (rs : List Row) : Bool :=
+  match as, bs with
+  | a :: _, b :: _ => isZero a && a == b && succOK (nextRow rs) (r.kb + 1) r.th r.tl r.act
+  | _, _ => false
+
+def skipAOK (as : List Item) (r : Row) (rs : List Row) : Bool :=
+  match as with
+  | a :: _ => isZero a && succOK (nextRow rs) r.kb r.th r.tl r.act
+  | _ => false
+
+def ordOK (c : Ctx) (as bs : List Item) (r : Row) (rs : List Row) : Bool :=
+  match as, bs with
+  | .ins i :: _, .ins j :: _ =>
     i == j &&
     match (Form.cands (argVal i))[r.fi]? with
     | some f =>
-      decide (f.instr = i) && f != .halt && valSameL la lb (argVal f.instr) && (!r.th || !f.readsH) && (!r.tl || !f.readsL) &&
-      (!f.viaNN || nnOK la lo hi (argVal f.instr)) &&
-      succOK next (r.kb + 1) (r.th && !f.writesH) (r.tl && !f.writesL) r.act
+      decide (f.instr = i) && f != .halt && valSameL c.la c.lb (argVal f.instr) && (!r.th || !f.readsH) &&
+      (!r.tl || !f.readsL) && (!f.viaNN || nnOK c.la c.lo c.hi (argVal f.instr)) &&
+      succOK (nextRow rs) (r.kb + 1) (r.th && !f.writesH) (r.tl && !f.writesL) r.act
     | none => false
-  | .jump, .ins ⟨opA, argsA⟩ :: _, .ins ⟨opB, argsB⟩ :: _ =>
+  | _, _ => false
+
+def jumpOK (c : Ctx) (as bs : List Item) (r : Row) (rs : List Row) : Bool :=
+  match as, bs with
+  | .ins ⟨opA, argsA⟩ :: _, .ins ⟨opB, argsB⟩ :: _ =>
     (opA == .jp || opA == .jr) && (opB == .jp || opB == .jr) && argsA == argsB &&
     match argsA with
     | [.imm (.sym l 0)] =>
-      match lookupL t l with
+      match lookupL c.t l with
       | some li => succOK li.row li.ib r.th r.tl r.act
       | none => false
-    | [c, .imm (.sym l 0)] =>
-      ccOK (some c) && c != .imm (.sym l 0) &&
-      match lookupL t l with
-      | some li => succOK li.row li.ib r.th r.tl r.act && succOK next (r.kb + 1) r.th r.tl r.act
+    | [cc, .imm (.sym l 0)] =>
+      ccOK (some cc) &&
+      match lookupL c.t l with
+      | some li => succOK li.row li.ib r.th r.tl r.act && succOK (nextRow rs) (r.kb + 1) r.th r.tl r.act
       | none => false
     | _ => false
-  | .djnz, .ins ⟨.djnz, [.imm (.sym l 0)]⟩ :: _, .ins ⟨.djnz, [.imm (.sym l' 0)]⟩ :: _ =>
+  | _, _ => false
+
+def djnzOK (c : Ctx) (as bs : List Item) (r : Row) (rs : List Row) : Bool :=
+  match as, bs with
+  | .ins ⟨.djnz, [.imm (.sym l 0)]⟩ :: _, .ins ⟨.djnz, [.imm (.sym l' 0)]⟩ :: _ =>
     l == l' &&
-    match lookupL t l with
-    | some li => succOK li.row li.ib r.th r.tl r.act && succOK next (r.kb + 1) r.th r.tl r.act
+    match lookupL c.t l with
+    | some li => succOK li.row li.ib r.th r.tl r.act && succOK (nextRow rs) (r.kb + 1) r.th r.tl r.act
     | none => false
-  | .call, .ins ⟨.call, [.imm (.sym l 0)]⟩ :: _, .ins ⟨.call, [.imm (.sym l' 0)]⟩ :: _ =>
+  | _, _ => false
+
+def callOK (c : Ctx) (as bs : List Item) (r : Row) (rs : List Row) : Bool :=
+  match as, bs with
+  | .ins ⟨.call, [.imm (.sym l 0)]⟩ :: _, .ins ⟨.call, [.imm (.sym l' 0)]⟩ :: _ =>
     l == l' &&
-    match lookupL t l with
+    match lookupL c.t l with
     | some li =>
-      let t' := trOf tr li.ia
-      succOK li.row li.ib r.th r.tl [li.ia] && succOK next (r.kb + 1) t'.1 t'.2 r.act
+      succOK li.row li.ib r.th r.tl [li.ia] &&
+        succOK (nextRow rs) (r.kb + 1) (trOf c.tr li.ia).1 (trOf c.tr li.ia).2 r.act
     | none => false
-  | .ret, .ins ⟨.ret, cc⟩ :: _, .ins ⟨.ret, cc'⟩ :: _ =>
-    cc == cc' && retOK &&
+  | _, _ => false
+
+def retRowOK (c : Ctx) (as bs : List Item) (r : Row) (rs : List Row) : Bool :=
+  match as, bs with
+  | .ins ⟨.ret, cc⟩ :: _, .ins ⟨.ret, cc'⟩ :: _ =>
+    cc == cc' && retOK c.tr r &&
     match cc with
     | [] => true
-    | [c] => ccOK (some c) && succOK next (r.kb + 1) r.th r.tl r.act
+    | [x] => ccOK (some x) && succOK (nextRow rs) (r.kb + 1) r.th r.tl r.act
     | _ => false
-  | .halt, .ins ⟨.halt, []⟩ :: _, .ins ⟨.halt, []⟩ :: _ => true
-  | .ldsp, .ins ⟨.ld, [.sp, .imm (.num 0)]⟩ :: _, .ins ⟨.ld, [.sp, .imm (.num 0)]⟩ :: _ =>
-    succOK next (r.kb + 1) r.th r.tl [topE]
-  | .ldir, .ins ⟨.ldir, []⟩ :: _, .ins ⟨.ldir, []⟩ :: _ =>
-    !r.th && !r.tl && succOK next (r.kb + 1) false false r.act
-  | .pack, _, _ =>
-    (packHighFrom.map Item.ins).isPrefixOf as && (packHighTo.map Item.ins).isPrefixOf bs &&
-    succOK (rowAt 4) (r.kb + 2) false false r.act
-  | .blk, .ins ⟨.call, [.imm (.sym f 0)]⟩ :: _, .ins ⟨.call, [.imm (.sym f' 0)]⟩ :: _ =>
-    f == f' && !r.th && !r.tl && routineOK tA tB f &&
+  | _, _ => false
+
+def haltOK (as bs : List Item) : Bool :=
+  match as, bs with
+  | .ins ⟨.halt, []⟩ :: _, .ins ⟨.halt, []⟩ :: _ => true
+  | _, _ => false
+
+def ldspOK (as bs : List Item) (r : Row) (rs : List Row) : Bool :=
+  match as, bs with
+  | .ins ⟨.ld, [.sp, .imm (.num 0)]⟩ :: _, .ins ⟨.ld, [.sp, .imm (.num 0)]⟩ :: _ =>
+    succOK (nextRow rs) (r.kb + 1) r.th r.tl [topE]
+  | _, _ => false
+
+def ldirOK (as bs : List Item) (r : Row) (rs : List Row) : Bool :=
+  match as, bs with
+  | .ins ⟨.ldir, []⟩ :: _, .ins ⟨.ldir, []⟩ :: _ => !r.th && !r.tl && succOK (nextRow rs) (r.kb + 1) false false r.act
+  | _, _ => false
+
+def packOK (as bs : List Item) (r : Row) (rs : List Row) : Bool :=
+  (packHighFrom.map Item.ins).isPrefixOf as && (packHighTo.map Item.ins).isPrefixOf bs &&
+    succOK (rowN rs 4) (r.kb + 2) false false r.act
+
+def blkOK (c : Ctx) (prev : Option Item) (as bs : List Item) (r : Row) (rs : List Row) : Bool :=
+  match as, bs with
+  | .ins ⟨.call, [.imm (.sym f 0)]⟩ :: _, .ins ⟨.call, [.imm (.sym f' 0)]⟩ :: _ =>
+    f == f' && !r.th && !r.tl && routineOK c.tA c.tB f &&
     (match prev with
-      | some (.ins ⟨.ld, [.hl, .imm (.sym l 0)]⟩) => notLabel tA l
+      | some (.ins ⟨.ld, [.hl, .imm (.sym l 0)]⟩) => notLabel c.tA l
       | _ => true) &&
-    succOK next (r.kb + 1) false false r.act
-  | .blkR, .ins ⟨.ld, [.hl, .imm (.sym l 0)]⟩ :: .ins ⟨.call, [.imm (.sym f 0)]⟩ :: _,
+    succOK (nextRow rs) (r.kb + 1) false false r.act
+  | _, _ => false
+
+def blkROK (c : Ctx) (as bs : List Item) (r : Row) (rs : List Row) : Bool :=
+  match as, bs with
+  | .ins ⟨.ld, [.hl, .imm (.sym l 0)]⟩ :: .ins ⟨.call, [.imm (.sym f 0)]⟩ :: _,
       .ins ⟨.ld, [.hl, .imm (.sym l' 0)]⟩ :: .ins ⟨.call, [.imm (.sym f' 0)]⟩ :: _ =>
-    l == l' && f == f' && f != "rt_st32" && f != "rt_or32" && routineOK tA tB f && litOK tA tB l 4 &&
-    succOK (rowAt 2) (r.kb + 2) true true r.act
-  | .copyR, .ins ⟨.ld, [.hl, .imm (.sym l 0)]⟩ :: .ins ⟨.ld, [.de, .imm (.sym g 0)]⟩ ::
-        .ins ⟨.ld, [.bc, .imm (.num n)]⟩ :: .ins ⟨.ldir, []⟩ :: _, b0 :: b1 :: b2 :: b3 :: _ =>
-    some b0 == as.head? && some b1 == (as.drop 1).head? && some b2 == (as.drop 2).head? &&
-      some b3 == (as.drop 3).head? &&
-    decide (1 ≤ n ∧ n < 65536) && litOK tA tB l n.toNat && valSameL la lb (.sym g 0) &&
-    (match valOf la (.sym g 0) with
-      | some d => decide (0 ≤ d ∧ lo ≤ d.toNat ∧ d.toNat + n.toNat ≤ hi)
+    l == l' && f == f' && f != "rt_st32" && f != "rt_or32" && routineOK c.tA c.tB f && litOK c.tA c.tB l 4 &&
+    succOK (rowN rs 2) (r.kb + 2) true true r.act
+  | _, _ => false
+
+def copyROK (c : Ctx) (as bs : List Item) (r : Row) (rs : List Row) : Bool :=
+  match as with
+  | .ins ⟨.ld, [.hl, .imm (.sym l 0)]⟩ :: .ins ⟨.ld, [.de, .imm (.sym g 0)]⟩ ::
+        .ins ⟨.ld, [.bc, .imm (.num n)]⟩ :: .ins ⟨.ldir, []⟩ :: _ =>
+    as.take 4 == bs.take 4 &&
+    decide (1 ≤ n ∧ n < 65536) && litOK c.tA c.tB l n.toNat && valSameL c.la c.lb (.sym g 0) &&
+    (match valOf c.la (.sym g 0) with
+      | some d => decide (0 ≤ d ∧ c.lo ≤ d.toNat ∧ d.toNat + n.toNat ≤ c.hi)
       | none => false) &&
-    succOK (rowAt 4) (r.kb + 4) true true r.act
-  | .retThr, .ins ⟨.jp, argsA⟩ :: _, .ins ⟨.ret, cc⟩ :: _ =>
-    retOK &&
+    succOK (rowN rs 4) (r.kb + 4) true true r.act
+  | _ => false
+
+def retThrOK (c : Ctx) (as bs : List Item) (r : Row) (rs : List Row) : Bool :=
+  match as, bs with
+  | .ins ⟨.jp, argsA⟩ :: _, .ins ⟨.ret, cc⟩ :: _ =>
+    retOK c.tr r &&
     match argsA, cc with
     | [.imm (.sym l 0)], [] =>
-      match sufOf tA l with
+      match sufOf c.tA l with
       | some sa => retAtB sa
       | none => false
-    | [c, .imm (.sym l 0)], [c'] =>
-      c == c' && ccOK (some c) &&
-      match sufOf tA l with
-      | some sa => retAtB sa && succOK next (r.kb + 1) r.th r.tl r.act
+    | [x, .imm (.sym l 0)], [x'] =>
+      x == x' && ccOK (some x) &&
+      match sufOf c.tA l with
+      | some sa => retAtB sa && succOK (nextRow rs) (r.kb + 1) r.th r.tl r.act
       | none => false
     | _, _ => false
-  | .condRet, .ins ⟨.jp, [c, .imm (.sym l 0)]⟩ :: as', .ins ⟨.ret, [c']⟩ :: _ =>
-    retOK && ccOK (some c) && Codegen.invert c == some c' && retSeqB tA as' &&
-    match lookupL t l with
+  | _, _ => false
+
+def condRetOK (c : Ctx) (as bs : List Item) (r : Row) : Bool :=
+  match as, bs with
+  | .ins ⟨.jp, [x, .imm (.sym l 0)]⟩ :: as', .ins ⟨.ret, [x']⟩ :: _ =>
+    retOK c.tr r && ccOK (some x) && Codegen.invert x == some x' && retSeqB c.tA as' &&
+    match lookupL c.t l with
     | some li => succOK li.row (r.kb + 1) r.th r.tl r.act
     | none => false
-  | .tail, .ins ⟨.call, [.imm (.sym l 0)]⟩ :: as', .ins ⟨opB, [.imm (.sym l' 0)]⟩ :: _ =>
-    l == l' && (opB == .jp || opB == .jr) && retSeqB tA as' && !(r.act.contains topE) &&
-    match lookupL t l with
+  | _, _ => false
+
+def tailOK (c : Ctx) (as bs : List Item) (r : Row) : Bool :=
+  match as, bs with
+  | .ins ⟨.call, [.imm (.sym l 0)]⟩ :: as', .ins ⟨opB, [.imm (.sym l' 0)]⟩ :: _ =>
+    l == l' && (opB == .jp || opB == .jr) && retSeqB c.tA as' && !(r.act.contains topE) &&
+    match lookupL c.t l with
     | some li =>
-      let t' := trOf tr li.ia
       succOK li.row li.ib r.th r.tl [li.ia] &&
-        r.act.all fun e => let te := trOf tr e; (!t'.1 || te.1) && (!t'.2 || te.2)
+        r.act.all fun e =>
+          (!(trOf c.tr li.ia).1 || (trOf c.tr e).1) && (!(trOf c.tr li.ia).2 || (trOf c.tr e).2)
     | none => false
-  | .tailBlk, .ins ⟨.call, [.imm (.sym f 0)]⟩ :: as', .ins ⟨.jp, [.imm (.sym f' 0)]⟩ :: _ =>
-    f == f' && (f == "rt_st32" || f == "rt_or32") && !r.th && !r.tl && routineOK tA tB f && retSeqB tA as' &&
-    !(r.act.contains topE)
-  | _, _, _ => false
+  | _, _ => false
+
+def tailBlkOK (c : Ctx) (as bs : List Item) (r : Row) : Bool :=
+  match as, bs with
+  | .ins ⟨.call, [.imm (.sym f 0)]⟩ :: as', .ins ⟨.jp, [.imm (.sym f' 0)]⟩ :: _ =>
+    f == f' && (f == "rt_st32" || f == "rt_or32") && !r.th && !r.tl && routineOK c.tA c.tB f &&
+      retSeqB c.tA as' && !(r.act.contains topE)
+  | _, _ => false
+
+/-- **The check at a row** (`as`, `bs`: the items of each image from the row on; `rs`: the rows after;
+`prev`: `A`'s item before). -/
+def rowOK (c : Ctx) (prev : Option Item) (as bs : List Item) (r : Row) (rs : List Row) : Bool :=
+  match r.tag with
+  | .none => false
+  | .skipBoth => skipBothOK as bs r rs
+  | .skipA => skipAOK as r rs
+  | .ord => ordOK c as bs r rs
+  | .jump => jumpOK c as bs r rs
+  | .djnz => djnzOK c as bs r rs
+  | .call => callOK c as bs r rs
+  | .ret => retRowOK c as bs r rs
+  | .halt => haltOK as bs
+  | .ldsp => ldspOK as bs r rs
+  | .ldir => ldirOK as bs r rs
+  | .pack => packOK as bs r rs
+  | .blk => blkOK c prev as bs r rs
+  | .blkR => blkROK c as bs r rs
+  | .copyR => copyROK c as bs r rs
+  | .retThr => retThrOK c as bs r rs
+  | .condRet => condRetOK c as bs r
+  | .tail => tailOK c as bs r
+  | .tailBlk => tailBlkOK c as bs r
 
 /-- **The walk**, over `n` items of `A`: every row of the certificate that is a meeting point checked,
 `B`'s items kept in step (its indices going up). -/
-def walk (la lb : List (String × Nat)) (lo hi : Nat) (t : List (String × LInfo)) (tA tB : List (String × Nat × List Item))
-    (tr : List (Nat × Bool × Bool)) : Nat → Option Item → List Item → List Row → List Item → Nat → Bool
+def walk (c : Ctx) : Nat → Option Item → List Item → List Row → List Item → Nat → Bool
   | 0, _, _, _, _, _ => true
   | _ + 1, _, [], _, _, _ => true
   | _ + 1, _, _ :: _, [], _, _ => false
   | n + 1, prev, a :: as, r :: rs, bs, kb =>
-    if r.tag = .none then walk la lb lo hi t tA tB tr n (some a) as rs bs kb
+    if r.tag = .none then walk c n (some a) as rs bs kb
     else
-      decide (kb ≤ r.kb) &&
-      rowOK la lb lo hi t tA tB tr prev (a :: as) (bs.drop (r.kb - kb)) r rs &&
-      walk la lb lo hi t tA tB tr n (some a) as rs (bs.drop (r.kb - kb)) r.kb
+      decide (kb ≤ r.kb) && rowOK c prev (a :: as) (bs.drop (r.kb - kb)) r rs &&
+      walk c n (some a) as rs (bs.drop (r.kb - kb)) r.kb
+
+/-- The context of the check of a certificate for two images. -/
+def mkCtx (xs ys : List Item) (a b : Assembled) (lo hi : Nat) (cert : List Row) (tr : List (Nat × Bool × Bool)) :
+    Ctx :=
+  ⟨a.labels.reverse, b.labels.reverse, lo, hi, mkTbl xs cert 0, labTbl xs 0, labTbl ys 0, tr⟩
 
 /-- **The check of a certificate** for the two images: the walk, and the start (`A`'s first item, `B`'s
 first, the activation of no function). -/
 def check (xs ys : List Item) (a b : Assembled) (lo hi : Nat) (cert : List Row) (tr : List (Nat × Bool × Bool)) :
     Bool :=
-  let t := mkTbl xs cert 0
   cert.length == xs.length &&
   (match cert with
     | r :: _ => r.tag != .none && r.kb == 0 && !r.th && !r.tl && r.act.contains topE
     | [] => false) &&
-  walk a.labels.reverse b.labels.reverse lo hi t (labTbl xs 0) (labTbl ys 0) tr xs.length none xs cert ys 0
+  walk (mkCtx xs ys a b lo hi cert tr) xs.length none xs cert ys 0
 
 end Ember.Proof.PassSim
