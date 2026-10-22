@@ -481,4 +481,88 @@ theorem seg_ret (D : Dev) {A B : Code} {lo hi : Nat} {G : List Frame} {rA rB e k
 /-- info: 'Ember.Proof.PassSim.seg_ret' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in #print axioms seg_ret
 
+/-! ## `djnz`, `halt`, `ld sp,nn` -/
+
+theorem Eqv.djnzed {lo hi : Nat} {s u : Cpu} (E : Eqv lo hi s u) (p q : UInt16) (c d : UInt64) :
+    Eqv lo hi (djnzed s p c) (djnzed u q d) := by
+  obtain ⟨p', r', c', m', q', e⟩ := regs_ex E.regs
+  subst e
+  exact ⟨by cases s; rfl, E.mem, E.msz⟩
+
+theorem mask_djnzed (th tl : Bool) (s t : Cpu) (p q : UInt16) (c d : UInt64) :
+    mask th tl (djnzed s p c) (djnzed t q d) = djnzed (mask th tl s t) q d := by
+  cases s; cases t; rfl
+
+theorem EqvT.b {lo hi : Nat} {th tl : Bool} {s t : Cpu} (E : EqvT lo hi th tl s t) : s.b = t.b := by
+  obtain ⟨_, _, _, _, _, e⟩ := regs_ex E.regs
+  have : (mask th tl s t).b = t.b := by cases t; rfl
+  rw [← this, e]
+
+/-- **`djnz` in both machines** to the same label: `B` the same in both, both jump or both go on. -/
+theorem seg_djnz (D : Dev) {A B : Code} {lo hi : Nat} {G : List Frame} {kA kB jA jB : Nat} {th tl : Bool}
+    {l : String}
+    (hA : A.items[kA]? = some (.ins ⟨.djnz, [.imm (.sym l 0)]⟩)) (hjA : A.items[jA]? = some (.label l))
+    (hB : B.items[kB]? = some (.ins ⟨.djnz, [.imm (.sym l 0)]⟩)) (hjB : B.items[jB]? = some (.label l))
+    {x y : Cpu × D.W} (S : Sync D A B lo hi G kA kB th tl x y) :
+    if (x.1.b - 1 != 0) = true then Sync D A B lo hi G jA jB th tl (mstep D x) (mstep D y)
+    else Sync D A B lo hi G (kA + 1) (kB + 1) th tl (mstep D x) (mstep D y) := by
+  obtain ⟨sA, w⟩ := x
+  obtain ⟨sB, w'⟩ := y
+  have hw : w' = w := S.w
+  subst hw
+  obtain ⟨pA, cA, eA, LA, atA⟩ := djnz_mstep D hA hjA S.LA S.atA w'
+  obtain ⟨pB, cB, eB, LB, atB⟩ := djnz_mstep D hB hjB S.LB S.atB w'
+  rw [eA, eB]
+  have hb : sA.b = sB.b := S.E.b
+  have E' : EqvT lo hi th tl (djnzed sA pA cA) (djnzed sB pB cB) := by
+    unfold EqvT; rw [mask_djnzed]; exact Eqv.djnzed S.E _ _ _ _
+  have stk : Stk A B hi G (top (djnzed sA pA cA).sp) (top (djnzed sB pB cB).sp) (djnzed sA pA cA).mem
+      (djnzed sB pB cB).mem := S.stk
+  simp only at atA atB ⊢
+  rw [hb] at atA ⊢
+  by_cases hc : (sB.b - 1 != 0) = true
+  · rw [if_pos hc] at atA atB ⊢
+    exact ⟨atA, atB, LA, LB, E', stk, S.msz, S.rs, rfl⟩
+  · rw [if_neg hc] at atA atB ⊢
+    exact ⟨atA, atB, LA, LB, E', stk, S.msz, S.rs, rfl⟩
+
+/-- Both machines halted, the devices in the same state: the end. -/
+def Done (D : Dev) (x y : Cpu × D.W) : Prop := x.1.halted = true ∧ y.1.halted = true ∧ y.2 = x.2
+
+/-- **`halt` in both machines**: both halt, the devices as they were. -/
+theorem seg_halt (D : Dev) {A B : Code} {lo hi : Nat} {G : List Frame} {kA kB : Nat} {th tl : Bool}
+    (hA : A.items[kA]? = some (.ins ⟨.halt, []⟩)) (hB : B.items[kB]? = some (.ins ⟨.halt, []⟩))
+    {x y : Cpu × D.W} (S : Sync D A B lo hi G kA kB th tl x y) : Done D (mstep D x) (mstep D y) := by
+  obtain ⟨sA, w⟩ := x
+  obtain ⟨sB, w'⟩ := y
+  have hw : w' = w := S.w
+  subst hw
+  rw [halt_mstep D hA S.LA S.atA w', halt_mstep D hB S.LB S.atB w']
+  exact ⟨rfl, rfl, rfl⟩
+
+/-- **`ld sp,0` in both machines**: both stacks empty, whatever was on them (start-up). -/
+theorem seg_ldsp0 (D : Dev) {A B : Code} {lo hi : Nat} {G : List Frame} {kA kB : Nat} {th tl : Bool}
+    (hA : A.items[kA]? = some (.ins ⟨.ld, [.sp, .imm (.num (Int.ofNat 0))]⟩))
+    (hB : B.items[kB]? = some (.ins ⟨.ld, [.sp, .imm (.num (Int.ofNat 0))]⟩))
+    {x y : Cpu × D.W} (S : Sync D A B lo hi G kA kB th tl x y) :
+    Sync D A B lo hi [] (kA + 1) (kB + 1) th tl (mstep D x) (mstep D y) := by
+  obtain ⟨sA, w⟩ := x
+  obtain ⟨sB, w'⟩ := y
+  have hw : w' = w := S.w
+  subst hw
+  obtain ⟨pA, cA, eA, atA, LA⟩ := ldsp_mstep D 0 (by decide) hA S.LA S.atA w'
+  obtain ⟨pB, cB, eB, atB, LB⟩ := ldsp_mstep D 0 (by decide) hB S.LB S.atB w'
+  rw [eA, eB]
+  refine ⟨atA, atB, LA, LB, ?_, ⟨rfl, rfl⟩, S.msz, S.rs, rfl⟩
+  have e : ∀ (s : Cpu) (p : UInt16) (c : UInt64), ({ op1 s with sp := UInt16.ofNat 0, pc := p, cycles := c } : Cpu) =
+      { jumped s p c with sp := 0 } := by intro s p c; rfl
+  rw [e, e]
+  have E := S.E.jumped pA pB cA cB
+  unfold EqvT at *
+  have hm : mask th tl ({ jumped sA pA cA with sp := 0 } : Cpu) { jumped sB pB cB with sp := 0 } =
+      { mask th tl (jumped sA pA cA) (jumped sB pB cB) with sp := 0 } := by cases sA; cases sB; rfl
+  rw [hm]
+  obtain ⟨hr, hm', hsz⟩ := E
+  exact ⟨by obtain ⟨_, _, _, _, _, e⟩ := regs_ex hr; rw [e]; cases sA; rfl, hm', hsz⟩
+
 end Ember.Proof.PassSim
