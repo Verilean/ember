@@ -331,7 +331,8 @@ The Z80 back end (M7, begun) — `Ember.Z80.IR.Sem` is the semantics of its IR:
   an ordinary instruction (`seg_ord`), a jump (`seg_jump`), a call (`seg_call`: each pushes its own
   return address, a frame more on the stacks), a return (`seg_ret`: each to its own return point, the
   frame popped; with a condition, both taken or both not), `djnz`, `ld sp,0` (`seg_ldsp0`: both stacks
-  empty), `halt` (`seg_halt`: both halted, `Done`);
+  empty), `halt` (`seg_halt`: both halted, `Done`), `packHigh`'s rewrite (`seg_pack`: four steps of `A`
+  against two of `B`);
 * `Z80PassRun`: two machines side by side to the end (`sim_halts`: a relation kept by segments of
   the two runs, the first machine taking at least one step, under which the first halted means the
   second halted with the same devices — then when the first halts so does the second);

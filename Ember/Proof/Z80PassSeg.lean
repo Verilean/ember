@@ -25,7 +25,7 @@ take the facts they need about the items as hypotheses.
 -/
 
 namespace Ember.Proof.PassSim
-open Ember.Z80 Ember.Z80.Asm Ember.Z80.Cpu Ember.Proof.Z80Enc
+open Ember.Z80 Ember.Z80.Asm Ember.Z80.Cpu Ember.Proof.Z80Enc Ember.Proof.Z80Gen Ember.Proof.PassLocal
 
 /-- What a call pushed on the stacks. -/
 inductive Frame where
@@ -564,5 +564,73 @@ theorem seg_ldsp0 (D : Dev) {A B : Code} {lo hi : Nat} {G : List Frame} {kA kB :
   rw [hm]
   obtain ⟨hr, hm', hsz⟩ := E
   exact ⟨by obtain ⟨_, _, _, _, _, e⟩ := regs_ex hr; rw [e]; cases sA; rfl, hm', hsz⟩
+
+/-! ## `packHigh` -/
+
+theorem RegsS.trans {s t u : Cpu} (h1 : RegsS s t) (h2 : RegsS t u) : RegsS s u := Eq.trans h1 h2
+theorem RegsS.symm {s t : Cpu} (h : RegsS s t) : RegsS t s := Eq.symm h
+
+theorem regsS_fromF_toF {lo hi : Nat} {th tl : Bool} {s t : Cpu} (E : EqvT lo hi th tl s t) :
+    RegsS (fromF s) (toF t) := by
+  have e1 := RegsS.of_regs (from_regs s)
+  have e2 := RegsS.of_regs (to_regs t)
+  refine e1.trans (RegsS.trans ?_ e2.symm)
+  obtain ⟨p', r', c', m', q', e⟩ := regs_ex E.regs
+  have ha : s.a = t.a := by
+    have : (mask th tl s t).a = t.a := by cases t; rfl
+    rw [← this, e]
+  have e3 : ({ t with h := t.a, l := 0, io := .none, eiDelay := false } : Cpu) =
+      { mask th tl s t with h := s.a, l := 0, io := .none, eiDelay := false } := by
+    rw [ha]; cases t; rfl
+  rw [e3, e]
+  cases s; rfl
+
+theorem fromF_mem (s : Cpu) : (fromF s).mem = s.mem ∧ (fromF s).sp = s.sp ∧ (fromF s).ramStart = s.ramStart := by
+  cases s; exact ⟨rfl, rfl, rfl⟩
+theorem toF_mem (s : Cpu) : (toF s).mem = s.mem ∧ (toF s).sp = s.sp ∧ (toF s).ramStart = s.ramStart := by
+  cases s; exact ⟨rfl, rfl, rfl⟩
+
+/-- **`packHigh` in both machines**: at `kA` in `A` the four items it rewrites, at `kB` in `B` the two it
+writes instead; four steps of `A` and two of `B` keep the relation, at the items after, `H` and `L`
+written (no longer free). -/
+theorem seg_pack (D : Dev) {A B : Code} {lo hi : Nat} {G : List Frame} {kA kB : Nat} {th tl : Bool}
+    (hA : Has A kA (packHighFrom.map .ins)) (hB : Has B kB (packHighTo.map .ins))
+    {x y : Cpu × D.W} (S : Sync D A B lo hi G kA kB th tl x y) :
+    Sync D A B lo hi G (kA + 4) (kB + 2) false false (mrun D 4 x) (mrun D 2 y) := by
+  obtain ⟨sA, w⟩ := x
+  obtain ⟨sB, w'⟩ := y
+  have hw : w' = w := S.w
+  subst hw
+  obtain ⟨e1, a1, L1, S1⟩ := does_step D does_ld_l_a (hA.get 0 rfl) S.LA S.atA w'
+  obtain ⟨e2, a2, L2, S2⟩ := does_step D does_ld_h_0 (hA.get 1 rfl) L1 a1 w'
+  obtain ⟨e3, a3, L3, S3⟩ := does_step D does_ld_h_l (hA.get 2 rfl) L2 a2 w'
+  obtain ⟨e4, a4, L4, S4⟩ := does_step D does_ld_l_0 (hA.get 3 rfl) L3 a3 w'
+  obtain ⟨f1, b1, M1, T1⟩ := does_step D does_ld_h_a (hB.get 0 rfl) S.LB S.atB w'
+  obtain ⟨f2, b2, M2, T2⟩ := does_step D does_ld_l_0 (hB.get 1 rfl) M1 b1 w'
+  have rA : mrun D 4 (sA, w') = (fromF sA, w') := by
+    show mrun D 3 (mstep D (sA, w')) = _
+    rw [e1]; show mrun D 2 (mstep D _) = _
+    rw [e2]; show mrun D 1 (mstep D _) = _
+    rw [e3]; show mrun D 0 (mstep D _) = _
+    rw [e4]; rfl
+  have rB : mrun D 2 (sB, w') = (toF sB, w') := by
+    show mrun D 1 (mstep D (sB, w')) = _
+    rw [f1]; show mrun D 0 (mstep D _) = _
+    rw [f2]; rfl
+  rw [rA, rB]
+  obtain ⟨mA, spA, rsA⟩ := fromF_mem sA
+  obtain ⟨mB, spB, rsB⟩ := toF_mem sB
+  have hmsk : (mask th tl sA sB).mem = sB.mem := by cases sB; rfl
+  refine ⟨a4, b2, L4, M2, ?_, ?_, by rw [mA]; exact S.msz, by rw [rsA]; exact S.rs, rfl⟩
+  · show Eqv lo hi (fromF sA) (mask false false (fromF sA) (toF sB))
+    rw [mask_ff]
+    refine ⟨regsS_fromF_toF S.E, fun x h1 h2 => ?_, ?_⟩
+    · rw [mA, mB, ← hmsk]; exact S.E.mem x h1 h2
+    · rw [mA, mB, ← hmsk]; exact S.E.msz
+  · show Stk A B hi G (top (fromF sA).sp) (top (toF sB).sp) (fromF sA).mem (toF sB).mem
+    rw [mA, mB, spA, spB]; exact S.stk
+
+/-- info: 'Ember.Proof.PassSim.seg_pack' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in #print axioms seg_pack
 
 end Ember.Proof.PassSim
