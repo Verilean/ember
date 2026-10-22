@@ -735,4 +735,171 @@ theorem step_ret {D : Dev} {A B : Code} {lo hi : Nat} {cert : List Row} {tr : Li
 /-- info: 'Ember.Proof.PassSim.step_ret' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in #print axioms step_ret
 
+theorem retThrOK_spec {c : Ctx} {as bs : List Item} {r : Row} {rs : List Row} (h : retThrOK c as bs r rs = true) :
+    ∃ (cc : Option Arg) (l : String) (sa a' b' : List Item),
+      as = .ins ⟨.jp, cc.toList ++ [.imm (.sym l 0)]⟩ :: a' ∧ bs = .ins ⟨.ret, cc.toList⟩ :: b' ∧
+      retOK c.tr r = true ∧ (∀ x, cc = some x → x = .nz ∨ x = .z ∨ x = .nc ∨ x = .c) ∧
+      sufOf c.tA l = some sa ∧ retAtB sa = true ∧
+      (cc.isSome = true → succOK (nextRow rs) (r.kb + 1) r.th r.tl r.act = true) := by
+  unfold retThrOK at h
+  split at h
+  · rename_i argsA a' cc b'
+    simp only [Bool.and_eq_true] at h
+    obtain ⟨hret, h⟩ := h
+    split at h
+    · rename_i l
+      split at h
+      · rename_i sa hsa
+        refine ⟨none, l, sa, a', b', rfl, rfl, hret, ?_, hsa, h, ?_⟩
+        · intro _ e; cases e
+        · intro e; cases e
+      · cases h
+    · rename_i x l x'
+      simp only [Bool.and_eq_true, decide_eq_true_eq] at h
+      obtain ⟨⟨e, hx⟩, h⟩ := h
+      subst e
+      split at h
+      · rename_i sa hsa
+        simp only [Bool.and_eq_true] at h
+        refine ⟨some x, l, sa, a', b', rfl, rfl, hret, ?_, hsa, h.1, fun _ => h.2⟩
+        intro y e; cases e; exact ccOK_spec hx
+      · cases h
+    · cases h
+  · cases h
+
+theorem step_retThr {D : Dev} {A B : Code} {lo hi : Nat} {cert : List Row} {tr : List (Nat × Bool × Bool)}
+    {x0 : Cpu × D.W} (Gl : Glob D A B lo hi cert tr x0) {G : List Frame} {k : Nat} {x y : Cpu × D.W}
+    (htag : (rowAt cert k).tag = .retThr)
+    (S : Sync D A B lo hi G k (rowAt cert k).kb (rowAt cert k).th (rowAt cert k).tl x y)
+    (hcur : cur G ∈ (rowAt cert k).act) (hF : FOK A cert tr G) (hx : ∃ n, x = mrun D n x0) :
+    ∃ a b, 0 < a ∧ Inv D A B lo hi cert tr x0 (mrun D a x) (mrun D b y) := by
+  have hrow := Gl.row (k := k) (by rw [htag]; intro h; cases h)
+  simp only [rowOK, htag] at hrow
+  obtain ⟨cc, l, sa, a', b', hA, hB, hret, hcc, hsa, hra, hs⟩ := retThrOK_spec hrow
+  obtain ⟨jl, hjl, rfl⟩ := sufOf_label hsa
+  have hRA := retAtB_spec A _ jl rfl hra
+  obtain ⟨htop, hle⟩ := retOK_spec hret
+  have hne : cur G ≠ topE := fun e => htop (e ▸ hcur)
+  obtain ⟨ts, rA, rB, e, G', hG, hts, hF', hle'⟩ := frames_split G hF hne
+  have ht : leT ((rowAt cert k).th, (rowAt cert k).tl) (trOf tr e) :=
+    ⟨fun h => hle'.1 ((hle _ hcur).1 h), fun h => hle'.2 ((hle _ hcur).2 h)⟩
+  subst hG
+  cases cc with
+  | none =>
+    obtain ⟨n, hn, S'⟩ := seg_retseq D (ts := ts)
+      ⟨k, ⟨Nat.le_refl _, fun m h1 h2 => by omega⟩, Or.inr ⟨l, jl, drop_cons hA, hjl, hRA⟩⟩ (drop_cons hB) hts S
+    exact ⟨n, 1, hn, inv_ret S' hF' ht (reach_step hx n)⟩
+  | some cnd =>
+    have S' := seg_retThrCC D (hcc cnd rfl) (drop_cons hA) hjl hRA (drop_cons hB) hts S
+    by_cases htk : taken (some cnd) x.1 = true
+    · rw [if_pos htk] at S'
+      obtain ⟨n, hn, S''⟩ := S'
+      exact ⟨n, 1, hn, inv_ret S'' hF' ht (reach_step hx n)⟩
+    · rw [if_neg htk] at S'
+      have hs' := hs rfl
+      rw [nextRow_drop] at hs'
+      obtain ⟨s1, s2, s3, s4, s5⟩ := succOK_spec hs'
+      refine ⟨1, 1, Nat.one_pos, Or.inr ⟨_, k + 1, s1, ?_, s5 _ hcur, hF, reach_step hx 1⟩⟩
+      rw [s2]; exact S'.mono s3 s4
+
+theorem condRetOK_spec {c : Ctx} {as bs : List Item} {r : Row} (h : condRetOK c as bs r = true) :
+    ∃ (x x' : Arg) (l : String) (li : LInfo) (a' b' : List Item),
+      as = .ins ⟨.jp, [x, .imm (.sym l 0)]⟩ :: a' ∧ bs = .ins ⟨.ret, [x']⟩ :: b' ∧
+      retOK c.tr r = true ∧ (x = .nz ∨ x = .z ∨ x = .nc ∨ x = .c) ∧ Codegen.invert x = some x' ∧
+      retSeqB c.tA a' = true ∧ lookupL c.t l = some li ∧ succOK li.row (r.kb + 1) r.th r.tl r.act = true := by
+  unfold condRetOK at h
+  split at h
+  · rename_i x l a' x' b'
+    simp only [Bool.and_eq_true, decide_eq_true_eq] at h
+    obtain ⟨⟨⟨⟨hret, hx⟩, hinv⟩, hseq⟩, h⟩ := h
+    split at h
+    · rename_i li hli
+      exact ⟨x, x', l, li, a', b', rfl, rfl, hret, ccOK_spec hx, hinv, hseq, hli, h⟩
+    · cases h
+  · cases h
+
+theorem step_condRet {D : Dev} {A B : Code} {lo hi : Nat} {cert : List Row} {tr : List (Nat × Bool × Bool)}
+    {x0 : Cpu × D.W} (Gl : Glob D A B lo hi cert tr x0) {G : List Frame} {k : Nat} {x y : Cpu × D.W}
+    (htag : (rowAt cert k).tag = .condRet)
+    (S : Sync D A B lo hi G k (rowAt cert k).kb (rowAt cert k).th (rowAt cert k).tl x y)
+    (hcur : cur G ∈ (rowAt cert k).act) (hF : FOK A cert tr G) (hx : ∃ n, x = mrun D n x0) :
+    ∃ a b, 0 < a ∧ Inv D A B lo hi cert tr x0 (mrun D a x) (mrun D b y) := by
+  have hrow := Gl.row (k := k) (by rw [htag]; intro h; cases h)
+  simp only [rowOK, htag] at hrow
+  obtain ⟨cnd, cnd', l, li, a', b', hA, hB, hret, hc, hinv, hseq, hli, hs⟩ := condRetOK_spec hrow
+  have hRS : RetSeq A (k + 1) := by
+    refine retSeqB_spec A a' (k + 1) ?_ hseq
+    have := congrArg List.tail hA; simpa [List.tail_drop] using this
+  obtain ⟨hlA, _, hrA, _, hkb⟩ := Gl.lab hli
+  obtain ⟨htop, hle⟩ := retOK_spec hret
+  have hne : cur G ≠ topE := fun e => htop (e ▸ hcur)
+  obtain ⟨ts, rA, rB, e, G', hG, hts, hF', hle'⟩ := frames_split G hF hne
+  have ht : leT ((rowAt cert k).th, (rowAt cert k).tl) (trOf tr e) :=
+    ⟨fun h => hle'.1 ((hle _ hcur).1 h), fun h => hle'.2 ((hle _ hcur).2 h)⟩
+  have hF0 := hF
+  have hcur0 := hcur
+  subst hG
+  have S' := seg_condRet D hc hinv (drop_cons hA) hlA hRS (drop_cons hB) hts S
+  by_cases htk : taken (some cnd) x.1 = true
+  · rw [if_pos htk] at S'
+    obtain ⟨s1, s2, s3, s4, s5⟩ := succOK_spec hs
+    refine ⟨1, 1, Nat.one_pos, Or.inr ⟨_, li.ia, by rw [hrA]; exact s1, ?_, by rw [hrA]; exact s5 _ hcur0, hF0,
+      reach_step hx 1⟩⟩
+    rw [hrA, s2]; exact S'.mono s3 s4
+  · rw [if_neg htk] at S'
+    obtain ⟨n, hn, S''⟩ := S'
+    exact ⟨n, 1, hn, inv_ret S'' hF' ht (reach_step hx n)⟩
+
+theorem tailOK_spec {c : Ctx} {as bs : List Item} {r : Row} (h : tailOK c as bs r = true) :
+    ∃ (opB : Op) (l : String) (li : LInfo) (a' b' : List Item),
+      as = .ins ⟨.call, [.imm (.sym l 0)]⟩ :: a' ∧ bs = .ins ⟨opB, [.imm (.sym l 0)]⟩ :: b' ∧
+      (opB = .jp ∨ opB = .jr) ∧ retSeqB c.tA a' = true ∧ topE ∉ r.act ∧ lookupL c.t l = some li ∧
+      succOK li.row li.ib r.th r.tl [li.ia] = true ∧
+      ∀ e, e ∈ r.act → leT (trOf c.tr li.ia) (trOf c.tr e) := by
+  unfold tailOK at h
+  split at h
+  · rename_i l a' opB l' b'
+    simp only [Bool.and_eq_true, beq_iff_eq, Bool.or_eq_true, decide_eq_true_eq, Bool.not_eq_true',
+      List.contains_iff_mem] at h
+    obtain ⟨⟨⟨⟨e, hop⟩, hseq⟩, htop⟩, h⟩ := h
+    subst e
+    split at h
+    · rename_i li hli
+      simp only [Bool.and_eq_true, List.all_eq_true, Bool.or_eq_true, Bool.not_eq_true'] at h
+      refine ⟨opB, l, li, a', b', rfl, rfl, hop, hseq, by simpa using htop, hli, h.1, fun e he => ?_⟩
+      obtain ⟨a, b⟩ := h.2 e he
+      refine ⟨fun x => ?_, fun x => ?_⟩
+      · rcases a with a | a
+        · exact absurd (x.symm.trans a) (by decide)
+        · exact a
+      · rcases b with b | b
+        · exact absurd (x.symm.trans b) (by decide)
+        · exact b
+    · cases h
+  · cases h
+
+theorem step_tail {D : Dev} {A B : Code} {lo hi : Nat} {cert : List Row} {tr : List (Nat × Bool × Bool)}
+    {x0 : Cpu × D.W} (Gl : Glob D A B lo hi cert tr x0) {G : List Frame} {k : Nat} {x y : Cpu × D.W}
+    (htag : (rowAt cert k).tag = .tail)
+    (S : Sync D A B lo hi G k (rowAt cert k).kb (rowAt cert k).th (rowAt cert k).tl x y)
+    (hcur : cur G ∈ (rowAt cert k).act) (hF : FOK A cert tr G) (hx : ∃ n, x = mrun D n x0) :
+    ∃ a b, 0 < a ∧ Inv D A B lo hi cert tr x0 (mrun D a x) (mrun D b y) := by
+  have hrow := Gl.row (k := k) (by rw [htag]; intro h; cases h)
+  simp only [rowOK, htag] at hrow
+  obtain ⟨opB, l, li, a', b', hA, hB, hop, hseq, htop, hli, hs, hle⟩ := tailOK_spec hrow
+  have hRS : RetSeq A (k + 1) := by
+    refine retSeqB_spec A a' (k + 1) ?_ hseq
+    have := congrArg List.tail hA; simpa [List.tail_drop] using this
+  obtain ⟨hlA, hlB, hrA, _, hkb⟩ := Gl.lab hli
+  have nd := Gl.need S hx
+  have S' := seg_tail D Gl.hhi hop (drop_cons hA) hlA (drop_cons hB) hlB S Gl.hlo Gl.h1 (by have := nd.1; omega)
+  obtain ⟨s1, s2, s3, s4, s5⟩ := succOK_spec hs
+  have hne : cur G ≠ topE := fun e => htop (e ▸ hcur)
+  refine ⟨1, 1, Nat.one_pos, Or.inr ⟨.tail (k + 1) li.ia :: G, li.ia, by rw [hrA]; exact s1, ?_,
+    by rw [hrA]; exact s5 _ (List.mem_singleton_self _), ⟨hRS, hne, hle _ hcur, hF⟩, reach_step hx 1⟩⟩
+  rw [hrA, s2]; exact S'.mono s3 s4
+
+/-- info: 'Ember.Proof.PassSim.step_tail' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in #print axioms step_tail
+
 end Ember.Proof.PassSim
