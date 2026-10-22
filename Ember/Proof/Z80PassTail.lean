@@ -114,7 +114,7 @@ theorem blkT_st32 (D : Dev) {A B : Code} {lo hi : Nat} (hhi : hi ≤ 65536) (hlo
     (hacc : lo ≤ acc ∧ acc + 4 ≤ hi) (hts : ∀ p, p ∈ ts → RetSeq A p.1)
     {x y : Cpu × D.W} (S : Sync D A B lo hi (tails ts ++ .ret rA rB e :: G) kA kB false false x y)
     (room : hi + 2 ≤ top x.1.sp) (foot : lo ≤ x.1.hl.toNat ∧ x.1.hl.toNat + 4 ≤ hi) :
-    ∃ n, Sync D A B lo hi G rA rB false false (mrun D n x) (mrun D 9 y) := by
+    ∃ n, 0 < n ∧ Sync D A B lo hi G rA rB false false (mrun D n x) (mrun D 9 y) := by
   have l3A : A.items[r + 3]? = some (.label "rt_st32") := hLA.get 3 rfl
   have l3B : B.items[q + 3]? = some (.label "rt_st32") := hLB.get 3 rfl
   have i9A : A.items[r + 9]? = some (.ins ⟨.ret, []⟩) := hLA.get 9 rfl
@@ -131,7 +131,7 @@ theorem blkT_st32 (D : Dev) {A B : Code} {lo hi : Nat} (hhi : hi ≤ 65536) (hlo
       rcases List.mem_cons.mp hp with rfl | hp
       · exact hR
       · exact hts p hp) S7
-  refine ⟨1 + (7 + n), ?_⟩
+  refine ⟨1 + (7 + n), by omega, ?_⟩
   rw [mrun_add, mrun_add, show 9 = 1 + (7 + 1) from rfl, mrun_add D 1, mrun_add D 7]
   exact S9
 
@@ -258,7 +258,7 @@ theorem blkT_bytes (D : Dev) {A B : Code} {lo hi : Nat} (hhi : hi ≤ 65536) (hl
     (hacc : lo ≤ acc ∧ acc + 4 ≤ hi) (hts : ∀ p, p ∈ ts → RetSeq A p.1)
     {x y : Cpu × D.W} (S : Sync D A B lo hi (tails ts ++ .ret rA rB e :: G) kA kB false false x y)
     (room : hi + 2 ≤ top x.1.sp) (foot : lo ≤ x.1.hl.toNat ∧ x.1.hl.toNat + 4 ≤ hi) :
-    ∃ n, Sync D A B lo hi G rA rB false false (mrun D n x) (mrun D (28 + pre.length) y) := by
+    ∃ n, 0 < n ∧ Sync D A B lo hi G rA rB false false (mrun D n x) (mrun D (28 + pre.length) y) := by
   have hLA' := hLA
   have hLB' := hLB
   rw [bytewise_split] at hLA' hLB'
@@ -288,7 +288,7 @@ theorem blkT_bytes (D : Dev) {A B : Code} {lo hi : Nat} (hhi : hi ≤ 65536) (hl
       rcases List.mem_cons.mp hp with rfl | hp
       · exact hR
       · exact hts p hp) SB
-  refine ⟨1 + (26 + pre.length + n), ?_⟩
+  refine ⟨1 + (26 + pre.length + n), by omega, ?_⟩
   rw [mrun_add, mrun_add, show 28 + pre.length = 1 + (26 + pre.length + 1) by omega, mrun_add D 1,
     mrun_add D (26 + pre.length)]
   exact S9

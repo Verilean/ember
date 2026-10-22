@@ -561,4 +561,178 @@ theorem step_pack {D : Dev} {A B : Code} {lo hi : Nat} {cert : List Row} {tr : L
   refine ⟨4, 2, by decide, Or.inr ⟨G, k + 4, s1, ?_, s5 _ hcur, hF, reach_step hx 4⟩⟩
   rw [s2]; exact S'.mono (fun e => by cases e) (fun e => by cases e)
 
+
+/-! ## Returns -/
+
+theorem retAtB_spec (C : Code) : ∀ (l : List Item) (i : Nat), C.items.drop i = l → retAtB l = true → RetAt C i
+  | [], _, _, h => by simp [retAtB] at h
+  | it :: rest, i, hd, h => by
+    cases it with
+    | label l =>
+      simp only [retAtB] at h
+      have hd' : C.items.drop (i + 1) = rest := by
+        have := congrArg List.tail hd; simpa [List.tail_drop] using this
+      obtain ⟨j, ⟨hij, hl⟩, hr⟩ := retAtB_spec C rest (i + 1) hd' h
+      refine ⟨j, ⟨by omega, fun m h1 h2 => ?_⟩, hr⟩
+      rcases Nat.eq_or_lt_of_le h1 with e | e
+      · subst e; exact ⟨l, drop_cons hd⟩
+      · exact hl m (by omega) h2
+    | ins ins =>
+      obtain ⟨op, args⟩ := ins
+      cases op <;> try (simp [retAtB] at h)
+      cases args with
+      | nil => exact ⟨i, ⟨Nat.le_refl _, fun m h1 h2 => by omega⟩, drop_cons hd⟩
+      | cons _ _ => simp [retAtB] at h
+    | _ => simp [retAtB] at h
+
+theorem retSeqB_spec (C : Code) : ∀ (l : List Item) (i : Nat), C.items.drop i = l →
+    retSeqB (labTbl C.items 0) l = true → RetSeq C i
+  | [], _, _, h => by simp [retSeqB] at h
+  | it :: rest, i, hd, h => by
+    cases it with
+    | label l =>
+      simp only [retSeqB] at h
+      have hd' : C.items.drop (i + 1) = rest := by
+        have := congrArg List.tail hd; simpa [List.tail_drop] using this
+      obtain ⟨j, ⟨hij, hl⟩, hr⟩ := retSeqB_spec C rest (i + 1) hd' h
+      refine ⟨j, ⟨by omega, fun m h1 h2 => ?_⟩, hr⟩
+      rcases Nat.eq_or_lt_of_le h1 with e | e
+      · subst e; exact ⟨l, drop_cons hd⟩
+      · exact hl m (by omega) h2
+    | ins ins =>
+      obtain ⟨op, args⟩ := ins
+      cases op <;> try (simp [retSeqB] at h)
+      · -- jp
+        match args, h with
+        | [.imm (.sym l 0)], h =>
+          simp only [retSeqB] at h
+          split at h
+          · rename_i sa hsa
+            obtain ⟨jl, hjl, rfl⟩ := sufOf_label hsa
+            exact ⟨i, ⟨Nat.le_refl _, fun m h1 h2 => by omega⟩,
+              Or.inr ⟨l, jl, drop_cons hd, hjl, retAtB_spec C _ jl rfl h⟩⟩
+          · cases h
+      · -- ret
+        cases args with
+        | nil => exact ⟨i, ⟨Nat.le_refl _, fun m h1 h2 => by omega⟩, Or.inl (drop_cons hd)⟩
+        | cons _ _ => simp [retSeqB] at h
+    | _ => simp [retSeqB] at h
+
+/-- **The frames under a function**: `A`'s own (each a return at its return point), then a call of
+both; the function's return taint at most that frame's. -/
+theorem frames_split {A : Code} {cert : List Row} {tr : List (Nat × Bool × Bool)} :
+    ∀ (G : List Frame), FOK A cert tr G → cur G ≠ topE →
+      ∃ ts rA rB e G', G = tails ts ++ .ret rA rB e :: G' ∧ (∀ p, p ∈ ts → RetSeq A p.1) ∧
+        FOK A cert tr (.ret rA rB e :: G') ∧ leT (trOf tr (cur G)) (trOf tr e)
+  | [], _, h => absurd rfl h
+  | .ret rA rB e :: G', hF, _ => ⟨[], rA, rB, e, G', rfl, (fun _ h => absurd h List.not_mem_nil), hF,
+      (fun h => h), (fun h => h)⟩
+  | .tail rA e :: G', ⟨hr, hne, hle, hF⟩, _ => by
+    obtain ⟨ts, rA', rB', e', G'', hG, hts, hF', hle'⟩ := frames_split G' hF hne
+    refine ⟨(rA, e) :: ts, rA', rB', e', G'', by rw [hG]; rfl, fun p hp => ?_, hF', ?_⟩
+    · rcases List.mem_cons.mp hp with rfl | hp
+      · exact hr
+      · exact hts p hp
+    · exact ⟨fun h => hle'.1 (hle.1 h), fun h => hle'.2 (hle.2 h)⟩
+  | .data :: _, hF, _ => absurd hF id
+
+theorem retOK_spec {tr : List (Nat × Bool × Bool)} {r : Row} (h : retOK tr r = true) :
+    topE ∉ r.act ∧ ∀ e, e ∈ r.act → leT (r.th, r.tl) (trOf tr e) := by
+  simp only [retOK, Bool.and_eq_true, Bool.not_eq_true', List.all_eq_true, Bool.or_eq_true] at h
+  obtain ⟨h1, h2⟩ := h
+  refine ⟨by simpa using h1, fun e he => ?_⟩
+  obtain ⟨a, b⟩ := h2 e he
+  refine ⟨fun x => ?_, fun x => ?_⟩
+  · rcases a with a | a
+    · exact absurd (x.symm.trans a) (by decide)
+    · exact a
+  · rcases b with b | b
+    · exact absurd (x.symm.trans b) (by decide)
+    · exact b
+
+theorem retRowOK_spec {c : Ctx} {as bs : List Item} {r : Row} {rs : List Row} (h : retRowOK c as bs r rs = true) :
+    ∃ (cc : Option Arg) (a' b' : List Item), as = .ins ⟨.ret, cc.toList⟩ :: a' ∧ bs = .ins ⟨.ret, cc.toList⟩ :: b' ∧
+      retOK c.tr r = true ∧ (∀ x, cc = some x → x = .nz ∨ x = .z ∨ x = .nc ∨ x = .c) ∧
+      (cc.isSome = true → succOK (nextRow rs) (r.kb + 1) r.th r.tl r.act = true) := by
+  unfold retRowOK at h
+  split at h
+  · rename_i cc a' cc' b'
+    simp only [Bool.and_eq_true, decide_eq_true_eq] at h
+    obtain ⟨⟨e, hret⟩, h⟩ := h
+    subst e
+    split at h
+    · refine ⟨none, a', b', rfl, rfl, hret, ?_, ?_⟩
+      · intro _ e; cases e
+      · intro e; cases e
+    · rename_i x
+      simp only [Bool.and_eq_true] at h
+      refine ⟨some x, a', b', rfl, rfl, hret, ?_, fun _ => h.2⟩
+      intro y e; cases e; exact ccOK_spec h.1
+    · cases h
+  · cases h
+
+theorem cc_some {x : Arg} (h : x = .nz ∨ x = .z ∨ x = .nc ∨ x = .c) : (cc? x).isSome = true := by
+  rcases h with rfl | rfl | rfl | rfl <;> rfl
+
+/-- The relation at the return points of a frame of both, popped. -/
+theorem inv_ret {D : Dev} {A B : Code} {lo hi : Nat} {cert : List Row} {tr : List (Nat × Bool × Bool)}
+    {x0 x y : Cpu × D.W} {G' : List Frame} {rA rB e : Nat} {th tl : Bool}
+    (S : Sync D A B lo hi G' rA rB th tl x y) (hF : FOK A cert tr (.ret rA rB e :: G'))
+    (ht : leT (th, tl) (trOf tr e)) (hx : ∃ n, x = mrun D n x0) : Inv D A B lo hi cert tr x0 x y := by
+  obtain ⟨f1, f2, f3, f4, f5⟩ := hF
+  refine Or.inr ⟨G', rA, f1, ?_, f4, f5, hx⟩
+  rw [f2]
+  exact S.mono (fun h => f3.1 (ht.1 h)) (fun h => f3.2 (ht.2 h))
+
+theorem step_ret {D : Dev} {A B : Code} {lo hi : Nat} {cert : List Row} {tr : List (Nat × Bool × Bool)}
+    {x0 : Cpu × D.W} (Gl : Glob D A B lo hi cert tr x0) {G : List Frame} {k : Nat} {x y : Cpu × D.W}
+    (htag : (rowAt cert k).tag = .ret)
+    (S : Sync D A B lo hi G k (rowAt cert k).kb (rowAt cert k).th (rowAt cert k).tl x y)
+    (hcur : cur G ∈ (rowAt cert k).act) (hF : FOK A cert tr G) (hx : ∃ n, x = mrun D n x0) :
+    ∃ a b, 0 < a ∧ Inv D A B lo hi cert tr x0 (mrun D a x) (mrun D b y) := by
+  have hrow := Gl.row (k := k) (by rw [htag]; intro h; cases h)
+  simp only [rowOK, htag] at hrow
+  obtain ⟨cc, a', b', hA, hB, hret, hcc, hs⟩ := retRowOK_spec hrow
+  obtain ⟨htop, hle⟩ := retOK_spec hret
+  have hne : cur G ≠ topE := fun e => htop (e ▸ hcur)
+  obtain ⟨ts, rA, rB, e, G', hG, hts, hF', hle'⟩ := frames_split G hF hne
+  have ht : leT ((rowAt cert k).th, (rowAt cert k).tl) (trOf tr e) :=
+    ⟨fun h => hle'.1 ((hle _ hcur).1 h), fun h => hle'.2 ((hle _ hcur).2 h)⟩
+  subst hG
+  cases cc with
+  | none =>
+    obtain ⟨n, hn, S'⟩ := seg_retseq D (ts := ts) ⟨k, ⟨Nat.le_refl _, fun m h1 h2 => by omega⟩, Or.inl (drop_cons hA)⟩
+      (drop_cons hB) hts S
+    exact ⟨n, 1, hn, inv_ret S' hF' ht (reach_step hx n)⟩
+  | some cnd =>
+    have hcx := cc_some (hcc cnd rfl)
+    have hfall : ∀ (S' : Sync D A B lo hi (tails ts ++ .ret rA rB e :: G') (k + 1) ((rowAt cert k).kb + 1)
+        (rowAt cert k).th (rowAt cert k).tl (mstep D x) (mstep D y)),
+        ∃ a b, 0 < a ∧ Inv D A B lo hi cert tr x0 (mrun D a x) (mrun D b y) := by
+      intro S'
+      have hs' := hs rfl
+      rw [nextRow_drop] at hs'
+      obtain ⟨s1, s2, s3, s4, s5⟩ := succOK_spec hs'
+      refine ⟨1, 1, Nat.one_pos, Or.inr ⟨_, k + 1, s1, ?_, s5 _ hcur, hF, reach_step hx 1⟩⟩
+      rw [s2]; exact S'.mono s3 s4
+    cases ts with
+    | nil =>
+      have S' := seg_ret D (cc := some cnd) (fun _ h => by cases h; exact hcx) (drop_cons hA) (drop_cons hB) S
+      by_cases htk : taken (some cnd) x.1 = true
+      · rw [if_pos htk] at S'
+        exact ⟨1, 1, Nat.one_pos, inv_ret S' hF' ht (reach_step hx 1)⟩
+      · rw [if_neg htk] at S'
+        exact hfall S'
+    | cons p ts =>
+      have S' := seg_retcc_tails D hcx (drop_cons hA) (drop_cons hB) hts S
+      by_cases htk : taken (some cnd) x.1 = true
+      · rw [if_pos htk] at S'
+        obtain ⟨n, hn, S''⟩ := S'
+        exact ⟨n, 1, hn, inv_ret S'' hF' ht (reach_step hx n)⟩
+      · rw [if_neg htk] at S'
+        exact hfall S'
+
+/-- info: 'Ember.Proof.PassSim.step_ret' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in #print axioms step_ret
+
 end Ember.Proof.PassSim

@@ -368,10 +368,13 @@ def tailOK (c : Ctx) (as bs : List Item) (r : Row) : Bool :=
     | none => false
   | _, _ => false
 
-def tailBlkOK (c : Ctx) (as bs : List Item) (r : Row) : Bool :=
+def tailBlkOK (c : Ctx) (prev : Option Item) (as bs : List Item) (r : Row) : Bool :=
   match as, bs with
   | .ins ⟨.call, [.imm (.sym f 0)]⟩ :: as', .ins ⟨.jp, [.imm (.sym f' 0)]⟩ :: _ =>
     f == f' && (f == "rt_st32" || f == "rt_or32") && !r.th && !r.tl && routineOK c.tA c.tB f &&
+      (match prev with
+        | some (.ins ⟨.ld, [.hl, .imm (.sym l 0)]⟩) => notLabel c.tA l
+        | _ => true) &&
       retSeqB c.tA as' && !(r.act.contains topE)
   | _, _ => false
 
@@ -397,7 +400,7 @@ def rowOK (c : Ctx) (prev : Option Item) (as bs : List Item) (r : Row) (rs : Lis
   | .retThr => retThrOK c as bs r rs
   | .condRet => condRetOK c as bs r
   | .tail => tailOK c as bs r
-  | .tailBlk => tailBlkOK c as bs r
+  | .tailBlk => tailBlkOK c prev as bs r
 
 /-- **The walk**, over `n` items of `A`: every row of the certificate that is a meeting point checked,
 `B`'s items kept in step (its indices going up). -/
