@@ -16,6 +16,9 @@ The two images' steps are put side by side in `Z80PassRun`.
 namespace Ember.Proof.PassSim
 open Ember.Z80 Ember.Z80.Asm Ember.Z80.Cpu Ember.Proof.Z80Enc Ember.Proof.Z80Gen Ember.Proof.PassLocal
 
+-- `c` here is a count of T-states, not the register
+set_option linter.constructorNameAsVariable false
+
 /-- A label is where its item is: the address the assembler gives it. -/
 theorem label_addr {C : Code} {s : Cpu} (L : Loaded C s) {j : Nat} {l : String}
     (hj : C.items[j]? = some (.label l)) :
@@ -420,5 +423,86 @@ theorem pop_af_mstep (D : Dev) {C : Code} {k : Nat} (hk : C.items[k]? = some (.i
   refine ⟨?_, hat' rfl, ⟨L.1.congr rfl rfl, L.2⟩⟩
   show (s.step (D.bus w), D.dev w (s.step (D.bus w)).io) = _
   rw [hs1]; exact congrArg (Prod.mk _) (D.quiet w)
+
+/-! ## `ldir` -/
+
+/-- One round of `ldir`, from the state after its two opcode bytes are fetched: a byte from `(HL)`
+to `(DE)` (not in ROM), both one up, `BC` one down, the flags of the block instructions; the
+program counter back at the `ldir` while `BC` is not zero. -/
+def ldirF (e : Cpu) : Cpu :=
+  let v := e.rd e.hl
+  let w := e.wr e.de v
+  let w := (w.setHL (w.hl + 1)).setDE (w.de + 1)
+  let w := w.setBC (w.bc - 1)
+  let more : Bool := w.bc != 0
+  let n : UInt8 := w.a + v
+  let w := { w with f := (w.f &&& (FS ||| FZ ||| FC)) ||| bit more FPV ||| (n &&& FX) ||| bit (n &&& 2 != 0) FY }
+  if more then ({ w with pc := w.pc - 2 }).tick 21 else w.tick 16
+
+theorem execBlock_ldir (e : Cpu) (inp : UInt16 → UInt8) : e.execBlock inp 6 0 = ldirF e := rfl
+
+/-- `ldirF`, written field by field. -/
+def ldirG (x : Cpu) : Cpu :=
+  let v := x.mem.get! x.hl.toNat
+  let m := if x.de < x.ramStart then x.mem else x.mem.set! x.de.toNat v
+  let bc' := x.bc - 1
+  let more : Bool := bc' != 0
+  let n : UInt8 := x.a + v
+  let f' : UInt8 := (x.f &&& (FS ||| FZ ||| FC)) ||| bit more FPV ||| (n &&& FX) ||| bit (n &&& 2 != 0) FY
+  let w : Cpu :=
+    { x with mem := m, h := hi (x.hl + 1), l := lo (x.hl + 1), d := hi (x.de + 1), e := lo (x.de + 1),
+             b := hi bc', c := lo bc', f := f' }
+  if more then { w with pc := x.pc - 2, cycles := x.cycles + 21 } else { w with cycles := x.cycles + 16 }
+
+set_option linter.unusedSimpArgs false in
+theorem ldirF_eq (e : Cpu) : ldirF e = ldirG e := by
+  cases e with
+  | mk a f b c d e h l a' f' b' c' d' e' h' l' ix iy sp pc i r iff1 iff2 im halted eiDelay cycles io ramStart mem =>
+  by_cases hd : mk16 d e < ramStart
+  · simp only [ldirF, ldirG, Cpu.wr, Cpu.rd, Cpu.setHL, Cpu.setDE, Cpu.setBC, Cpu.hl, Cpu.de, Cpu.bc, Cpu.tick,
+      Ember.Proof.Z80Gen.hi_mk16, Ember.Proof.Z80Gen.lo_mk16, Ember.Proof.Z80Gen.mk16_hi_lo, hd, if_true]
+  · simp only [ldirF, ldirG, Cpu.wr, Cpu.rd, Cpu.setHL, Cpu.setDE, Cpu.setBC, Cpu.hl, Cpu.de, Cpu.bc, Cpu.tick,
+      Ember.Proof.Z80Gen.hi_mk16, Ember.Proof.Z80Gen.lo_mk16, Ember.Proof.Z80Gen.mk16_hi_lo, hd, if_false]
+
+/-- One round of `ldir` from the state before its opcode is fetched. -/
+def ldirS (s : Cpu) : Cpu := ldirG (op2 s)
+
+theorem ldir_mstep (D : Dev) {C : Code} {k : Nat} (hk : C.items[k]? = some (.ins ⟨.ldir, []⟩))
+    {s : Cpu} (L : Loaded C s) (hat : At C.addrs k s) (w : D.W) :
+    mstep D (s, w) = (ldirS s, w) ∧
+      (if (s.bc - 1 != 0) = true then At C.addrs k (ldirS s) else At C.addrs (k + 1) (ldirS s)) := by
+  obtain ⟨ad, had, hpc⟩ := hat
+  have hx : exec (C.a.env ad) ⟨.ldir, []⟩ s (D.bus w) = some (ldirS s) := by
+    show some ((op2 s).execBlock (D.bus w) 6 0) = _
+    rw [execBlock_ldir, ldirF_eq]; rfl
+  obtain ⟨hs1, _⟩ := step_of hk L had hpc w hx
+  obtain ⟨bs, hbs, hnext, hlt⟩ := C.placed.next L.1 hk had
+  have hlen : bs.length = 2 := by
+    have h' : encode ⟨.ldir, []⟩ (C.a.env ad) = .ok bs := hbs
+    have h'' := encode_run h'
+    have : (encode' ⟨.ldir, []⟩).run (C.a.env ad) = .ok [0xED, 0xB0] := rfl
+    rw [this] at h''; cases h''; rfl
+  have hlt' := hlt (by intro e; rw [e] at hlen; cases hlen)
+  have hbc : (op2 s).bc = s.bc := rfl
+  refine ⟨?_, ?_⟩
+  · show (s.step (D.bus w), D.dev w (s.step (D.bus w)).io) = _
+    rw [hs1]
+    have : (ldirS s).io = .none := by
+      simp only [ldirS, ldirG]; split <;> rfl
+    rw [this, D.quiet]
+  · simp only [ldirS, ldirG, hbc]
+    by_cases hb : (s.bc - 1 != 0) = true
+    · rw [if_pos hb, if_pos hb]
+      refine ⟨ad, had, ?_⟩
+      show (s.pc + 1 + 1 - 2).toNat = ad
+      rw [show s.pc + 1 + 1 - 2 = s.pc by
+        apply UInt16.toNat_inj.mp
+        simp only [UInt16.toNat_sub, UInt16.toNat_add, UInt16.toNat_one, show (2 : UInt16).toNat = 2 from rfl]
+        omega]
+      exact hpc
+    · rw [if_neg hb, if_neg hb]
+      refine ⟨ad + 2, by rw [hnext, hlen], ?_⟩
+      show (s.pc + 1 + 1).toNat = ad + 2
+      rw [UInt16.toNat_add, UInt16.toNat_add, hpc]; simp only [UInt16.toNat_one]; omega
 
 end Ember.Proof.PassSim
