@@ -320,7 +320,112 @@ theorem ord_eqv (lo hi : Nat) (hhi : hi ≤ 65536) (f : Form)
          Cpu.rot]
        (repeat' split) <;> exact ⟨rfl, hm, hsz⟩)
 
+/-- An ordinary instruction always does something; it leaves the start of RAM, the size of memory and,
+when what it writes is in RAM, the bytes below `ramStart` (the ROM) as they were; only `halt` halts. -/
+theorem ord_rom (f : Form) (n : UInt8) (nn : UInt16) (inp : UInt16 → UInt8) (s : Cpu)
+    (hhl : f.mem = true → s.ramStart.toNat ≤ s.hl.toNat) (hde : f.mem = true → s.ramStart.toNat ≤ s.de.toNat)
+    (hnn : f.mem = true → s.ramStart.toNat ≤ nn.toNat ∧ nn.toNat < 65535) :
+    ∃ s', execI f.instr n nn s inp = some s' ∧ s'.ramStart = s.ramStart ∧ s'.mem.size = s.mem.size ∧
+      (∀ x, x < s.ramStart.toNat → s'.mem.get! x = s.mem.get! x) ∧ (f ≠ .halt → s'.halted = s.halted) := by
+  cases s with
+  | mk a f0 b c0 d e h l a' f' b' c' d' e' h' l' ix iy sp pc i r0 iff1 iff2 im halted eiDelay cycles io ramStart mem =>
+  cases f
+  all_goals
+    simp +decide only [Form.instr, execI, exec1, exec2, ldI, aluI, incI, decI, rotI, simpleI, rr?, r8?,
+      Option.map_some, if_true, if_false]
+    refine ⟨_, rfl, ?_, ?_, ?_, ?_⟩
+  all_goals
+    try simp only [op1, op2, skip, Cpu.bumpR, Cpu.tick, Cpu.setReg, Cpu.reg, Cpu.setHL, Cpu.hl, Cpu.setRp,
+      Cpu.idxGet, Cpu.idxSet, Cpu.alu, Cpu.add16, Cpu.sbc16, Cpu.rd, Cpu.wr, Cpu.wr16, Cpu.rd16, Cpu.de, Cpu.flag,
+      Cpu.inc8, Cpu.dec8, Cpu.rot, Cpu.setBC, Cpu.setDE, Cpu.rp, Ember.Proof.IRSim.size_set]
+  all_goals
+    first
+    | trivial
+    | (intro _; trivial)
+    | (intro _ _; trivial)
+    | (intro _; rfl)
+    | (intro hne; exact absurd rfl hne)
+    | (((repeat' split) <;> simp only [Ember.Proof.IRSim.size_set]) <;> done)
+    | ((repeat' split) <;> first | (intro _; trivial) | (intro _; rfl))
+    | (have hhl := hhl rfl; have hde := hde rfl; have hnn := hnn rfl
+       simp only [Cpu.hl, Cpu.de] at hhl hde
+       intro x hx
+       (repeat' split) <;> simp only [Ember.Proof.IRSim.get_set] <;> (repeat' split) <;>
+         first | rfl | (simp only [UInt16.lt_iff_toNat_lt, UInt16.toNat_add] at *; omega))
+    | ((repeat' split) <;> intro x hx <;> rfl)
+
+theorem ord_falls (f : Form) : f.instr.falls = true := by
+  cases f <;> rfl
+
+/-- What a step leaves of the image: the same start of RAM and the same ROM. -/
+theorem Loaded.keep {C : Code} {s s' : Cpu} (L : Loaded C s) (hr : s'.ramStart = s.ramStart)
+    (hm : ∀ x, x < s.ramStart.toNat → s'.mem.get! x = s.mem.get! x) (hh : s'.halted = false) : Loaded C s' := by
+  refine ⟨⟨by rw [hr]; exact L.1.rom, fun x b hb => ?_⟩, hh⟩
+  have hlt : x < C.a.bytes.size := by
+    rcases Nat.lt_or_ge x C.a.bytes.data.size with h' | h'
+    · exact h'
+    · rw [Array.getElem?_eq_none h'] at hb; cases hb
+  have := L.1.rom
+  rw [hm _ (by omega)]
+  exact L.1.bytes x b hb
+
+/-- **An ordinary instruction, a step of each machine**: in `A` at item
+`kA` and in `B` at item `kB` the same instruction of a form of `Form`,
+with the same operand in both (`hop`: a number, or a symbol both images
+place alike); from CPUs that agree (`Eqv lo hi`, `lo` in RAM), running
+their images, the bytes the instruction reads or writes in `[lo, hi)`:
+one step of each machine, the devices in the same state, gives CPUs
+that agree, at the items after, running their images (not `halt`). -/
+theorem ord_mstep (D : Dev) {A B : Code} {kA kB : Nat} (f : Form) (hnh : f ≠ .halt) (lo hi : Nat)
+    (hhi : hi ≤ 65536) (hA : A.items[kA]? = some (.ins f.instr)) (hB : B.items[kB]? = some (.ins f.instr))
+    (hop : ∀ pa pb, f.instr.immB (A.a.env pa) = f.instr.immB (B.a.env pb) ∧
+      f.instr.immW (A.a.env pa) = f.instr.immW (B.a.env pb))
+    {s t : Cpu} (LA : Loaded A s) (LB : Loaded B t) (atA : At A.addrs kA s) (atB : At B.addrs kB t)
+    (E : Eqv lo hi s t) (hlo : s.ramStart.toNat ≤ lo)
+    (hhl : f.mem = true → lo ≤ s.hl.toNat ∧ s.hl.toNat < hi) (hde : f.mem = true → lo ≤ s.de.toNat ∧ s.de.toNat < hi)
+    (hnn : ∀ pa, f.mem = true → lo ≤ (f.instr.immW (A.a.env pa)).toNat ∧ (f.instr.immW (A.a.env pa)).toNat + 1 < hi)
+    (w : D.W) :
+    ∃ s' t' w', mstep D (s, w) = (s', w') ∧ mstep D (t, w) = (t', w') ∧ Eqv lo hi s' t' ∧
+      At A.addrs (kA + 1) s' ∧ At B.addrs (kB + 1) t' ∧ Loaded A s' ∧ Loaded B t' := by
+  obtain ⟨pa, hpa, hpcA⟩ := atA
+  obtain ⟨pb, hpb, hpcB⟩ := atB
+  have hrsT : t.ramStart = s.ramStart := (Regs.ramStart E.regs).symm
+  have hhlT : t.hl = s.hl := by
+    have := E.regs; obtain ⟨_, _, _, _, rfl⟩ := regs_ex this; rfl
+  have hdeT : t.de = s.de := by
+    have := E.regs; obtain ⟨_, _, _, _, rfl⟩ := regs_ex this; rfl
+  have hnA := hnn pa
+  obtain ⟨s', hs', hrs', _, hrom', hh'⟩ := ord_rom f (f.instr.immB (A.a.env pa)) (f.instr.immW (A.a.env pa))
+    (D.bus w) s (fun h => by have := hhl h; omega) (fun h => by have := hde h; omega)
+    (fun h => by have := hnA h; omega)
+  obtain ⟨t', ht', E'⟩ := ord_eqv lo hi hhi f _ _ (D.bus w) s t E hhl hde (hnn pa) s' hs'
+  obtain ⟨t'', ht'', hrsT', _, hromT', hhT'⟩ := ord_rom f (f.instr.immB (A.a.env pa)) (f.instr.immW (A.a.env pa))
+    (D.bus w) t (fun h => by have := hhl h; rw [hhlT, hrsT]; omega) (fun h => by have := hde h; rw [hdeT, hrsT]; omega)
+    (fun h => by have := hnA h; rw [hrsT]; omega)
+  rw [ht'] at ht''
+  cases ht''
+  have exA : exec (A.a.env pa) f.instr s (D.bus w) = some s' := hs'
+  have exB : exec (B.a.env pb) f.instr t (D.bus w) = some t' := by
+    show execI f.instr (f.instr.immB (B.a.env pb)) (f.instr.immW (B.a.env pb)) t (D.bus w) = some t'
+    rw [← (hop pa pb).1, ← (hop pa pb).2]; exact ht'
+  have stA := step_item A.placed LA.1 hA hpa hpcA LA.2 exA
+  have stB := step_item B.placed LB.1 hB hpb hpcB LB.2 exB
+  have hio : t'.io = s'.io := (Regs.io E'.regs).symm
+  refine ⟨s', t', D.dev w s'.io, ?_, ?_, E', stA.2 (ord_falls f), stB.2 (ord_falls f),
+    LA.keep hrs' hrom' (by rw [hh' hnh]; exact LA.2), LB.keep hrsT' hromT' (by rw [hhT' hnh]; exact LB.2)⟩
+  · show (s.step (D.bus w), D.dev w (s.step (D.bus w)).io) = _
+    rw [stA.1]
+  · show (t.step (D.bus w), D.dev w (t.step (D.bus w)).io) = _
+    rw [stB.1, hio]
+
 /-- info: 'Ember.Proof.PassSim.ord_eqv' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs in #print axioms ord_eqv
+
+
+/-- info: 'Ember.Proof.PassSim.ord_rom' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in #print axioms ord_rom
+
+/-- info: 'Ember.Proof.PassSim.ord_mstep' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in #print axioms ord_mstep
 
 end Ember.Proof.PassSim
