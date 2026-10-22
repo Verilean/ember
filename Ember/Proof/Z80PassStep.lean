@@ -7,7 +7,7 @@ import Ember.Proof.IRMem
 The two images (without the passes and with them) are run side by side;
 where they run the same instruction, from states that agree, they are
 to agree after it.  `Eqv lo hi`: two CPUs equal but for the program
-counter, `R`, the T-states and memory, and their memories equal on
+counter, `R`, the T-states, memory and the stack pointer, and their memories equal on
 `[lo, hi)` (the RAM below the stack: what the two keep the same; the
 ROM differs, so does the stack, which holds return addresses).
 
@@ -28,19 +28,42 @@ the same in both; nor is a jump's target.
 namespace Ember.Proof.PassSim
 open Ember.Z80 Ember.Z80.Asm Ember.Z80.Cpu Ember.Proof.Z80Enc
 
-/-- Two CPUs equal but for `pc`, `R`, the T-states and memory; memories equal on `[lo, hi)`, of one size. -/
+/-- Two CPUs equal but for `pc`, `R`, the T-states, memory and the stack pointer (where the stacks
+of the two machines are, and what is on them, is a relation of its own: a call the passes made a
+jump leaves one return address less on the stack of the image with the passes). -/
+def RegsS (s t : Cpu) : Prop :=
+  { s with pc := 0, r := 0, cycles := 0, mem := .empty, sp := 0 } =
+    { t with pc := 0, r := 0, cycles := 0, mem := .empty, sp := 0 }
+
+/-- Two CPUs equal but for `pc`, `R`, the T-states, memory and the stack pointer; memories equal on
+`[lo, hi)`, of one size. -/
 structure Eqv (lo hi : Nat) (s t : Cpu) : Prop where
-  regs : Regs s t
+  regs : RegsS s t
   mem : ∀ x, lo ≤ x → x < hi → s.mem.get! x = t.mem.get! x
   msz : s.mem.size = t.mem.size
 
-theorem regs_iff {s t : Cpu} : Regs s t ↔ t = { s with pc := t.pc, r := t.r, cycles := t.cycles, mem := t.mem } := by
+theorem regs_iff {s t : Cpu} :
+    RegsS s t ↔ t = { s with pc := t.pc, r := t.r, cycles := t.cycles, mem := t.mem, sp := t.sp } := by
   constructor
-  · intro h; cases s; cases t; simp only [Regs, Cpu.mk.injEq] at h ⊢; simp_all
+  · intro h; cases s; cases t; simp only [RegsS, Cpu.mk.injEq] at h ⊢; simp_all
   · intro h; rw [h]; rfl
 
-theorem regs_ex {s t : Cpu} (h : Regs s t) : ∃ p r c m, t = { s with pc := p, r := r, cycles := c, mem := m } :=
-  ⟨t.pc, t.r, t.cycles, t.mem, regs_iff.mp h⟩
+theorem regs_ex {s t : Cpu} (h : RegsS s t) :
+    ∃ p r c m q, t = { s with pc := p, r := r, cycles := c, mem := m, sp := q } :=
+  ⟨t.pc, t.r, t.cycles, t.mem, t.sp, regs_iff.mp h⟩
+
+theorem RegsS.ramStart {s t : Cpu} (h : RegsS s t) : s.ramStart = t.ramStart := by
+  obtain ⟨_, _, _, _, _, rfl⟩ := regs_ex h; rfl
+theorem RegsS.io {s t : Cpu} (h : RegsS s t) : s.io = t.io := by
+  obtain ⟨_, _, _, _, _, rfl⟩ := regs_ex h; rfl
+theorem RegsS.halted {s t : Cpu} (h : RegsS s t) : s.halted = t.halted := by
+  obtain ⟨_, _, _, _, _, rfl⟩ := regs_ex h; rfl
+theorem RegsS.hl {s t : Cpu} (h : RegsS s t) : s.hl = t.hl := by
+  obtain ⟨_, _, _, _, _, rfl⟩ := regs_ex h; rfl
+theorem RegsS.de {s t : Cpu} (h : RegsS s t) : s.de = t.de := by
+  obtain ⟨_, _, _, _, _, rfl⟩ := regs_ex h; rfl
+theorem RegsS.of_regs {s t : Cpu} (h : Regs s t) : RegsS s t := by
+  revert h; cases s; cases t; simp only [Regs, RegsS, Cpu.mk.injEq]; intro h; simp_all
 
 /-- The forms of the ordinary instructions of the stack's images (`v`: the operand, a number or a symbol). -/
 inductive Form where
@@ -285,7 +308,7 @@ theorem ord_eqv (lo hi : Nat) (hhi : hi ≤ 65536) (f : Form)
     (s' : Cpu) (hs : execI f.instr n nn s inp = some s') :
     ∃ t', execI f.instr n nn t inp = some t' ∧ Eqv lo hi s' t' := by
   obtain ⟨hr, hm, hsz⟩ := E
-  obtain ⟨p, r, c, m, rfl⟩ := regs_ex hr
+  obtain ⟨p, r, c, m, q, rfl⟩ := regs_ex hr
   cases s with
   | mk a f0 b c0 d e h l a' f' b' c' d' e' h' l' ix iy sp pc i r0 iff1 iff2 im halted eiDelay cycles io ramStart mem =>
   cases f
@@ -389,11 +412,9 @@ theorem ord_mstep (D : Dev) {A B : Code} {kA kB : Nat} (f : Form) (hnh : f ≠ .
       At A.addrs (kA + 1) s' ∧ At B.addrs (kB + 1) t' ∧ Loaded A s' ∧ Loaded B t' := by
   obtain ⟨pa, hpa, hpcA⟩ := atA
   obtain ⟨pb, hpb, hpcB⟩ := atB
-  have hrsT : t.ramStart = s.ramStart := (Regs.ramStart E.regs).symm
-  have hhlT : t.hl = s.hl := by
-    have := E.regs; obtain ⟨_, _, _, _, rfl⟩ := regs_ex this; rfl
-  have hdeT : t.de = s.de := by
-    have := E.regs; obtain ⟨_, _, _, _, rfl⟩ := regs_ex this; rfl
+  have hrsT : t.ramStart = s.ramStart := (RegsS.ramStart E.regs).symm
+  have hhlT : t.hl = s.hl := (RegsS.hl E.regs).symm
+  have hdeT : t.de = s.de := (RegsS.de E.regs).symm
   have hnA := hnn pa
   obtain ⟨s', hs', hrs', _, hrom', hh'⟩ := ord_rom f (f.instr.immB (A.a.env pa)) (f.instr.immW (A.a.env pa))
     (D.bus w) s (fun h => by have := hhl h; omega) (fun h => by have := hde h; omega)
@@ -410,7 +431,7 @@ theorem ord_mstep (D : Dev) {A B : Code} {kA kB : Nat} (f : Form) (hnh : f ≠ .
     rw [← (hop pa pb).1, ← (hop pa pb).2]; exact ht'
   have stA := step_item A.placed LA.1 hA hpa hpcA LA.2 exA
   have stB := step_item B.placed LB.1 hB hpb hpcB LB.2 exB
-  have hio : t'.io = s'.io := (Regs.io E'.regs).symm
+  have hio : t'.io = s'.io := (RegsS.io E'.regs).symm
   refine ⟨s', t', D.dev w s'.io, ?_, ?_, E', stA.2 (ord_falls f), stB.2 (ord_falls f),
     LA.keep hrs' hrom' (by rw [hh' hnh]; exact LA.2), LB.keep hrsT' hromT' (by rw [hhT' hnh]; exact LB.2)⟩
   · show (s.step (D.bus w), D.dev w (s.step (D.bus w)).io) = _
