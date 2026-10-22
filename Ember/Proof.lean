@@ -143,6 +143,7 @@ import Ember.Proof.Z80PassTaint
 import Ember.Proof.Z80PassRun
 import Ember.Proof.Z80PassSeg
 import Ember.Proof.Z80PassBlock
+import Ember.Proof.Z80PassBlockRom
 import Ember.Proof.Z80PassCheck
 import Ember.Proof.Z80StackDAsm
 import Ember.Proof.Z80World
@@ -344,6 +345,9 @@ The Z80 back end (M7, begun) — `Ember.Z80.IR.Sem` is the semantics of its IR:
   `blk_bytes` (`rt_add32`, `rt_sub32`, `rt_or32`: the loop over the bytes, `loop_eq_rounds`), `blk_cmp32`
   (`rt_cmp32`, its loop keeping `AF` on the stack, `loop_cmp_rounds`);
   `ldir_eq_rounds`: all the rounds of an `ldir` within that RAM;
+* `Z80PassBlockRom`: a routine of the runtime reading a literal of the ROM (`ld hl,lit` before the
+  call, each image's `HL` on its own literal, the same bytes: `H` and `L` free): `blkR_ld32`
+  (`rt_ld32`, nine steps of each), `ldir_rom_rounds` (an `ldir` from the ROM to the RAM in both machines);
 * `Z80PassRun`: two machines side by side to the end (`sim_halts`: a relation kept by segments of
   the two runs, the first machine taking at least one step, under which the first halted means the
   second halted with the same devices — then when the first halts so does the second);
