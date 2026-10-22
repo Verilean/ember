@@ -146,6 +146,7 @@ import Ember.Proof.Z80PassBlock
 import Ember.Proof.Z80PassBlockRom
 import Ember.Proof.Z80PassCert
 import Ember.Proof.Z80PassRet
+import Ember.Proof.Z80PassTail
 import Ember.Proof.Z80PassCheck
 import Ember.Proof.Z80StackDAsm
 import Ember.Proof.Z80World
@@ -363,6 +364,8 @@ The Z80 back end (M7, begun) — `Ember.Z80.IR.Sem` is the semantics of its IR:
   (`seg_retcc_tails`); `jp cc,l` to a `ret` against `ret cc` (`seg_retThrCC`);
   `jp cc,l` over a return against `ret` on the other condition (`seg_condRet`); a call against a jump,
   a frame on `A`'s stack only (`seg_tail`);
+* `Z80PassTail`: a routine of the runtime called in `A` before a return, jumped to in `B`: its body
+  with any frames (`body_st32`, `body_bytes`), the segments (`blkT_st32`, `blkT_bytes`);
 * `Z80PassRun`: two machines side by side to the end (`sim_halts`: a relation kept by segments of
   the two runs, the first machine taking at least one step, under which the first halted means the
   second halted with the same devices — then when the first halts so does the second);
