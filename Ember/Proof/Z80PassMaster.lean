@@ -1197,4 +1197,202 @@ theorem step_blkR {D : Dev} {A B : Code} {lo hi : Nat} {cert : List Row} {tr : L
 /-- info: 'Ember.Proof.PassSim.step_blkR' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in #print axioms step_blkR
 
+theorem drop_idx {xs l : List Item} {k : Nat} (h : xs.drop k = l) (i : Nat) : xs[k + i]? = l[i]? := by
+  rw [← h, List.getElem?_drop]
+
+theorem copyROK_spec {c : Ctx} {as bs : List Item} {r : Row} {rs : List Row} (h : copyROK c as bs r rs = true) :
+    ∃ (l g : String) (n d : Int) (a' : List Item),
+      as = .ins ⟨.ld, [.hl, .imm (.sym l 0)]⟩ :: .ins ⟨.ld, [.de, .imm (.sym g 0)]⟩ ::
+        .ins ⟨.ld, [.bc, .imm (.num n)]⟩ :: .ins ⟨.ldir, []⟩ :: a' ∧
+      as.take 4 = bs.take 4 ∧ 1 ≤ n ∧ n < 65536 ∧ litOK c.tA c.tB l n.toNat = true ∧
+      valSameL c.la c.lb (.sym g 0) = true ∧ valOf c.la (.sym g 0) = some d ∧ 0 ≤ d ∧ c.lo ≤ d.toNat ∧
+      d.toNat + n.toNat ≤ c.hi ∧ succOK (rowN rs 4) (r.kb + 4) true true r.act = true := by
+  unfold copyROK at h
+  split at h
+  · rename_i l g n a'
+    simp only [Bool.and_eq_true, decide_eq_true_eq] at h
+    obtain ⟨⟨⟨⟨⟨htk, hn⟩, hl⟩, hv⟩, hd⟩, hs⟩ := h
+    split at hd
+    · rename_i d hdv
+      simp only [decide_eq_true_eq] at hd
+      exact ⟨l, g, n, d, a', rfl, htk, hn.1, hn.2, hl, hv, hdv, hd.1, hd.2.1, hd.2.2, hs⟩
+    · cases hd
+  · cases h
+
+theorem step_copyR {D : Dev} {A B : Code} {lo hi : Nat} {cert : List Row} {tr : List (Nat × Bool × Bool)}
+    {x0 : Cpu × D.W} (Gl : Glob D A B lo hi cert tr x0) {G : List Frame} {k : Nat} {x y : Cpu × D.W}
+    (htag : (rowAt cert k).tag = .copyR)
+    (S : Sync D A B lo hi G k (rowAt cert k).kb (rowAt cert k).th (rowAt cert k).tl x y)
+    (hcur : cur G ∈ (rowAt cert k).act) (hF : FOK A cert tr G) (hx : ∃ n, x = mrun D n x0) :
+    ∃ a b, 0 < a ∧ Inv D A B lo hi cert tr x0 (mrun D a x) (mrun D b y) := by
+  have hrow := Gl.row (k := k) (by rw [htag]; intro h; cases h)
+  simp only [rowOK, htag] at hrow
+  obtain ⟨l, g, n, d, a', hA, htk, hn1, hn2, hl, hv, hd, hd0, hdlo, hdhi, hs⟩ := copyROK_spec hrow
+  obtain ⟨m, hm⟩ : ∃ m : Nat, n = ((m + 1 : Nat) : Int) := ⟨n.toNat - 1, by omega⟩
+  subst hm
+  have hmn : (((m + 1 : Nat) : Int)).toNat = m + 1 := by omega
+  rw [hmn] at hl hdhi
+  -- the items of both images
+  have iA := drop_idx hA
+  have iB : ∀ i, i < 4 → B.items[(rowAt cert k).kb + i]? = A.items[k + i]? := by
+    intro i hi'
+    rw [List.getElem?_drop.symm, List.getElem?_drop.symm]
+    rw [← List.getElem?_take_of_lt hi', ← htk, List.getElem?_take_of_lt hi']
+  have hA0 : A.items[k]? = some (.ins ⟨.ld, [.hl, .imm (.sym l 0)]⟩) := by simpa using iA 0
+  have hA1 : A.items[k + 1]? = some (.ins (Form.ldDEI (.sym g 0)).instr) := iA 1
+  have hA2 : A.items[k + 2]? = some (.ins (Form.ldBCI (.num (m + 1 : Nat))).instr) := iA 2
+  have hA3 : A.items[k + 3]? = some (.ins ⟨.ldir, []⟩) := iA 3
+  have hB0 : B.items[(rowAt cert k).kb]? = some (.ins ⟨.ld, [.hl, .imm (.sym l 0)]⟩) := by
+    have := iB 0 (by decide); simp only [Nat.add_zero] at this; rw [this]; exact hA0
+  have hB1 : B.items[(rowAt cert k).kb + 1]? = some (.ins (Form.ldDEI (.sym g 0)).instr) := by
+    rw [iB 1 (by decide)]; exact hA1
+  have hB2 : B.items[(rowAt cert k).kb + 2]? = some (.ins (Form.ldBCI (.num (m + 1 : Nat))).instr) := by
+    rw [iB 2 (by decide)]; exact hA2
+  have hB3 : B.items[(rowAt cert k).kb + 3]? = some (.ins ⟨.ldir, []⟩) := by
+    rw [iB 3 (by decide)]; exact hA3
+  -- the destination
+  have hvB := valSameL_B (A := A) (B := B) hv
+  simp only [valOf, symValL, Option.map_map, Option.map_eq_some_iff] at hd
+  obtain ⟨a, ha, hda⟩ := hd
+  simp only [Function.comp_apply, Int.add_zero] at hda
+  subst hda
+  have ha' : A.a.labels.reverse.lookup g = some a := ha
+  have hlo0 : lo ≤ (Int.ofNat a).toNat := hdlo
+  have hhi0 : (Int.ofNat a).toNat + (m + 1) ≤ hi := hdhi
+  have hta : (Int.ofNat a).toNat = a := rfl
+  have hlo' : lo ≤ a := by rw [← hta]; exact hlo0
+  have hhi' : a + (m + 1) ≤ hi := by rw [← hta]; exact hhi0
+  have hgA : ∀ pa, (A.a.env pa).val (.sym g 0) = Int.ofNat a := fun pa => by
+    rw [val_sym _ g 0 (Int.ofNat a) (by simp [env_resolve, symVal, ha'])]; simp
+  have hgB : ∀ pb, (B.a.env pb).val (.sym g 0) = Int.ofNat a := fun pb => by
+    rw [← valSame_of hvB 0 pb]; exact hgA 0
+  -- the literal
+  obtain ⟨dA, dB, vs, hlA, hdA, hlB, hdB, hnums, hlen⟩ := litOK_spec hl
+  have hencA : ∀ ad, Item.encode (.db vs) (A.a.env ad) = .ok (vs.map dbByte) := fun ad => db_encode vs hnums _
+  have hencB : ∀ ad, Item.encode (.db vs) (B.a.env ad) = .ok (vs.map dbByte) := fun ad => db_encode vs hnums _
+  have hbs : (vs.map dbByte).length = m + 1 := by rw [List.length_map, hlen]
+  have S' := blkR_copy D Gl.hhi hA0 hB0 hA1 hB1 hA2 hB2 hA3 hB3 hgA hgB
+    ⟨hlo', by omega⟩ (by omega) hlA hdA hlB hdB hencA hencB hbs S
+  rw [rowN_drop _ _ _ (by decide)] at hs
+  obtain ⟨s1, s2, s3, s4, s5⟩ := succOK_spec hs
+  refine ⟨m + 4, m + 4, by omega, Or.inr ⟨G, k + 4, s1, ?_, s5 _ hcur, hF, reach_step hx _⟩⟩
+  rw [s2]; exact S'.mono s3 s4
+
+/-- info: 'Ember.Proof.PassSim.step_copyR' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in #print axioms step_copyR
+
+/-! ## Past labels -/
+
+theorem isZero_encode {it : Item} (h : isZero it = true) : ∀ env, it.encode env = .ok [] := by
+  cases it <;> simp_all [isZero, Item.encode]
+
+/-- **Rows of items of no bytes**: past them, no step, to a row of another kind. -/
+theorem past_zero {D : Dev} {A B : Code} {lo hi : Nat} {cert : List Row} {tr : List (Nat × Bool × Bool)}
+    {x0 : Cpu × D.W} (Gl : Glob D A B lo hi cert tr x0) {x y : Cpu × D.W} {G : List Frame} :
+    ∀ (d k : Nat), A.items.length - k = d → (rowAt cert k).tag ≠ .none →
+      Sync D A B lo hi G k (rowAt cert k).kb (rowAt cert k).th (rowAt cert k).tl x y →
+      cur G ∈ (rowAt cert k).act →
+      ∃ k', (rowAt cert k').tag ≠ .none ∧ (rowAt cert k').tag ≠ .skipBoth ∧ (rowAt cert k').tag ≠ .skipA ∧
+        Sync D A B lo hi G k' (rowAt cert k').kb (rowAt cert k').th (rowAt cert k').tl x y ∧
+        cur G ∈ (rowAt cert k').act
+  | d, k, hd, ht, S, hcur => by
+    by_cases hb : (rowAt cert k).tag = .skipBoth
+    · have hrow := Gl.row (k := k) ht
+      simp only [rowOK, hb] at hrow
+      unfold skipBothOK at hrow
+      split at hrow
+      · rename_i a as b bs hA hB
+        simp only [Bool.and_eq_true, decide_eq_true_eq] at hrow
+        obtain ⟨⟨hz, e⟩, hs⟩ := hrow
+        subst e
+        rw [nextRow_drop] at hs
+        obtain ⟨s1, s2, s3, s4, s5⟩ := succOK_spec hs
+        have S1 : Sync D A B lo hi G (k + 1) ((rowAt cert k).kb + 1) (rowAt cert k).th (rowAt cert k).tl x y :=
+          { S with
+            atA := at_skip A.placed (drop_cons hA) (isZero_encode hz) S.atA
+            atB := at_skip B.placed (drop_cons hB) (isZero_encode hz) S.atB }
+        have hk : k < A.items.length := by
+          have := drop_cons hA; exact (List.getElem?_eq_some_iff.mp this).1
+        cases d with
+        | zero => omega
+        | succ d =>
+          exact past_zero Gl d (k + 1) (by omega) s1 (by rw [s2]; exact S1.mono s3 s4) (s5 _ hcur)
+      · cases hrow
+    by_cases ha : (rowAt cert k).tag = .skipA
+    · have hrow := Gl.row (k := k) ht
+      simp only [rowOK, ha] at hrow
+      unfold skipAOK at hrow
+      split at hrow
+      · rename_i a as hA
+        simp only [Bool.and_eq_true] at hrow
+        obtain ⟨hz, hs⟩ := hrow
+        rw [nextRow_drop] at hs
+        obtain ⟨s1, s2, s3, s4, s5⟩ := succOK_spec hs
+        have S1 : Sync D A B lo hi G (k + 1) (rowAt cert k).kb (rowAt cert k).th (rowAt cert k).tl x y :=
+          { S with atA := at_skip A.placed (drop_cons hA) (isZero_encode hz) S.atA }
+        have hk : k < A.items.length := by
+          have := drop_cons hA; exact (List.getElem?_eq_some_iff.mp this).1
+        cases d with
+        | zero => omega
+        | succ d =>
+          exact past_zero Gl d (k + 1) (by omega) s1 (by rw [s2]; exact S1.mono s3 s4) (s5 _ hcur)
+      · cases hrow
+    exact ⟨k, ht, hb, ha, S, hcur⟩
+
+/-! ## The two runs to the end -/
+
+/-- **A segment from any meeting point**: some steps of `A` (at least one), some of `B`, to the relation
+again. -/
+theorem step_inv {D : Dev} {A B : Code} {lo hi : Nat} {cert : List Row} {tr : List (Nat × Bool × Bool)}
+    {x0 : Cpu × D.W} (Gl : Glob D A B lo hi cert tr x0) (x y : Cpu × D.W)
+    (hI : Inv D A B lo hi cert tr x0 x y) (hx : x.1.halted = false) :
+    ∃ a b, 0 < a ∧ Inv D A B lo hi cert tr x0 (mrun D a x) (mrun D b y) := by
+  rcases hI with hd | ⟨G, k, ht, S, hcur, hF, hr⟩
+  · rw [hd.1] at hx; cases hx
+  obtain ⟨k', ht', hb, ha, S', hcur'⟩ := past_zero Gl _ k rfl ht S hcur
+  cases htag : (rowAt cert k').tag with
+  | none => exact absurd htag ht'
+  | skipBoth => exact absurd htag hb
+  | skipA => exact absurd htag ha
+  | ord => exact step_ord Gl htag S' hcur' hF hr
+  | jump => exact step_jump Gl htag S' hcur' hF hr
+  | djnz => exact step_djnz Gl htag S' hcur' hF hr
+  | call => exact step_call Gl htag S' hcur' hF hr
+  | ret => exact step_ret Gl htag S' hcur' hF hr
+  | halt => exact step_halt Gl htag S'
+  | ldsp => exact step_ldsp Gl htag S' hr
+  | ldir => exact step_ldir Gl htag S' hcur' hF hr
+  | pack => exact step_pack Gl htag S' hcur' hF hr
+  | blk => exact step_blk Gl htag S' hcur' hF hr
+  | blkR => exact step_blkR Gl htag S' hcur' hF hr
+  | copyR => exact step_copyR Gl htag S' hcur' hF hr
+  | retThr => exact step_retThr Gl htag S' hcur' hF hr
+  | condRet => exact step_condRet Gl htag S' hcur' hF hr
+  | tail => exact step_tail Gl htag S' hcur' hF hr
+  | tailBlk => exact step_tailBlk Gl htag S' hcur' hF hr
+
+/-- **The image with the passes halts when the one without does, with the same devices.**  From a
+certificate the checker accepts for the two images (`Glob.chk`), what `A`'s run is taken to do
+(`Glob.safe`, a hypothesis), the RAM kept equal and the accumulator in it, and the two machines
+related at their first items with empty stacks (`Sync` at `0`, `0`; `H`, `L` the same): if `A`'s run
+halts after `N` steps, `B`'s halts after some `M`, the devices as `A`'s left them. -/
+theorem passes_halt {D : Dev} {A B : Code} {lo hi : Nat} {cert : List Row} {tr : List (Nat × Bool × Bool)}
+    {x0 y0 : Cpu × D.W} (Gl : Glob D A B lo hi cert tr x0) (S0 : Sync D A B lo hi [] 0 0 false false x0 y0) :
+    ∀ N, (mrun D N x0).1.halted = true →
+      ∃ M, (mrun D M y0).1.halted = true ∧ (mrun D M y0).2 = (mrun D N x0).2 := by
+  intro N hN
+  obtain ⟨_, ⟨r, rs, hc, ht, hkb, hth, htl, htop⟩, _⟩ := check_rows Gl.chk
+  have hr0 : rowAt cert 0 = r := by simp [rowAt, hc]
+  have hI : Inv D A B lo hi cert tr x0 x0 y0 := by
+    refine Or.inr ⟨[], 0, by rw [hr0]; exact ht, ?_, by rw [hr0]; exact htop, trivial, ⟨0, rfl⟩⟩
+    rw [hr0, hkb, hth, htl]; exact S0
+  refine sim_halts D (Inv D A B lo hi cert tr x0) (step_inv Gl) ?_ N x0 y0 hI hN
+  intro x y hI hx
+  rcases hI with hd | ⟨_, _, _, S, _⟩
+  · exact ⟨hd.2.1, hd.2.2⟩
+  · rw [S.LA.2] at hx; cases hx
+
+/-- info: 'Ember.Proof.PassSim.passes_halt' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in #print axioms passes_halt
+
 end Ember.Proof.PassSim

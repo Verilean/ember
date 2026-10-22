@@ -375,8 +375,12 @@ The Z80 back end (M7, begun) — `Ember.Z80.IR.Sem` is the semantics of its IR:
 * `Z80PassChkOK`: what the walk and the tables say (`check_rows`, `mkTbl_lookup`, `labTbl_lookup`);
 * `Z80PassMaster`: the relation the two runs keep (`Inv`: both halted, or at a row of the certificate
   with the frames as it says, `FOK`), what `A`'s run is taken to do (`SafeA`, `Need`: a hypothesis
-  about the image without the passes), and the segments from each kind of row (in progress:
-  `step_ord`, `step_jump`);
+  about the image without the passes), the segments from each kind of row (`step_ord`, `step_jump`,
+  `step_djnz`, `step_call`, `step_ret`, `step_halt`, `step_ldsp`, `step_ldir`, `step_pack`, `step_blk`,
+  `step_blkR`, `step_copyR`, `step_retThr`, `step_condRet`, `step_tail`, `step_tailBlk`; past labels,
+  `past_zero`), and **`passes_halt`**: from a certificate the checker accepts, `SafeA`, and the two
+  machines related at their first items, when `A`'s run halts so does `B`'s, with the same devices
+  (for any two images: the stack's images and the certificate are not plugged in here);
 * `Z80PassRun`: two machines side by side to the end (`sim_halts`: a relation kept by segments of
   the two runs, the first machine taking at least one step, under which the first halted means the
   second halted with the same devices — then when the first halts so does the second);
