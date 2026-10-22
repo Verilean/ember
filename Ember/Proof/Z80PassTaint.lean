@@ -96,8 +96,8 @@ that are free, from CPUs related so it gives CPUs related so, free what it did n
 theorem ord_eqvT (lo hi : Nat) (hhi : hi ≤ 65536) (f : Form) (th tl : Bool)
     (hrh : th = true → f.readsH = false) (hrl : tl = true → f.readsL = false)
     (n : UInt8) (nn : UInt16) (inp : UInt16 → UInt8) (s t : Cpu) (E : EqvT lo hi th tl s t)
-    (hhl : f.mem = true → lo ≤ s.hl.toNat ∧ s.hl.toNat < hi) (hde : f.mem = true → lo ≤ s.de.toNat ∧ s.de.toNat < hi)
-    (hnn : f.mem = true → lo ≤ nn.toNat ∧ nn.toNat + 1 < hi)
+    (hhl : f.viaHL = true → lo ≤ s.hl.toNat ∧ s.hl.toNat < hi) (hde : f.viaDE = true → lo ≤ s.de.toNat ∧ s.de.toNat < hi)
+    (hnn : f.viaNN = true → lo ≤ nn.toNat ∧ nn.toNat + 1 < hi)
     (s' : Cpu) (hs : execI f.instr n nn s inp = some s') :
     ∃ t', execI f.instr n nn t inp = some t' ∧
       EqvT lo hi (th && !f.writesH) (tl && !f.writesL) s' t' := by
@@ -152,5 +152,11 @@ theorem ord_eqvT (lo hi : Nat) (hhi : hi ≤ 65536) (f : Form) (th tl : Bool)
 
 /-- info: 'Ember.Proof.PassSim.ord_eqvT' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs in #print axioms ord_eqvT
+
+theorem Form.viaHL_readsH (f : Form) (h : f.viaHL = true) : f.readsH = true := by
+  cases f <;> simp_all [Form.viaHL, Form.readsH]
+
+theorem Form.viaHL_readsL (f : Form) (h : f.viaHL = true) : f.readsL = true := by
+  cases f <;> simp_all [Form.viaHL, Form.readsL]
 
 end Ember.Proof.PassSim

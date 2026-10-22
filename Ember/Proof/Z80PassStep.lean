@@ -220,82 +220,20 @@ def Form.instr : Form → Instr
   | .xorA => ⟨.xor, [.a]⟩
   | .xorN v => ⟨.xor, [.imm v]⟩
 
-/-- Does the form read or write memory through `HL`, `DE` or its operand address? -/
-def Form.mem : Form → Bool
-  | .adcAM => true
-  | .sbcAM => true
-  | .andM => true
-  | .cpM => true
-  | .orM => true
-  | .incM => true
-  | .stA _ => true
-  | .stHL _ => true
-  | .stDEA => true
-  | .stHLA => true
-  | .stHLN _ => true
-  | .ldAN _ => true
-  | .ldADE => true
-  | .ldAHL => true
-  | .ldDENN _ => true
-  | .ldHLNN _ => true
-  | .addAC => false
-  | .addHLBC => false
-  | .addHLDE => false
-  | .addHLHL => false
-  | .andC => false
-  | .andL => false
-  | .andN _ => false
-  | .cpC => false
-  | .cpN _ => false
-  | .cpl => false
-  | .decA => false
-  | .decB => false
-  | .decBC => false
-  | .decC => false
-  | .decHL => false
-  | .di => false
-  | .exDEHL => false
-  | .halt => false
-  | .inA _ => false
-  | .incA => false
-  | .incB => false
-  | .incC => false
-  | .incDE => false
-  | .incHL => false
-  | .ldAB => false
-  | .ldAC => false
-  | .ldAH => false
-  | .ldAL => false
-  | .ldAI _ => false
-  | .ldBI _ => false
-  | .ldBCI _ => false
-  | .ldCA => false
-  | .ldCI _ => false
-  | .ldDH => false
-  | .ldDEI _ => false
-  | .ldEL => false
-  | .ldHA => false
-  | .ldHL2 => false
-  | .ldHI _ => false
-  | .ldHLI _ => false
-  | .ldLA => false
-  | .ldLI _ => false
-  | .orA => false
-  | .orC => false
-  | .orD => false
-  | .orE => false
-  | .orH => false
-  | .orL => false
-  | .orN _ => false
-  | .outA _ => false
-  | .rla => false
-  | .rrL => false
-  | .sbcHLDE => false
-  | .srlA => false
-  | .srlH => false
-  | .subC => false
-  | .xorA => false
-  | .xorN _ => false
+/-- Does the form read or write memory at `HL`? -/
+def Form.viaHL : Form → Bool
+  | .adcAM | .sbcAM | .andM | .cpM | .orM | .incM | .stHLA | .stHLN _ | .ldAHL => true
+  | _ => false
+
+/-- Does the form read or write memory at `DE`? -/
+def Form.viaDE : Form → Bool
+  | .stDEA | .ldADE => true
+  | _ => false
+
+/-- Does the form read or write the two bytes at its operand address? -/
+def Form.viaNN : Form → Bool
+  | .stA _ | .stHL _ | .ldAN _ | .ldDENN _ | .ldHLNN _ => true
+  | _ => false
 
 /-- **An ordinary instruction in two machines**: from CPUs that agree
 (`Eqv lo hi`), with the same operands and the same answers of the bus,
@@ -303,8 +241,8 @@ the bytes it may read or write at `HL`, `DE` and its operand address in
 `[lo, hi)` (in RAM), the instruction gives CPUs that agree. -/
 theorem ord_eqv (lo hi : Nat) (hhi : hi ≤ 65536) (f : Form)
     (n : UInt8) (nn : UInt16) (inp : UInt16 → UInt8) (s t : Cpu) (E : Eqv lo hi s t)
-    (hhl : f.mem = true → lo ≤ s.hl.toNat ∧ s.hl.toNat < hi) (hde : f.mem = true → lo ≤ s.de.toNat ∧ s.de.toNat < hi)
-    (hnn : f.mem = true → lo ≤ nn.toNat ∧ nn.toNat + 1 < hi)
+    (hhl : f.viaHL = true → lo ≤ s.hl.toNat ∧ s.hl.toNat < hi) (hde : f.viaDE = true → lo ≤ s.de.toNat ∧ s.de.toNat < hi)
+    (hnn : f.viaNN = true → lo ≤ nn.toNat ∧ nn.toNat + 1 < hi)
     (s' : Cpu) (hs : execI f.instr n nn s inp = some s') :
     ∃ t', execI f.instr n nn t inp = some t' ∧ Eqv lo hi s' t' := by
   obtain ⟨hr, hm, hsz⟩ := E
@@ -319,17 +257,39 @@ theorem ord_eqv (lo hi : Nat) (hhi : hi ≤ 65536) (f : Form)
     refine ⟨_, rfl, ?_⟩
   all_goals
     first
-    | (have hhl := hhl rfl; have hde := hde rfl; have hnn := hnn rfl
-       simp only [Cpu.hl, Cpu.de] at hhl hde
+    | (have hhl := hhl rfl
+       simp only [Cpu.hl] at hhl
        have e1 : m.get! (mk16 h l).toNat = mem.get! (mk16 h l).toNat := (hm _ hhl.1 hhl.2).symm
+       simp only [op1, op2, skip, Cpu.bumpR, Cpu.tick, Cpu.setReg, Cpu.reg, Cpu.setHL, Cpu.hl, Cpu.setRp,
+         Cpu.idxGet, Cpu.idxSet, Cpu.alu, Cpu.rd, Cpu.wr, Cpu.wr16, Cpu.rd16, Cpu.de, Cpu.flag, Cpu.inc8, e1]
+       (repeat' split) <;> refine ⟨?_, ?_, ?_⟩ <;>
+         first
+         | exact rfl
+         | exact hm
+         | exact hsz
+         | (intro x h1 h2; simp only [Ember.Proof.IRSim.get_set, Ember.Proof.IRSim.size_set, hsz]
+            (repeat' split) <;> first | rfl | exact hm x h1 h2 | omega)
+         | simp only [Ember.Proof.IRSim.size_set, hsz])
+    | (have hde := hde rfl
+       simp only [Cpu.de] at hde
        have e4 : m.get! (mk16 d e).toNat = mem.get! (mk16 d e).toNat := (hm _ hde.1 hde.2).symm
+       simp only [op1, op2, skip, Cpu.bumpR, Cpu.tick, Cpu.setReg, Cpu.reg, Cpu.setHL, Cpu.hl, Cpu.setRp,
+         Cpu.idxGet, Cpu.idxSet, Cpu.alu, Cpu.rd, Cpu.wr, Cpu.wr16, Cpu.rd16, Cpu.de, Cpu.flag, Cpu.inc8, e4]
+       (repeat' split) <;> refine ⟨?_, ?_, ?_⟩ <;>
+         first
+         | exact rfl
+         | exact hm
+         | exact hsz
+         | (intro x h1 h2; simp only [Ember.Proof.IRSim.get_set, Ember.Proof.IRSim.size_set, hsz]
+            (repeat' split) <;> first | rfl | exact hm x h1 h2 | omega)
+         | simp only [Ember.Proof.IRSim.size_set, hsz])
+    | (have hnn := hnn rfl
        have e2 : m.get! nn.toNat = mem.get! nn.toNat := (hm _ hnn.1 (by omega)).symm
        have e3 : m.get! (nn + 1).toNat = mem.get! (nn + 1).toNat := by
          have : (nn + 1).toNat = nn.toNat + 1 := by rw [UInt16.toNat_add]; simp; omega
          rw [this]; exact (hm _ (by omega) hnn.2).symm
        simp only [op1, op2, skip, Cpu.bumpR, Cpu.tick, Cpu.setReg, Cpu.reg, Cpu.setHL, Cpu.hl, Cpu.setRp,
-         Cpu.idxGet, Cpu.idxSet, Cpu.alu, Cpu.rd, Cpu.wr, Cpu.wr16, Cpu.rd16, Cpu.de, Cpu.flag, Cpu.inc8,
-         e1, e2, e3, e4]
+         Cpu.idxGet, Cpu.idxSet, Cpu.alu, Cpu.rd, Cpu.wr, Cpu.wr16, Cpu.rd16, Cpu.de, Cpu.flag, Cpu.inc8, e2, e3]
        (repeat' split) <;> refine ⟨?_, ?_, ?_⟩ <;>
          first
          | exact rfl
@@ -346,9 +306,9 @@ theorem ord_eqv (lo hi : Nat) (hhi : hi ≤ 65536) (f : Form)
 /-- An ordinary instruction always does something; it leaves the start of RAM, the size of memory and,
 when what it writes is in RAM, the bytes below `ramStart` (the ROM) as they were; only `halt` halts. -/
 theorem ord_rom (f : Form) (lo hi : Nat) (hhi : hi ≤ 65536) (n : UInt8) (nn : UInt16) (inp : UInt16 → UInt8)
-    (s : Cpu) (hhl : f.mem = true → lo ≤ s.hl.toNat ∧ s.hl.toNat < hi)
-    (hde : f.mem = true → lo ≤ s.de.toNat ∧ s.de.toNat < hi)
-    (hnn : f.mem = true → lo ≤ nn.toNat ∧ nn.toNat + 1 < hi) :
+    (s : Cpu) (hhl : f.viaHL = true → lo ≤ s.hl.toNat ∧ s.hl.toNat < hi)
+    (hde : f.viaDE = true → lo ≤ s.de.toNat ∧ s.de.toNat < hi)
+    (hnn : f.viaNN = true → lo ≤ nn.toNat ∧ nn.toNat + 1 < hi) :
     ∃ s', execI f.instr n nn s inp = some s' ∧ s'.ramStart = s.ramStart ∧ s'.mem.size = s.mem.size ∧
       (∀ x, x < lo ∨ hi ≤ x → s'.mem.get! x = s.mem.get! x) ∧ (f ≠ .halt → s'.halted = s.halted) ∧
       s'.sp = s.sp := by
@@ -372,8 +332,21 @@ theorem ord_rom (f : Form) (lo hi : Nat) (hhi : hi ≤ 65536) (n : UInt8) (nn : 
     | (intro hne; exact absurd rfl hne)
     | (((repeat' split) <;> simp only [Ember.Proof.IRSim.size_set]) <;> done)
     | ((repeat' split) <;> first | (intro _; trivial) | (intro _; rfl))
-    | (have hhl := hhl rfl; have hde := hde rfl; have hnn := hnn rfl
-       simp only [Cpu.hl, Cpu.de] at hhl hde
+    | (have hhl := hhl rfl
+       simp only [Cpu.hl] at hhl
+       intro x hx
+       (repeat' split) <;> simp only [Ember.Proof.IRSim.get_set] <;> (repeat' split) <;>
+         first
+         | rfl
+         | (simp only [UInt16.lt_iff_toNat_lt] at *; omega))
+    | (have hde := hde rfl
+       simp only [Cpu.de] at hde
+       intro x hx
+       (repeat' split) <;> simp only [Ember.Proof.IRSim.get_set] <;> (repeat' split) <;>
+         first
+         | rfl
+         | (simp only [UInt16.lt_iff_toNat_lt] at *; omega))
+    | (have hnn := hnn rfl
        have e3 : (nn + 1).toNat = nn.toNat + 1 := by rw [UInt16.toNat_add]; simp; omega
        intro x hx
        (repeat' split) <;> simp only [Ember.Proof.IRSim.get_set] <;> (repeat' split) <;>
@@ -410,8 +383,8 @@ theorem ord_mstep (D : Dev) {A B : Code} {kA kB : Nat} (f : Form) (hnh : f ≠ .
       f.instr.immW (A.a.env pa) = f.instr.immW (B.a.env pb))
     {s t : Cpu} (LA : Loaded A s) (LB : Loaded B t) (atA : At A.addrs kA s) (atB : At B.addrs kB t)
     (E : Eqv lo hi s t) (hlo : s.ramStart.toNat ≤ lo)
-    (hhl : f.mem = true → lo ≤ s.hl.toNat ∧ s.hl.toNat < hi) (hde : f.mem = true → lo ≤ s.de.toNat ∧ s.de.toNat < hi)
-    (hnn : ∀ pa, f.mem = true → lo ≤ (f.instr.immW (A.a.env pa)).toNat ∧ (f.instr.immW (A.a.env pa)).toNat + 1 < hi)
+    (hhl : f.viaHL = true → lo ≤ s.hl.toNat ∧ s.hl.toNat < hi) (hde : f.viaDE = true → lo ≤ s.de.toNat ∧ s.de.toNat < hi)
+    (hnn : ∀ pa, f.viaNN = true → lo ≤ (f.instr.immW (A.a.env pa)).toNat ∧ (f.instr.immW (A.a.env pa)).toNat + 1 < hi)
     (w : D.W) :
     ∃ s' t' w', mstep D (s, w) = (s', w') ∧ mstep D (t, w) = (t', w') ∧ Eqv lo hi s' t' ∧
       At A.addrs (kA + 1) s' ∧ At B.addrs (kB + 1) t' ∧ Loaded A s' ∧ Loaded B t' ∧
