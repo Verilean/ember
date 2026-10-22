@@ -230,4 +230,113 @@ theorem blk_ld32 (D : Dev) {A B : Code} {lo hi : Nat} (hhi : hi ≤ 65536) (hlo 
 /-- info: 'Ember.Proof.PassSim.blk_ld32' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in #print axioms blk_ld32
 
+/-! ## `rt_st32` -/
+
+theorem mrun_9 (D : Dev) (x : Cpu × D.W) :
+    mrun D 9 x = mstep D (mrun D 4 (mstep D (mstep D (mstep D (mstep D x))))) := by
+  show mrun D (4 + (4 + 1)) x = _
+  rw [mrun_add, mrun_add]; rfl
+
+/-- The state after `ex de,hl`. -/
+def exDH' (s : Cpu) : Cpu :=
+  ({ op1 s with d := (op1 s).h, e := (op1 s).l, h := (op1 s).d, l := (op1 s).e } : Cpu).tick 4
+
+theorem exDH'_regs (s : Cpu) : (exDH' s).de = s.hl ∧ (exDH' s).hl = s.de ∧ (exDH' s).bc = s.bc := by
+  refine ⟨?_, ?_, ?_⟩ <;> rfl
+
+set_option maxHeartbeats 2000000 in
+/-- **`call rt_st32` in both machines, the four bytes at `HL` in the RAM kept equal**: the accumulator's
+first four bytes written there; nine steps of each. -/
+theorem blk_st32 (D : Dev) {A B : Code} {lo hi : Nat} (hhi : hi ≤ 65536) (hlo : lo ≤ hi) (h1 : 1 ≤ hi)
+    {G : List Frame} {kA kB r q acc : Nat}
+    (hA : A.items[kA]? = some (.ins ⟨.call, [.imm (.sym "rt_st32" 0)]⟩))
+    (hB : B.items[kB]? = some (.ins ⟨.call, [.imm (.sym "rt_st32" 0)]⟩))
+    (hLA : Has A r stItems) (hLB : Has B q stItems)
+    (haccA : ∀ pa, (A.a.env pa).val (.sym "rt_acc" 0) = Int.ofNat acc)
+    (haccB : ∀ pb, (B.a.env pb).val (.sym "rt_acc" 0) = Int.ofNat acc)
+    (hacc : lo ≤ acc ∧ acc + 4 ≤ hi)
+    {x y : Cpu × D.W} (S : Sync D A B lo hi G kA kB false false x y)
+    (room : hi + 2 ≤ top x.1.sp) (foot : lo ≤ x.1.hl.toNat ∧ x.1.hl.toNat + 4 ≤ hi) :
+    Sync D A B lo hi G (kA + 1) (kB + 1) false false (mrun D 9 x) (mrun D 9 y) := by
+  have l3A : A.items[r + 3]? = some (.label "rt_st32") := hLA.get 3 rfl
+  have l3B : B.items[q + 3]? = some (.label "rt_st32") := hLB.get 3 rfl
+  have i4A : A.items[r + 4]? = some (.ins (Form.ldBCI (.num 4)).instr) := hLA.get 4 rfl
+  have i4B : B.items[q + 4]? = some (.ins (Form.ldBCI (.num 4)).instr) := hLB.get 4 rfl
+  have l5A : A.items[r + 5]? = some (.label "rt_stw") := hLA.get 5 rfl
+  have l5B : B.items[q + 5]? = some (.label "rt_stw") := hLB.get 5 rfl
+  have i6A : A.items[r + 6]? = some (.ins Form.exDEHL.instr) := hLA.get 6 rfl
+  have i6B : B.items[q + 6]? = some (.ins Form.exDEHL.instr) := hLB.get 6 rfl
+  have i7A : A.items[r + 7]? = some (.ins (Form.ldHLI (.sym "rt_acc" 0)).instr) := hLA.get 7 rfl
+  have i7B : B.items[q + 7]? = some (.ins (Form.ldHLI (.sym "rt_acc" 0)).instr) := hLB.get 7 rfl
+  have i8A : A.items[r + 8]? = some (.ins ⟨.ldir, []⟩) := hLA.get 8 rfl
+  have i8B : B.items[q + 8]? = some (.ins ⟨.ldir, []⟩) := hLB.get 8 rfl
+  have i9A : A.items[r + 9]? = some (.ins ⟨.ret, (none : Option Arg).toList⟩) := hLA.get 9 rfl
+  have i9B : B.items[q + 9]? = some (.ins ⟨.ret, (none : Option Arg).toList⟩) := hLB.get 9 rfl
+  have hvacc : ∀ pa pb, (A.a.env pa).val (.sym "rt_acc" 0) = (B.a.env pb).val (.sym "rt_acc" 0) := by
+    intro pa pb; rw [haccA, haccB]
+  obtain ⟨sA, w⟩ := x
+  simp only at room foot
+  rw [mrun_9, mrun_9]
+  -- the call
+  obtain ⟨T, adA, _, _, _, _, eA1, _⟩ := call_mstep D hA l3A S.LA S.atA w
+  have S1 := (seg_call D hhi hA l3A hB l3B S hlo h1 room).skip l3A l3B
+  rw [eA1] at S1 ⊢
+  obtain ⟨hl1, _, _⟩ := called_regs sA (UInt16.ofNat T)
+  generalize called sA (UInt16.ofNat T) = s1 at S1 hl1 ⊢
+  -- `ld bc,4`
+  have S2 := (seg_ord D hhi (Form.ldBCI (.num 4)) (by intro h; cases h) i4A i4B
+    (imm_same _ _ rfl ⟨by decide, by decide⟩ (val_num 4)) (by simp) (by simp) S1
+    (by simp [Form.viaHL]) (by simp [Form.viaDE]) (fun _ h => by simp [Form.viaNN] at h)).skip l5A l5B
+  have e2 : mstep D (s1, w) = (ldRP s1 0 (Instr.immW (A.a.env 0) ⟨.ld, [.bc, .imm (.num 4)]⟩), w) :=
+    mstep_exec D i4A S1.LA S1.atA w (fun pa inp => by
+      show exec (A.a.env pa) ⟨.ld, [.bc, .imm (.num 4)]⟩ s1 inp = _
+      rw [exec_ld_rp _ .bc 0 rfl (by decide)]; rfl) rfl
+  have hn4 : (Instr.immW (A.a.env 0) ⟨.ld, [.bc, .imm (.num 4)]⟩).toNat = 4 :=
+    immW_toNat _ _ (.num 4) 4 rfl rfl (by decide)
+  rw [e2] at S2 ⊢
+  obtain ⟨bc2, hl2, _⟩ := ldRP_bc s1 (Instr.immW (A.a.env 0) ⟨.ld, [.bc, .imm (.num 4)]⟩)
+  generalize ldRP s1 0 (Instr.immW (A.a.env 0) ⟨.ld, [.bc, .imm (.num 4)]⟩) = s2 at S2 bc2 hl2 ⊢
+  simp only [Form.writesH, Form.writesL, Bool.false_and] at S2
+  -- `ex de,hl`
+  have S3 := seg_ord D hhi Form.exDEHL (by intro h; cases h) i6A i6B (fun _ _ => ⟨rfl, rfl⟩) (by simp) (by simp) S2
+    (by simp [Form.viaHL]) (by simp [Form.viaDE]) (fun _ h => by simp [Form.viaNN] at h)
+  have e3 : mstep D (s2, w) = (exDH' s2, w) := mstep_exec D i6A S2.LA S2.atA w (fun _ _ => rfl) rfl
+  rw [e3] at S3 ⊢
+  obtain ⟨de3, hl3', bc3⟩ := exDH'_regs s2
+  generalize exDH' s2 = s3 at S3 de3 hl3' bc3 ⊢
+  simp only [Form.writesH, Form.writesL, Bool.false_and] at S3
+  -- `ld hl,rt_acc`
+  have S4 := seg_ord D hhi (Form.ldHLI (.sym "rt_acc" 0)) (by intro h; cases h) i7A i7B
+    (imm_same _ _ rfl ⟨by decide, by decide⟩ hvacc) (by simp) (by simp) S3
+    (by simp [Form.viaHL]) (by simp [Form.viaDE]) (fun _ h => by simp [Form.viaNN] at h)
+  have e4 : mstep D (s3, w) = (ldRP s3 2 (Instr.immW (A.a.env 0) ⟨.ld, [.hl, .imm (.sym "rt_acc" 0)]⟩), w) :=
+    mstep_exec D i7A S3.LA S3.atA w (fun pa inp => by
+      show exec (A.a.env pa) ⟨.ld, [.hl, .imm (.sym "rt_acc" 0)]⟩ s3 inp = _
+      rw [exec_ld_rp _ .hl 2 rfl (by decide)]
+      congr 2
+      apply UInt16.toNat_inj.mp
+      rw [immW_toNat _ _ _ acc rfl (haccA pa) (by omega), immW_toNat _ _ _ acc rfl (haccA 0) (by omega)]) rfl
+  have hacc4 : (Instr.immW (A.a.env 0) ⟨.ld, [.hl, .imm (.sym "rt_acc" 0)]⟩).toNat = acc :=
+    immW_toNat _ _ _ acc rfl (haccA 0) (by omega)
+  rw [e4] at S4 ⊢
+  have hl4 : (ldRP s3 2 (Instr.immW (A.a.env 0) ⟨.ld, [.hl, .imm (.sym "rt_acc" 0)]⟩)).hl =
+      Instr.immW (A.a.env 0) ⟨.ld, [.hl, .imm (.sym "rt_acc" 0)]⟩ := by
+    simp only [ldRP, Cpu.setRp, Cpu.idxSet, Cpu.setHL, Cpu.hl, Cpu.tick, skip, op1, Cpu.bumpR,
+      Ember.Proof.Z80Gen.mk16_hi_lo]
+  have de4 : (ldRP s3 2 (Instr.immW (A.a.env 0) ⟨.ld, [.hl, .imm (.sym "rt_acc" 0)]⟩)).de = s3.de := rfl
+  have bc4 : (ldRP s3 2 (Instr.immW (A.a.env 0) ⟨.ld, [.hl, .imm (.sym "rt_acc" 0)]⟩)).bc = s3.bc := rfl
+  generalize ldRP s3 2 (Instr.immW (A.a.env 0) ⟨.ld, [.hl, .imm (.sym "rt_acc" 0)]⟩) = s4 at S4 hl4 de4 bc4 ⊢
+  simp only [Form.writesH, Form.writesL, Bool.false_and, Bool.not_true, Bool.and_false] at S4
+  -- `ldir`, four rounds: from the accumulator to the bytes at the old `HL`
+  have S8 := ldir_eq_rounds D hhi i8A i8B 3 _ _ S4 (by simp only; rw [bc4, bc3, bc2, hn4])
+    (by simp only; rw [hl4, hacc4]; exact hacc.1) (by simp only; rw [hl4, hacc4]; omega)
+    (by simp only; rw [de4, de3, hl2, hl1]; exact foot.1) (by simp only; rw [de4, de3, hl2, hl1]; omega)
+  -- `ret`
+  have S9 := seg_ret D (cc := none) (fun _ h => by cases h) i9A i9B S8
+  simp only [taken, if_true] at S9
+  exact S9
+
+/-- info: 'Ember.Proof.PassSim.blk_st32' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in #print axioms blk_st32
+
 end Ember.Proof.PassSim
