@@ -1,6 +1,7 @@
 import Ember.Proof.Z80PassTaint
 import Ember.Proof.Z80PassCtl
 import Ember.Proof.Z80PassRun
+import Ember.Proof.Z80Bytes
 
 /-!
 # Ember.Proof.Z80PassSeg — the relation of the two machines, and its segments (plan M7.3)
@@ -953,5 +954,120 @@ theorem seg_ldir (D : Dev) {A B : Code} {lo hi : Nat} (hhi : hi ≤ 65536) {G : 
 
 /-- info: 'Ember.Proof.PassSim.seg_ldir' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in #print axioms seg_ldir
+
+/-! ## A step that goes on, in general -/
+
+/-- **One instruction that goes on, in both machines, in general**: each image's instruction does,
+from the related states, what `sA'` and `sB'` are — no I/O, the stack pointer, the start of RAM and
+memory outside `[lo, hi)` as they were, not halted — and those are related (`E'`, with `H`, `L`
+free as it says).  Then the relation holds at the items after. -/
+theorem seg_gen (D : Dev) {A B : Code} {lo hi : Nat} (hhi : hi ≤ 65536) {G : List Frame} {kA kB : Nat}
+    {th tl th' tl' : Bool} {iA iB : Instr}
+    (hA : A.items[kA]? = some (.ins iA)) (hB : B.items[kB]? = some (.ins iB))
+    (hfA : iA.falls = true) (hfB : iB.falls = true)
+    {x y : Cpu × D.W} (S : Sync D A B lo hi G kA kB th tl x y) (sA' sB' : Cpu)
+    (exA : ∀ pa, A.addrs[kA]? = some pa → exec (A.a.env pa) iA x.1 (D.bus x.2) = some sA')
+    (exB : ∀ pb, B.addrs[kB]? = some pb → exec (B.a.env pb) iB y.1 (D.bus y.2) = some sB')
+    (ioA : sA'.io = .none) (ioB : sB'.io = .none)
+    (spA : sA'.sp = x.1.sp) (spB : sB'.sp = y.1.sp) (rsA : sA'.ramStart = x.1.ramStart)
+    (rsB : sB'.ramStart = y.1.ramStart) (hA' : sA'.halted = false) (hB' : sB'.halted = false)
+    (memA : ∀ z, ¬ (lo ≤ z ∧ z < hi) → sA'.mem.get! z = x.1.mem.get! z)
+    (memB : ∀ z, ¬ (lo ≤ z ∧ z < hi) → sB'.mem.get! z = y.1.mem.get! z)
+    (szA : sA'.mem.size = 65536) (E' : EqvT lo hi th' tl' sA' sB') :
+    Sync D A B lo hi G (kA + 1) (kB + 1) th' tl' (mstep D x) (mstep D y) := by
+  obtain ⟨sA, w⟩ := x
+  obtain ⟨sB, w'⟩ := y
+  have hw : w' = w := S.w
+  subst hw
+  obtain ⟨pa, hpa, hpcA⟩ := S.atA
+  obtain ⟨pb, hpb, hpcB⟩ := S.atB
+  have stA := step_item A.placed S.LA.1 hA hpa hpcA S.LA.2 (exA pa hpa)
+  have stB := step_item B.placed S.LB.1 hB hpb hpcB S.LB.2 (exB pb hpb)
+  have eA : mstep D (sA, w') = (sA', w') := by
+    show (sA.step (D.bus w'), D.dev w' (sA.step (D.bus w')).io) = _
+    rw [stA.1, ioA, D.quiet]
+  have eB : mstep D (sB, w') = (sB', w') := by
+    show (sB.step (D.bus w'), D.dev w' (sB.step (D.bus w')).io) = _
+    rw [stB.1, ioB, D.quiet]
+  rw [eA, eB]
+  have hrsA : sA.ramStart.toNat ≤ lo := S.rs
+  have hrsB : sB.ramStart = sA.ramStart := by
+    have := RegsS.ramStart S.E.regs; rw [mask_ramStart] at this; exact this.symm
+  have hrsB' : sB.ramStart.toNat = sA.ramStart.toNat := by rw [hrsB]
+  have htop : hi ≤ top sA.sp ∧ hi ≤ top sB.sp := (S.stk).top_ge hhi
+  refine ⟨stA.2 hfA, stB.2 hfB, S.LA.keep rsA (fun z (hz : z < sA.ramStart.toNat) => memA z (by omega)) hA',
+    S.LB.keep rsB (fun z (hz : z < sB.ramStart.toNat) => memB z (by omega)) hB', E', ?_, szA,
+    by rw [rsA]; exact hrsA, rfl⟩
+  show Stk A B hi G (top sA'.sp) (top sB'.sp) sA'.mem sB'.mem
+  rw [spA, spB]
+  exact Stk.congr G _ _ _ _ _ _ S.stk (fun z (hz : top sA.sp ≤ z) => memA z (by omega))
+    (fun z (hz : top sB.sp ≤ z) => memB z (by omega))
+
+/-- info: 'Ember.Proof.PassSim.seg_gen' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in #print axioms seg_gen
+
+/-! ## `H` and `L` free: a literal's address into `HL`, `HL` stepped, a byte read through it -/
+
+/-- A state after an instruction that changes the program counter, the T-states (and `R`) and
+writes `H` and `L`. -/
+theorem eqvT_hl_written {lo hi : Nat} {th tl : Bool} {s t : Cpu} (E : EqvT lo hi th tl s t)
+    (p q : UInt16) (c d : UInt64) (a1 a2 b1 b2 : UInt8) :
+    EqvT lo hi true true { jumped s p c with h := a1, l := a2 } { jumped t q d with h := b1, l := b2 } := by
+  unfold EqvT at *
+  have hm : mask true true ({ jumped s p c with h := a1, l := a2 } : Cpu) { jumped t q d with h := b1, l := b2 } =
+      { jumped (mask th tl s t) q d with h := a1, l := a2 } := by cases s; cases t; rfl
+  rw [hm]
+  have J := Eqv.jumped E p q c d
+  obtain ⟨p', r', c', m', q', e⟩ := regs_ex J.regs
+  refine ⟨?_, J.mem, J.msz⟩
+  rw [e]; cases s; rfl
+
+theorem alu_struct (s : Cpu) (k v : UInt8) : s.alu k v = { s with a := aluA k s.a s.f v, f := aluF k s.a s.f v } := by
+  unfold aluA aluF Cpu.alu; split <;> rfl
+
+/-- A state after an operation on `A` with a byte read: the program counter, the T-states, `R`,
+`A` and the flags. -/
+theorem eqvT_alu_read {lo hi : Nat} {th tl : Bool} {s t : Cpu} (E : EqvT lo hi th tl s t)
+    (p q : UInt16) (c d : UInt64) (k v : UInt8) :
+    EqvT lo hi th tl { jumped s p c with a := aluA k s.a s.f v, f := aluF k s.a s.f v }
+      { jumped t q d with a := aluA k t.a t.f v, f := aluF k t.a t.f v } := by
+  unfold EqvT at *
+  have hm : mask th tl ({ jumped s p c with a := aluA k s.a s.f v, f := aluF k s.a s.f v } : Cpu)
+      { jumped t q d with a := aluA k t.a t.f v, f := aluF k t.a t.f v } =
+      { jumped (mask th tl s t) q d with a := aluA k t.a t.f v, f := aluF k t.a t.f v } := by cases s; cases t; rfl
+  rw [hm]
+  have J := Eqv.jumped E p q c d
+  have ha : s.a = (mask th tl s t).a ∧ s.f = (mask th tl s t).f := by
+    obtain ⟨_, _, _, _, _, e⟩ := regs_ex E.regs; rw [e]; exact ⟨rfl, rfl⟩
+  have ha' : (mask th tl s t).a = t.a ∧ (mask th tl s t).f = t.f := by cases t; exact ⟨rfl, rfl⟩
+  obtain ⟨p', r', c', m', q', e⟩ := regs_ex J.regs
+  refine ⟨?_, J.mem, J.msz⟩
+  rw [← ha'.1, ← ha'.2, ← ha.1, ← ha.2, e]; cases s; rfl
+
+/-- The state after `ld hl,nn`. -/
+def ldHL (s : Cpu) (n : UInt16) : Cpu := ((skip (op1 s) 2).setRp .hl 2 n).tick 10
+
+theorem ldHL_eq (s : Cpu) (n : UInt16) :
+    ldHL s n = { jumped s (s.pc + 1 + 2) ((op1 s).cycles + 10) with h := Cpu.hi n, l := Cpu.lo n } := by
+  cases s; rfl
+
+/-- **`ld hl,nn` in both machines, the operands what they may be** (a literal's address, each in its
+own image): the relation holds after, `H` and `L` free. -/
+theorem seg_ldhl (D : Dev) {A B : Code} {lo hi : Nat} (hhi : hi ≤ 65536) {G : List Frame} {kA kB : Nat}
+    {th tl : Bool} {vA vB : Val}
+    (hA : A.items[kA]? = some (.ins ⟨.ld, [.hl, .imm vA]⟩)) (hB : B.items[kB]? = some (.ins ⟨.ld, [.hl, .imm vB]⟩))
+    {x y : Cpu × D.W} (S : Sync D A B lo hi G kA kB th tl x y) :
+    Sync D A B lo hi G (kA + 1) (kB + 1) true true (mstep D x) (mstep D y) := by
+  obtain ⟨pa, hpa, _⟩ := S.atA
+  obtain ⟨pb, hpb, _⟩ := S.atB
+  have hw : y.2 = x.2 := S.w
+  refine seg_gen D hhi hA hB rfl rfl S (ldHL x.1 (Instr.immW (A.a.env pa) ⟨.ld, [.hl, .imm vA]⟩))
+    (ldHL y.1 (Instr.immW (B.a.env pb) ⟨.ld, [.hl, .imm vB]⟩)) (fun pa' h => ?_) (fun pb' h => ?_)
+    (by rw [ldHL_eq]; rfl) (by rw [ldHL_eq]; rfl) (by rw [ldHL_eq]; rfl) (by rw [ldHL_eq]; rfl)
+    (by rw [ldHL_eq]; rfl) (by rw [ldHL_eq]; rfl) (by rw [ldHL_eq]; exact S.LA.2) (by rw [ldHL_eq]; exact S.LB.2)
+    (fun z _ => by rw [ldHL_eq]; rfl) (fun z _ => by rw [ldHL_eq]; rfl) (by rw [ldHL_eq]; exact S.msz)
+    (by rw [ldHL_eq, ldHL_eq]; exact eqvT_hl_written S.E _ _ _ _ _ _ _ _)
+  · rw [hpa] at h; cases h; rfl
+  · rw [hpb] at h; cases h; rfl
 
 end Ember.Proof.PassSim
