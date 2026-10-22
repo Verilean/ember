@@ -242,9 +242,46 @@ macro "enc_i16ed" : tactic =>
     refine ⟨by rw [step_ed _ _ _ hh (code0 hc) (code1 hc)]; rfl, ?_⟩
     enc_pc))
 
+/-- Where `ED` and an opcode leave the program counter: the word after them. -/
+theorem fetch16_op2 (s : Cpu) :
+    (op2 s).fetch16 = (w16 (s.rd (s.pc + 1 + 1)) (s.rd (s.pc + 1 + 1 + 1)), skip (op2 s) 2) := rfl
+
+/-! `ld (nn),bc`, `ld (nn),de`, `ld (nn),sp`: what the CPU does, by the
+opcode as the assembler writes it.  Without these the unifier compares
+the two writes to memory before their addresses (`rd16` of the program
+counter against the word the assembler read), and takes 80 s each. -/
+
+theorem edOp_43 (s : Cpu) (inp : UInt16 → UInt8) :
+    edOp s inp (u8 (67 + 16 * 0)) = (s.fetch16.2.wr16 s.fetch16.1 (s.rp .hl 0)).tick 20 := rfl
+theorem edOp_53 (s : Cpu) (inp : UInt16 → UInt8) :
+    edOp s inp (u8 (67 + 16 * 1)) = (s.fetch16.2.wr16 s.fetch16.1 (s.rp .hl 1)).tick 20 := rfl
+theorem edOp_73 (s : Cpu) (inp : UInt16 → UInt8) :
+    edOp s inp (u8 (67 + 16 * 3)) = (s.fetch16.2.wr16 s.fetch16.1 (s.rp .hl 3)).tick 20 := rfl
+
+set_option hygiene false in
+/-- A word after `ED` and the opcode, stored to: `ld (nn),rr`. -/
+macro "enc_st16ed" : tactic =>
+  `(tactic| (
+    have he' : ((imm16 _).run _).bind _ = Except.ok _ := he
+    obtain ⟨l, hl, hb⟩ := bind_ok he'
+    obtain rfl := imm16_bytes hl
+    cases hb
+    have c2 := code2 hc
+    have c3 := code3 hc
+    unfold exec at hx
+    generalize hW : Instr.immW env _ = nW at hx
+    have hnW : nW = w16 (s.rd (s.pc + 1 + 1)) (s.rd (s.pc + 1 + 1 + 1)) := by rw [← hW, c2, c3]; rfl
+    subst hnW
+    cases hx
+    refine ⟨by
+      rw [step_ed _ _ _ hh (code0 hc) (code1 hc)]
+      (first | rw [edOp_43] | rw [edOp_53] | rw [edOp_73])
+      rw [fetch16_op2], ?_⟩
+    enc_pc))
+
 set_option hygiene false in
 macro "enc_any" : tactic =>
-  `(tactic| first | (cases hx; done) | enc_main | enc_ed | enc_cb | enc_i8 | enc_i16 | enc_i16ed | enc_rel)
+  `(tactic| first | (cases hx; done) | enc_main | enc_ed | enc_cb | enc_i8 | enc_i16 | enc_st16ed | enc_i16ed | enc_rel)
 
 set_option maxHeartbeats 0 in
 theorem arity0_ok (op : Op) (he : (encode' ⟨op, []⟩).run env = .ok bs) (hc : Code s bs) (hh : s.halted = false)
