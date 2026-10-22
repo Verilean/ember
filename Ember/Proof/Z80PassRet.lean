@@ -162,16 +162,17 @@ steps of `A` and one of `B` reach the return points of the frame of both, that f
 theorem seg_retseq_from (D : Dev) {A B : Code} {lo hi : Nat} {G : List Frame} {rA rB e kA kB : Nat}
     {th tl : Bool} {ts : List (Nat × Nat)} {x y : Cpu × D.W} {ccB : Option Arg} (hccB : ∀ c, ccB = some c → (cc? c).isSome)
     (hB : B.items[kB]? = some (.ins ⟨.ret, ccB.toList⟩)) (htB : taken ccB y.1 = true)
-    (hts : ∀ p, p ∈ ts → RetSeq A p.1)
-    (S : Sync D A B lo hi (tails ts ++ .ret rA rB e :: G) kA kB th tl x y)
+    (hts : ∀ p, p ∈ ts → RetSeq A p.1) {G0 : List Frame}
+    (S : Sync D A B lo hi G0 kA kB th tl x y)
     {m0 k0 : Nat} {a : Cpu} (em0 : mrun D m0 x = (a, x.2)) (La : Loaded A a) (hat0 : At A.addrs k0 a)
-    (hk0 : RetSeq A k0) (hr0 : RegsS (normIE x.1) (normIE a)) (hm0 : a.mem = x.1.mem) (hsp0 : a.sp = x.1.sp) :
+    (hk0 : RetSeq A k0) (hr0 : RegsS (normIE x.1) (normIE a)) (hm0 : a.mem = x.1.mem)
+    (hst : Stk A B hi (tails ts ++ .ret rA rB e :: G) (top a.sp) (top y.1.sp) a.mem y.1.mem) :
     ∃ n, m0 + 1 ≤ n ∧ Sync D A B lo hi G rA rB th tl (mrun D n x) (mstep D y) := by
   obtain ⟨sA, w⟩ := x
   obtain ⟨sB, w'⟩ := y
   have hw : w' = w := S.w
   subst hw
-  simp only at em0 hr0 hm0 hsp0 htB
+  simp only at em0 hr0 hm0 hst htB
   -- `A` through its own frames: a state at a return, the frame of both on top
   have core : ∀ (ts : List (Nat × Nat)) (k : Nat) (s : Cpu) (m : Nat), (∀ p, p ∈ ts → RetSeq A p.1) →
       RetSeq A k → mrun D m (sA, w') = (s, w') → Loaded A s → At A.addrs k s → RegsS (normIE sA) (normIE s) →
@@ -194,8 +195,7 @@ theorem seg_retseq_from (D : Dev) {A B : Code} {lo hi : Nat} {G : List Frame} {r
         (fun q hq => hts' q (List.mem_cons_of_mem _ hq)) (hts' p (List.mem_cons_self ..)) em' L' at' hr2
         (by rw [hm', hm]) st'
       exact ⟨m', s'', k'', by omega, h2, h3, h4, h5, h6, h7, h8⟩
-  obtain ⟨m, s, k, hm0', em, L, hat, hk, hr, hm, st⟩ := core ts k0 a m0 hts hk0 em0 La hat0 hr0 hm0
-    (by rw [hsp0, hm0]; exact S.stk)
+  obtain ⟨m, s, k, hm0', em, L, hat, hk, hr, hm, st⟩ := core ts k0 a m0 hts hk0 em0 La hat0 hr0 hm0 hst
   -- the last return of `A`, the `ret` of `B`
   obtain ⟨n, s', hn, e1, L', hr', hm', hsp, hpc⟩ := retseq_A D hk L hat w'
   have stB := ret_mstep D hccB hB S.LB S.atB w'
@@ -230,7 +230,7 @@ theorem seg_retseq (D : Dev) {A B : Code} {lo hi : Nat} {G : List Frame} {rA rB 
     (hts : ∀ p, p ∈ ts → RetSeq A p.1)
     {x y : Cpu × D.W} (S : Sync D A B lo hi (tails ts ++ .ret rA rB e :: G) kA kB th tl x y) :
     ∃ n, 1 ≤ n ∧ Sync D A B lo hi G rA rB th tl (mrun D n x) (mstep D y) :=
-  seg_retseq_from D (ccB := none) (fun _ h => by cases h) hB rfl hts S (m0 := 0) rfl S.LA S.atA hA rfl rfl rfl
+  seg_retseq_from D (ccB := none) (fun _ h => by cases h) hB rfl hts S (m0 := 0) rfl S.LA S.atA hA rfl rfl S.stk
 
 /-- info: 'Ember.Proof.PassSim.seg_retseq' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in #print axioms seg_retseq
@@ -266,7 +266,7 @@ theorem seg_retThrCC (D : Dev) {A B : Code} {lo hi : Nat} {G : List Frame} {rA r
   · rw [if_pos htk] at atA1 ⊢
     obtain ⟨n, hn, S'⟩ := seg_retseq_from D (ccB := some c) (fun _ h => by cases h; exact hcc) hB
       (by rw [← ht]; exact htk) hts S (m0 := 1) (by show mstep D (sA, w') = _; rw [eA]) LA1 atA1 hr.retSeq
-      (by rw [normIE_jumped]; exact regsS_jumped sA p cy) rfl rfl
+      (by rw [normIE_jumped]; exact regsS_jumped sA p cy) rfl S.stk
     exact ⟨n, by omega, S'⟩
   · rw [if_neg htk] at atA1 ⊢
     rw [ht] at htk
@@ -278,6 +278,53 @@ theorem seg_retThrCC (D : Dev) {A B : Code} {lo hi : Nat} {G : List Frame} {rA r
 /-- info: 'Ember.Proof.PassSim.seg_retThrCC' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in #print axioms seg_retThrCC
 
+
+/-- **`ret cc` in both, a frame of `A`'s own on top**: taken, `A` returns through its own frames and the
+frame of both, `B` returns; not taken, both go on. -/
+theorem seg_retcc_tails (D : Dev) {A B : Code} {lo hi : Nat} {G : List Frame} {rA rB e kA kB : Nat}
+    {th tl : Bool} {p : Nat × Nat} {ts : List (Nat × Nat)} {c : Arg} (hc : (cc? c).isSome)
+    (hA : A.items[kA]? = some (.ins ⟨.ret, [c]⟩)) (hB : B.items[kB]? = some (.ins ⟨.ret, [c]⟩))
+    (hts : ∀ q, q ∈ p :: ts → RetSeq A q.1)
+    {x y : Cpu × D.W} (S : Sync D A B lo hi (tails (p :: ts) ++ .ret rA rB e :: G) kA kB th tl x y) :
+    if taken (some c) x.1 then ∃ n, 1 ≤ n ∧ Sync D A B lo hi G rA rB th tl (mrun D n x) (mstep D y)
+    else Sync D A B lo hi (tails (p :: ts) ++ .ret rA rB e :: G) (kA + 1) (kB + 1) th tl (mstep D x) (mstep D y) := by
+  obtain ⟨sA, w⟩ := x
+  obtain ⟨sB, w'⟩ := y
+  have hw : w' = w := S.w
+  subst hw
+  have stA := ret_mstep D (cc := some c) (fun _ h => by cases h; exact hc) hA S.LA S.atA w'
+  have stB := ret_mstep D (cc := some c) (fun _ h => by cases h; exact hc) hB S.LB S.atB w'
+  have ht := taken_eq S.E (some c)
+  simp only at ht ⊢
+  by_cases htk : taken (some c) sA = true
+  · rw [if_pos htk] at stA ⊢
+    obtain ⟨cA, eA⟩ := stA
+    have st := S.stk
+    simp only [tails, List.map_cons, List.cons_append] at st
+    obtain ⟨h1, wA, rest⟩ := st
+    have bnd := Stk.bounds _ _ _ _ _ rest
+    obtain ⟨t1, t2⟩ := top_ne (sp := sA.sp) (by simp at bnd; omega)
+    have hpc : (returned sA cA).pc.toNat = word sA.mem (top sA.sp) := by
+      rw [returned_pc, t1, rd16_word sA (by omega)]
+    have htop : top (returned sA cA).sp = top sA.sp + 2 := by rw [returned_sp, top_add2 _ (by omega), t1]
+    obtain ⟨n, hn, S'⟩ := seg_retseq_from D (x := (sA, w')) (y := (sB, w')) (a := returned sA cA) (ccB := some c)
+      (fun _ h => by cases h; exact hc) hB
+      (by show taken (some c) sB = true; rw [← ht]; exact htk) (fun q hq => hts q (List.mem_cons_of_mem _ hq)) S (m0 := 1)
+      (by show mstep D (sA, w') = _; rw [eA]) ⟨S.LA.1.congr rfl (returned_mem _ _), S.LA.2⟩ ⟨_, wA, hpc⟩
+      (hts p (List.mem_cons_self ..)) (by rw [normIE_returned]; exact regsS_returned sA cA) (returned_mem _ _)
+      (by rw [htop, returned_mem]; exact rest)
+    exact ⟨n, by omega, S'⟩
+  · rw [if_neg htk] at stA ⊢
+    rw [ht] at htk
+    rw [if_neg htk] at stB
+    obtain ⟨pA, cA, eA, atA⟩ := stA
+    obtain ⟨pB, cB, eB, atB⟩ := stB
+    rw [eA, eB]
+    exact ⟨atA, atB, ⟨S.LA.1.congr rfl rfl, S.LA.2⟩, ⟨S.LB.1.congr rfl rfl, S.LB.2⟩, S.E.jumped _ _ _ _,
+      S.stk, S.msz, S.rs, rfl⟩
+
+/-- info: 'Ember.Proof.PassSim.seg_retcc_tails' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in #print axioms seg_retcc_tails
 
 /-- **`jp cc,l` over a return in `A`, `ret` on the other condition in `B`** (`condRet`; `l` after the
 return): when `A` jumps, `B` goes on, both after the return; when it does not, `A` returns (through
@@ -316,7 +363,7 @@ theorem seg_condRet (D : Dev) {A B : Code} {lo hi : Nat} {G : List Frame} {rA rB
       rw [hi, ← ht]; cases h : taken (some c) sA <;> simp_all
     obtain ⟨n, hn, S'⟩ := seg_retseq_from D (ccB := some c') (fun _ h => by cases h; exact hcc') hB hB' hts S
       (m0 := 1) (by show mstep D (sA, w') = _; rw [eA]) LA1 atA1 hr
-      (by rw [normIE_jumped]; exact regsS_jumped sA p cy) rfl rfl
+      (by rw [normIE_jumped]; exact regsS_jumped sA p cy) rfl S.stk
     exact ⟨n, by omega, S'⟩
 
 /-- info: 'Ember.Proof.PassSim.seg_condRet' depends on axioms: [propext, Classical.choice, Quot.sound] -/

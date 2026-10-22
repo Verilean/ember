@@ -359,7 +359,8 @@ The Z80 back end (M7, begun) — `Ember.Z80.IR.Sem` is the semantics of its IR:
 * `Z80PassRet`: returns `A` has more of — the relation after steps that change only `pc`, `R`, the
   T-states, `SP` and memory outside the RAM kept equal (`EqvT.shift`); a return of `A` (`RetSeq`,
   `retseq_A`); `A` through frames of its own then the frame of both while `B` returns once
-  (`pop_tail`, `seg_retseq`, `seg_retseq_from`); `jp cc,l` to a `ret` against `ret cc` (`seg_retThrCC`);
+  (`pop_tail`, `seg_retseq`, `seg_retseq_from`); `ret cc` in both, a frame of `A`'s own on top
+  (`seg_retcc_tails`); `jp cc,l` to a `ret` against `ret cc` (`seg_retThrCC`);
   `jp cc,l` over a return against `ret` on the other condition (`seg_condRet`); a call against a jump,
   a frame on `A`'s stack only (`seg_tail`);
 * `Z80PassRun`: two machines side by side to the end (`sim_halts`: a relation kept by segments of
