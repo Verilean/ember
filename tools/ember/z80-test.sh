@@ -58,6 +58,9 @@ $z80 trap-note-terse $out/trapnote-own.ihx
 $z80 own-build net --out $out
 $z80 replay $out/net-own.ihx Tests/Ember/corpus Tests/Ember/regress
 $z80 replay $out/net-own.ihx $gen
+# the tcb observer: the record in the RAM at the head of the loop, after each item = the Spec's state
+$z80 tcb-obs Tests/Ember/corpus Tests/Ember/regress $gen
+$z80 tcb-obs --plain Tests/Ember/corpus Tests/Ember/regress $gen
 # the same without the passes on the assembly: the image the proofs of M7.3 speak of
 $z80 own-fuzz ${PLAINFUZZ:-500} --plain
 $z80 own-build sliploop --plain --out $out

@@ -134,6 +134,7 @@ import Ember.Proof.SemTrapped
 import Ember.Proof.Z80SimCheck
 import Ember.Proof.TcbCheckpoint
 import Ember.Proof.Z80StackHTcb
+import Ember.Proof.Z80StackHTcbObs
 import Ember.Proof.Z80World
 import Ember.Proof.Z80Image
 import Ember.Proof.Z80LoopHItems
@@ -291,7 +292,13 @@ The Z80 back end (M7, begun) — `Ember.Z80.IR.Sem` is the semantics of its IR:
   Spec's control block after the same items** — in the Ember semantics (`tcb_checkpoint`), in the IR's
   memory (`stackH_tcb_ir`) and in the RAM of the machine the tests run at the head of its loop
   (`stackH_tcb_ram`); `RawTcb.describe` writes of it what the Spec's `tcb` lines write.  The lines
-  themselves are not written by the program.
+  themselves are not written by the program;
+* `Z80StackHTcbObs`: **the observer's lines** (`Ember.Z80.TcbObs`, `ember-z80 tcb-obs`: the record read
+  from the RAM at every head of the harness's loop) **are, when it gives lines, one per item, at the
+  number of its input, the Spec's control block after it** (`stackH_tcb_obs`: sound given the
+  observer's own count check, that it gives lines is not proved; what runs, `scan`, is what the proof
+  reads, `obsList`: `run_eq`).  Not the Spec's `tcb` lines: an item can write two, or one that is not
+  the state after it.
 
 By-reference parameters and `inlineCalls` are outside M7.1; of `IR → Z80` (M7.3) not proved: the routines
 of the runtime the stack's image for the harness does not call; interrupts and the board's runtime and

@@ -1,4 +1,5 @@
 import Ember.Proof.Driver
+import Ember.Z80.TcbObs
 
 /-!
 # Ember.Proof.TcbCheckpoint — the connection's state between input items (plan M7.3, `tcb` lines)
@@ -36,12 +37,7 @@ and the Z80's RAM at these points.
 
 namespace Ember.Proof.Refine
 open Ember Ember.Lang Ember.Lang.Sem
-
-/-- The name of a state by its code, as `Spec.Tcp.St.toString` names it. -/
-def stName (c : UInt8) : String :=
-  if c = 0 then "LISTEN" else if c = 1 then "SYN-RCVD" else if c = 2 then "ESTABLISHED"
-  else if c = 3 then "CLOSE-WAIT" else if c = 4 then "LAST-ACK" else if c = 5 then "FIN-WAIT-1"
-  else if c = 6 then "FIN-WAIT-2" else if c = 7 then "CLOSING" else if c = 8 then "TIME-WAIT" else "?"
+open Ember.Z80.TcbObs (stName)
 
 /-- What a `tcb` line says of the connection record: `Tcb.describe`'s
 fields, in its order and words. -/

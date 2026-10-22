@@ -277,6 +277,90 @@ def proofGenTests : IO Nat := do
   IO.println s!"proof-files: a stretch of 0 or not a number refused; {bad} failures"
   return bad
 
+/-- The `tcb` observer (`TcbObs`) on the stack's image, with and without
+the passes: on each input its line per item is the Spec's state after
+the item.  The inputs: none, an empty chunk, a tick, a SYN (a chunk of
+many bytes); a tick that waits for the end of a frame, the Spec writing
+two `tcb` lines for the byte that ends it (the frame, then the tick:
+the observer's line is the second, the first is not observed), and
+writing one line for it that is not the state after the item (the tick
+counted the retransmission timer down after the frame's line); a frame
+given up by a second tick.  Refused: too few steps, a wrong head of the
+loop, another layout of the record, another program, an image without
+`rt_main`. -/
+def tcbObsTests : IO Nat := do
+  let mut bad := 0
+  let check (name : String) (ok : Bool) : IO Nat := do
+    if !ok then IO.println s!"FAIL tcb observer: {name}"
+    return if ok then 0 else 1
+  let p := Tools.NetCheck.netProg
+  let after (ins : Array Input) : Spec.State :=
+    ((Tools.Z80.specItems ins).back?.map (·.2.2)).getD (Spec.State.init {})
+  let halves (pkt : ByteArray) : Input × Input :=
+    let e := Spec.Slip.encode pkt
+    (.rx (e.extract 0 (e.size / 2)), .rx (e.extract (e.size / 2) e.size))
+  let syn := Spec.Peer.tcp 4000 1000 0 Spec.Tcp.SYN
+  let iss1 := (after #[Spec.Peer.slip syn]).tcb.sndNxt
+  let (s1, s2) := halves syn
+  let (d1, d2) := halves (Spec.Peer.tcp 4000 1001 iss1 (Spec.Tcp.PSH ||| Spec.Tcp.ACK) (Spec.Peer.str "hi"))
+  -- data out of order: the Spec logs it; the tick that waited for it retransmits the echo and logs
+  let (o1, o2) := halves (Spec.Peer.tcp 4000 1013 iss1 (Spec.Tcp.PSH ||| Spec.Tcp.ACK) (Spec.Peer.str "x"))
+  let twoLines := #[Spec.Peer.slip syn, Spec.Peer.slip (Spec.Peer.tcp 4000 1001 iss1 Spec.Tcp.ACK),
+    Spec.Peer.slip (Spec.Peer.tcp 4000 1001 iss1 (Spec.Tcp.PSH ||| Spec.Tcp.ACK) (Spec.Peer.str "hi")),
+    .tick, .tick, o1, .tick, o2]
+  let lastDiffers := #[Spec.Peer.slip syn, Spec.Peer.slip (Spec.Peer.tcp 4000 1001 iss1 Spec.Tcp.ACK), d1, .tick, d2]
+  let givenUp := #[Spec.Peer.slip syn, .tick, s1, .tick, .tick, s2, .tick]
+  let cases : List (String × Array Input) := [("no input", #[]), ("an empty chunk", #[.rx .empty]),
+    ("a tick", #[.tick]), ("a SYN", #[Spec.Peer.slip syn]), ("two lines", twoLines),
+    ("the last line not the state after", lastDiffers), ("a frame given up", givenUp)]
+  for passes in [false, true] do
+    let w := if passes then "" else " (plain)"
+    match Tools.Z80.ownImage p (passes := passes) with
+    | .error e => bad := bad + (← check s!"image{w}: {e}" false)
+    | .ok img =>
+      for (name, ins) in cases do
+        match Tools.Z80.tcbItems img p ins with
+        | .error e => bad := bad + (← check s!"{name}{w}: {e}" false)
+        | .ok its =>
+          bad := bad + (← check s!"{name}{w}: one line per item" (its.size == TcbObs.itemCount ins))
+          for it in its do
+            bad := bad + (← check s!"{name}{w}: {it.obs.print} against {it.spec.print}" (it.obs == it.spec))
+          let lastItem := its.back?
+          let logged := (lastItem.map (·.logged)).getD []
+          let obsText := (lastItem.map fun it => match it.obs.ev with | .tcb x => x | _ => "").getD ""
+          if name == "a tick" then
+            bad := bad + (← check s!"{name}{w}: LISTEN" (obsText.startsWith "state=LISTEN "))
+          if name == "two lines" then
+            -- the Spec's two lines for the last byte; the observer has the second
+            bad := bad + (← check s!"{name}{w}: {logged}" (logged.length == 2 && logged.getLast? == some obsText &&
+              logged.head? != some obsText))
+          if name == "the last line not the state after" then
+            bad := bad + (← check s!"{name}{w}: {logged}" (logged.length == 1 && logged.head? != some obsText))
+          if name == "a frame given up" then
+            -- the second tick in the frame: two ticks, the second retransmits
+            let gi := (its.filter (·.obs.step == 4)).toList.map (·.logged)
+            bad := bad + (← check s!"{name}{w}: {gi}" (gi.map (·.length) == [1]))
+      match TcbObs.addrsOf p img with
+      | .error e => bad := bad + (← check s!"addresses{w}: {e}" false)
+      | .ok (t, lh) =>
+        let m := Tools.Z80.machineOf img
+        bad := bad + (← check s!"too few steps{w}"
+          (match TcbObs.run m 0 twoLines t lh 1000 with
+           | .error e => e.startsWith "still running" | .ok _ => false))
+        bad := bad + (← check s!"a wrong head of the loop{w}"
+          (match TcbObs.run m 0 twoLines t (lh + 1) with
+           | .error e => (e.splitOn "heads of the loop").length == 2 | .ok _ => false))
+        bad := bad + (← check s!"no rt_main{w}"
+          (TcbObs.addrsOf p { img with labels := img.labels.filter (·.1 != "rt_main") } matches .error _))
+      let reordered := { p with structs := p.structs.map fun d => if d.name == "Tcb" then { d with fields := d.fields.reverse } else d }
+      bad := bad + (← check s!"the record in another order{w}" (TcbObs.addrsOf reordered img matches .error _))
+  match Tools.Z80.ownImage Net.Loop.prog with
+  | .error e => bad := bad + (← check s!"sliploop image: {e}" false)
+  | .ok img =>
+    bad := bad + (← check "another program (sliploop)" (TcbObs.addrsOf (Tools.NetCheck.checked Net.Loop.prog) img matches .error _))
+  IO.println s!"tcb observer: {cases.length} inputs on the stack's image with and without the passes (one line per item, the Spec's state after it; two Spec lines for an item, its last line not the state after, a frame given up), too few steps, a wrong head of the loop, another record, another program, no rt_main refused; {bad} failures"
+  return bad
+
 def main : IO UInt32 := do
   let mut bad ← modelTests
   bad := bad + (← proofGenTests)
@@ -284,6 +368,7 @@ def main : IO UInt32 := do
   bad := bad + (← noteAgreeTests)
   bad := bad + (← boardNoteTests)
   bad := bad + (← ownExamples)
+  bad := bad + (← tcbObsTests)
   for t in ["sdcc", "make"] do
     if !(← Ember.Tests.TargetTests.installed t) then
       IO.println s!"z80: {t} not installed, the SDCC tests are skipped"

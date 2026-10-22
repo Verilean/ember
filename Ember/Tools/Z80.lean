@@ -9,6 +9,7 @@ import Ember.Z80.IRSem
 import Ember.Z80.Codegen
 import Ember.Z80.RtCheck
 import Ember.Z80.Target
+import Ember.Z80.TcbObs
 import Ember.Tools.NetCheck
 import Ember.Tools.Fuzz
 import Ember.Tools.ProofGen
@@ -531,6 +532,89 @@ def ownImage (p : Lang.Prog) (annotate := false) (passes := true) : Except Strin
 def machineOf (img : Codegen.Image) : Machine :=
   { cpu := { (({} : Cpu).load img.origin img.bytes) with ramStart := 0x8000 } }
 
+/-! ## `tcb` lines read from the RAM (`TcbObs`) -/
+
+/-- The Spec item by item, as the Ember stack reads its input on a SLIP
+link: for each item (a byte of a chunk, a tick), the number of its
+input, the lines the Spec wrote for it and the state after it. -/
+def specItems (inputs : Array Input) : Array (Nat × Array Trace.Event × Spec.State) := Id.run do
+  let mut s := Spec.State.init {}
+  let mut out := #[]
+  for h : i in [0:inputs.size] do
+    match inputs[i] with
+    | .tick =>
+      let ((), (s', es)) := Spec.tickArrives.run (s, #[])
+      s := s'
+      out := out.push (i, es, s')
+    | .rx b =>
+      for c in b.toList do
+        let ((), (s', es)) := (Spec.byteInput c).run (s, #[])
+        s := s'
+        out := out.push (i, es, s')
+  return out
+
+/-- An item as the observer and the Spec see it. -/
+structure TcbItem where
+  /-- The observer's line. -/
+  obs : Trace.Line
+  /-- The Spec's state after the item, as a line (the observer's contract). -/
+  spec : Trace.Line
+  /-- The Spec's own `tcb` lines for the item, in order. -/
+  logged : List String
+
+def tcbItems (img : Codegen.Image) (p : Lang.Prog) (inputs : Array Input) (budget : Nat := 200000000) :
+    Except String (Array TcbItem) := do
+  let (t, lh) ← TcbObs.addrsOf p img
+  let lines ← TcbObs.run (machineOf img) 0 inputs t lh budget
+  let sp := specItems inputs
+  unless lines.length = sp.size do throw s!"{lines.length} lines for {sp.size} items"
+  return (lines.toArray.zip sp).map fun (l, (i, es, s)) =>
+    { obs := l, spec := ⟨i, .tcb s.tcb.describe⟩,
+      logged := es.toList.filterMap fun e => match e with | .tcb x => some x | _ => none }
+
+structure TcbStats where
+  files : Nat := 0
+  items : Nat := 0
+  bad : Nat := 0
+  /-- Items for which the Spec wrote a `tcb` line, two or more, and those
+  whose last line says other than the state after the item. -/
+  logged : Nat := 0
+  twice : Nat := 0
+  lastDiffers : Nat := 0
+  /-- The states the observer's lines name, each once. -/
+  states : List String := []
+
+/-- The observer on the fixtures: each line is the Spec's state after its item. -/
+def tcbObsFiles (img : Codegen.Image) (p : Lang.Prog) (paths : List String) (verbose := false) : IO TcbStats := do
+  let mut st : TcbStats := {}
+  for path in paths do
+    for f in ← traceFiles path do
+      let t ← Trace.readFile f
+      if !NetCheck.supported t.header then continue
+      st := { st with files := st.files + 1 }
+      match tcbItems img p t.inputs with
+      | .error e =>
+        st := { st with bad := st.bad + 1 }
+        IO.println s!"FAIL {f}: {e}"
+      | .ok its =>
+        for it in its do
+          st := { st with items := st.items + 1 }
+          if let .tcb x := it.obs.ev then
+            let n := ((x.drop 6).takeWhile (· != ' ')).toString
+            unless st.states.contains n do st := { st with states := st.states ++ [n] }
+          if !(it.obs == it.spec) then
+            st := { st with bad := st.bad + 1 }
+            IO.println s!"FAIL {f}: {it.obs.print} against {it.spec.print}"
+          if !it.logged.isEmpty then
+            st := { st with logged := st.logged + 1 }
+            if it.logged.length ≥ 2 then
+              st := { st with twice := st.twice + 1 }
+              if verbose then IO.println s!"two lines {f} step {it.obs.step}: {it.logged}"
+            if some (Trace.Event.tcb (it.logged.getLast?.getD "")) != some it.obs.ev then
+              st := { st with lastDiffers := st.lastDiffers + 1 }
+              if verbose then IO.println s!"last differs {f} step {it.obs.step}: {it.logged} / {it.obs.print}"
+  return st
+
 /-- A program through the own back end, on the model, with the harness. -/
 def ownRun (p : Lang.Prog) (ins : Array Input) (budget : Nat := 20000000) (passes := true) :
     Except String Trace := do
@@ -814,7 +898,8 @@ def usage : String :=
   "  ember-z80 own-size net|sliploop [--trace 0|1|2]      bytes per function\n" ++
   "  ember-z80 trap-note|trap-note-terse IMAGE.ihx                   the `trapnote` program: notes named like a trap, and a trap\n" ++
   "  ember-z80 proof-files [--out DIR]                    the stack's image written out for the proofs (Ember/Proof)\n" ++
-  "  --plain with own-fuzz, own-build, own-size: without the passes on the assembly (the image the proofs speak of)"
+  "  ember-z80 tcb-obs [--plain] PATH...                 the stack's tcb observer on fixtures against the Spec's state\n" ++
+  "  --plain with own-fuzz, own-build, own-size, tcb-obs: without the passes on the assembly (the image the proofs speak of)"
 
 def main (args : List String) : IO UInt32 := do
   let o := parse args {}
@@ -871,6 +956,15 @@ def main (args : List String) : IO UInt32 := do
       | some b =>
         IO.println s!"stack bound: {b.total} bytes at most ({b.main} from start-up on, {b.interrupt} for an interrupt); {room} bytes above the static RAM"
         return if b.total ≤ room then 0 else 1
+  | "tcb-obs" :: paths =>
+    match ownImage NetCheck.netProg (passes := !o.plain) with
+    | .error e => IO.println s!"FAIL {e}"; return 1
+    | .ok img =>
+      let st ← tcbObsFiles img NetCheck.netProg paths o.verbose
+      IO.println s!"tcb observer{if o.plain then " (plain)" else ""}: {st.files} fixtures, {st.items} items, {st.bad} failures; the Spec wrote tcb lines for {st.logged} items, two or more for {st.twice}, the last not the state after the item for {st.lastDiffers}; states seen: {st.states.length} {st.states}"
+      -- no fixture is a failure: a wrong path is not a pass
+      if st.files == 0 then IO.println "FAIL tcb observer: no fixture for the SLIP build"
+      return if st.bad == 0 && st.files > 0 then 0 else 1
   | "own-fuzz" :: rest => ownFuzz ((rest.head?.bind (·.toNat?)).getD 500) o.seed o.verbose !o.plain
   | "ir-replay" :: paths => irReplay paths
   | "ir-dump" :: rest => irDump ((rest.head?.bind (·.toNat?)).getD 400) o.seed

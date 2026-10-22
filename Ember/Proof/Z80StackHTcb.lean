@@ -14,9 +14,15 @@ IR's memory after `j + 1` calls of `main`, hold a connection record and
 an echo buffer that hold the Spec's control block after the first
 `j + 1` items, and describe as it does (`RawTcb.describe`).
 
-Not here: the Z80's RAM at those points (the image's loop head:
-`AtLoop.mem` ties the RAM to the IR's memory on the plan's shared bytes),
-and the lines themselves.
+And in the RAM of the machine the tests run (`stackH_tcb_ram`): at the
+head of the harness's loop the RAM has the plan's shared bytes as the
+IR's memory does (`AtLoop.mem`), and `t` and `pend` are shared bytes
+(`inIv_tcb`), so after `j + 1` calls the RAM holds the same record and
+buffer — or the machine stopped before, the input used up.  Which step
+of the run that is, is said here only by its existence; the observer of
+`Ember.Z80.TcbObs` and `Z80StackHTcbObs` fix it.
+
+Not here: the lines themselves.
 -/
 
 namespace Ember.Proof.Z80Gen.StackH
