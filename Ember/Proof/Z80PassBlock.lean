@@ -106,6 +106,10 @@ theorem toNat_sub1 (v : UInt16) (h : 1 ≤ v.toNat) : (v - 1).toNat = v.toNat - 
   rw [UInt16.toNat_sub_of_le]; · rfl
   rw [UInt16.le_iff_toNat_le]; exact h
 
+theorem toNat_sub1_8 (v : UInt8) (h : 1 ≤ v.toNat) : (v - 1).toNat = v.toNat - 1 := by
+  rw [UInt8.toNat_sub_of_le]; · rfl
+  rw [UInt8.le_iff_toNat_le]; exact h
+
 /-- **All the rounds of an `ldir` within the RAM kept equal**, in both machines: `BC` the count, the
 bytes read and written in that RAM. -/
 theorem ldir_eq_rounds (D : Dev) {A B : Code} {lo hi : Nat} (hhi : hi ≤ 65536) {G : List Frame} {kA kB : Nat}
@@ -338,5 +342,131 @@ theorem blk_st32 (D : Dev) {A B : Code} {lo hi : Nat} (hhi : hi ≤ 65536) (hlo 
 
 /-- info: 'Ember.Proof.PassSim.blk_st32' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in #print axioms blk_st32
+
+/-! ## The loop over four bytes (`rt_add32`, `rt_sub32`, `rt_or32`) -/
+
+/-- The states after `ld a,(de)`, `ld (de),a`, `inc de`. -/
+def ldADES (s : Cpu) : Cpu := ({ op1 s with a := (op1 s).rd (op1 s).de } : Cpu).tick 7
+def stDEAS (s : Cpu) : Cpu := ((op1 s).wr (op1 s).de (op1 s).a).tick 7
+def incDES (s : Cpu) : Cpu := ((op1 s).setRp .hl 1 ((op1 s).rp .hl 1 + 1)).tick 6
+
+theorem ldADES_regs (s : Cpu) : (ldADES s).hl = s.hl ∧ (ldADES s).de = s.de ∧ (ldADES s).b = s.b := ⟨rfl, rfl, rfl⟩
+theorem stDEAS_regs (s : Cpu) : (stDEAS s).hl = s.hl ∧ (stDEAS s).de = s.de ∧ (stDEAS s).b = s.b := by
+  simp only [stDEAS, Cpu.wr, Cpu.tick]; refine ⟨?_, ?_, ?_⟩ <;> (split <;> rfl)
+theorem aluMS_regs (k : UInt8) (s : Cpu) : (aluMS k s).hl = s.hl ∧ (aluMS k s).de = s.de ∧ (aluMS k s).b = s.b := by
+  rw [aluMS_eq]; exact ⟨rfl, rfl, rfl⟩
+theorem incHLS_regs (s : Cpu) : (incHLS s).hl = s.hl + 1 ∧ (incHLS s).de = s.de ∧ (incHLS s).b = s.b := by
+  rw [incHLS_eq]
+  refine ⟨?_, rfl, rfl⟩
+  simp only [Cpu.hl, Ember.Proof.Z80Gen.mk16_hi_lo]
+theorem incDES_regs (s : Cpu) : (incDES s).hl = s.hl ∧ (incDES s).de = s.de + 1 ∧ (incDES s).b = s.b := by
+  refine ⟨rfl, ?_, rfl⟩
+  simp only [incDES, Cpu.setRp, Cpu.setDE, Cpu.rp, Cpu.de, Cpu.tick, op1, Cpu.bumpR, Ember.Proof.Z80Gen.mk16_hi_lo]
+theorem djnzed_regs (s : Cpu) (p : UInt16) (c : UInt64) :
+    (djnzed s p c).hl = s.hl ∧ (djnzed s p c).de = s.de ∧ (djnzed s p c).b = s.b - 1 := ⟨rfl, rfl, rfl⟩
+
+theorem exec_ld_a_de (env : Env) (s : Cpu) (inp : UInt16 → UInt8) :
+    exec env Form.ldADE.instr s inp = some (ldADES s) := rfl
+theorem exec_ld_de_a (env : Env) (s : Cpu) (inp : UInt16 → UInt8) :
+    exec env Form.stDEA.instr s inp = some (stDEAS s) := rfl
+theorem exec_inc_hl (env : Env) (s : Cpu) (inp : UInt16 → UInt8) :
+    exec env Form.incHL.instr s inp = some (incHLS s) := rfl
+theorem exec_inc_de (env : Env) (s : Cpu) (inp : UInt16 → UInt8) :
+    exec env Form.incDE.instr s inp = some (incDES s) := rfl
+
+
+theorem mrun_6 (D : Dev) (x : Cpu × D.W) :
+    mrun D 6 x = mstep D (mstep D (mstep D (mstep D (mstep D (mstep D x))))) := rfl
+
+/-- **The loop over the bytes, all its rounds, within the RAM kept equal**, in both machines (`k`:
+the operation's code; `B` the count, the bytes at `HL` and `DE` in that RAM). -/
+theorem loop_eq_rounds (D : Dev) {A B : Code} {lo hi : Nat} (hhi : hi ≤ 65536) {G : List Frame}
+    {j m : Nat} {l : String} {i : Instr} (k : UInt8) (hexec : ∀ env s inp, exec env i s inp = some (aluMS k s))
+    (hfi : i.falls = true) (hLA : Has A j (loopItems l i)) (hLB : Has B m (loopItems l i)) :
+    ∀ (n : Nat) (x y : Cpu × D.W), Sync D A B lo hi G (j + 1) (m + 1) false false x y → x.1.b.toNat = n + 1 →
+      lo ≤ x.1.hl.toNat → x.1.hl.toNat + n + 1 ≤ hi → lo ≤ x.1.de.toNat → x.1.de.toNat + n + 1 ≤ hi →
+      Sync D A B lo hi G (j + 7) (m + 7) false false (mrun D (6 * (n + 1)) x) (mrun D (6 * (n + 1)) y)
+  | n, (s, w), y, S, hb, h1, h2, d1, d2 => by
+    have l0A : A.items[j]? = some (.label l) := hLA.get 0 rfl
+    have l0B : B.items[m]? = some (.label l) := hLB.get 0 rfl
+    have i1A : A.items[j + 1]? = some (.ins Form.ldADE.instr) := hLA.get 1 rfl
+    have i1B : B.items[m + 1]? = some (.ins Form.ldADE.instr) := hLB.get 1 rfl
+    have i2A : A.items[j + 2]? = some (.ins i) := hLA.get 2 rfl
+    have i2B : B.items[m + 2]? = some (.ins i) := hLB.get 2 rfl
+    have i3A : A.items[j + 3]? = some (.ins Form.stDEA.instr) := hLA.get 3 rfl
+    have i3B : B.items[m + 3]? = some (.ins Form.stDEA.instr) := hLB.get 3 rfl
+    have i4A : A.items[j + 4]? = some (.ins Form.incHL.instr) := hLA.get 4 rfl
+    have i4B : B.items[m + 4]? = some (.ins Form.incHL.instr) := hLB.get 4 rfl
+    have i5A : A.items[j + 5]? = some (.ins Form.incDE.instr) := hLA.get 5 rfl
+    have i5B : B.items[m + 5]? = some (.ins Form.incDE.instr) := hLB.get 5 rfl
+    have i6A : A.items[j + 6]? = some (.ins ⟨.djnz, [.imm (.sym l 0)]⟩) := hLA.get 6 rfl
+    have i6B : B.items[m + 6]? = some (.ins ⟨.djnz, [.imm (.sym l 0)]⟩) := hLB.get 6 rfl
+    simp only at hb h1 h2 d1 d2
+    rw [show 6 * (n + 1) = 6 + 6 * n by omega, mrun_add, mrun_add, mrun_6, mrun_6]
+    -- `ld a,(de)`
+    have S1 := seg_ord D hhi Form.ldADE (by intro h; cases h) i1A i1B (fun _ _ => ⟨rfl, rfl⟩) (by simp) (by simp) S
+      (by simp [Form.viaHL]) (fun _ => by simp only; exact ⟨d1, by omega⟩) (fun _ h => by simp [Form.viaNN] at h)
+    rw [mstep_exec D i1A S.LA S.atA w (fun _ _ => exec_ld_a_de _ _ _) rfl] at S1 ⊢
+    obtain ⟨a1, b1, c1⟩ := ldADES_regs s
+    generalize ldADES s = s1 at S1 a1 b1 c1 ⊢
+    simp only [Form.writesH, Form.writesL, Bool.false_and] at S1
+    -- the operation on `A` with the byte at `(HL)`
+    have E1 := eqv_ff S1.E
+    have hhl1 : s1.hl = (mstep D y).1.hl := RegsS.hl E1.regs
+    have S2 := seg_aluM D hhi k hexec hfi i2A i2B S1 (by
+      simp only; rw [← hhl1]; exact E1.mem _ (by rw [a1]; exact h1) (by rw [a1]; omega))
+    rw [mstep_exec D i2A S1.LA S1.atA w (fun _ _ => hexec _ _ _) (by rw [aluMS_eq]; rfl)] at S2 ⊢
+    obtain ⟨a2, b2, c2⟩ := aluMS_regs k s1
+    generalize aluMS k s1 = s2 at S2 a2 b2 c2 ⊢
+    -- `ld (de),a`
+    have S3 := seg_ord D hhi Form.stDEA (by intro h; cases h) i3A i3B (fun _ _ => ⟨rfl, rfl⟩) (by simp) (by simp) S2
+      (by simp [Form.viaHL]) (fun _ => ⟨by rw [b2, b1]; exact d1, by rw [b2, b1]; omega⟩)
+      (fun _ h => by simp [Form.viaNN] at h)
+    rw [mstep_exec D i3A S2.LA S2.atA w (fun _ _ => exec_ld_de_a _ _ _) (by simp only [stDEAS, Cpu.wr, Cpu.tick]; split <;> rfl)] at S3 ⊢
+    obtain ⟨a3, b3, c3⟩ := stDEAS_regs s2
+    generalize stDEAS s2 = s3 at S3 a3 b3 c3 ⊢
+    simp only [Form.writesH, Form.writesL, Bool.false_and] at S3
+    -- `inc hl`
+    have S4 := seg_ord D hhi Form.incHL (by intro h; cases h) i4A i4B (fun _ _ => ⟨rfl, rfl⟩) (by simp) (by simp) S3
+      (by simp [Form.viaHL]) (by simp [Form.viaDE]) (fun _ h => by simp [Form.viaNN] at h)
+    rw [mstep_exec D i4A S3.LA S3.atA w (fun _ _ => exec_inc_hl _ _ _) (by rw [incHLS_eq]; rfl)] at S4 ⊢
+    obtain ⟨a4, b4, c4⟩ := incHLS_regs s3
+    generalize incHLS s3 = s4 at S4 a4 b4 c4 ⊢
+    simp only [Form.writesH, Form.writesL, Bool.false_and] at S4
+    -- `inc de`
+    have S5 := seg_ord D hhi Form.incDE (by intro h; cases h) i5A i5B (fun _ _ => ⟨rfl, rfl⟩) (by simp) (by simp) S4
+      (by simp [Form.viaHL]) (by simp [Form.viaDE]) (fun _ h => by simp [Form.viaNN] at h)
+    rw [mstep_exec D i5A S4.LA S4.atA w (fun _ _ => exec_inc_de _ _ _) rfl] at S5 ⊢
+    obtain ⟨a5, b5, c5⟩ := incDES_regs s4
+    generalize incDES s4 = s5 at S5 a5 b5 c5 ⊢
+    simp only [Form.writesH, Form.writesL, Bool.false_and] at S5
+    -- `djnz`
+    have S6 := seg_djnz D i6A l0A i6B l0B S5
+    obtain ⟨p6, c6, e6, _, _⟩ := djnz_mstep D i6A l0A S5.LA S5.atA w
+    have hb5 : s5.b.toNat = n + 1 := by rw [c5, c4, c3, c2, c1]; exact hb
+    obtain ⟨d6h, d6d, d6b⟩ := djnzed_regs s5 p6 c6
+    cases n with
+    | zero =>
+      have h0 : s5.b - 1 = 0 := by apply UInt8.toNat_inj.mp; rw [toNat_sub1_8 _ (by omega)]; simp [hb5]
+      have hne : ¬ ((s5.b - 1 != 0) = true) := by rw [h0]; decide
+      rw [if_neg hne] at S6
+      simpa only [Nat.mul_zero, mrun] using S6
+    | succ n' =>
+      have hne : (s5.b - 1 != 0) = true := by
+        have h' : (s5.b - 1).toNat = n' + 1 := by rw [toNat_sub1_8 _ (by omega)]; omega
+        have : s5.b - 1 ≠ 0 := by intro e; rw [e] at h'; simp at h'
+        simp [this]
+      rw [if_pos hne] at S6
+      have S6' := S6.skip l0A l0B
+      rw [e6] at S6' ⊢
+      exact loop_eq_rounds D hhi k hexec hfi hLA hLB n' _ _ S6'
+        (by simp only; rw [d6b, toNat_sub1_8 _ (by omega)]; omega)
+        (by simp only; rw [d6h, a5, a4, toNat_add1 _ (by rw [a3, a2, a1]; omega), a3, a2, a1]; omega)
+        (by simp only; rw [d6h, a5, a4, toNat_add1 _ (by rw [a3, a2, a1]; omega), a3, a2, a1]; omega)
+        (by simp only; rw [d6d, b5, toNat_add1 _ (by rw [b4, b3, b2, b1]; omega), b4, b3, b2, b1]; omega)
+        (by simp only; rw [d6d, b5, toNat_add1 _ (by rw [b4, b3, b2, b1]; omega), b4, b3, b2, b1]; omega)
+
+/-- info: 'Ember.Proof.PassSim.loop_eq_rounds' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in #print axioms loop_eq_rounds
 
 end Ember.Proof.PassSim
