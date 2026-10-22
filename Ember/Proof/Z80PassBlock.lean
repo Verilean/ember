@@ -326,7 +326,7 @@ theorem blk_st32 (D : Dev) {A B : Code} {lo hi : Nat} (hhi : hi ≤ 65536) (hlo 
   have de4 : (ldRP s3 2 (Instr.immW (A.a.env 0) ⟨.ld, [.hl, .imm (.sym "rt_acc" 0)]⟩)).de = s3.de := rfl
   have bc4 : (ldRP s3 2 (Instr.immW (A.a.env 0) ⟨.ld, [.hl, .imm (.sym "rt_acc" 0)]⟩)).bc = s3.bc := rfl
   generalize ldRP s3 2 (Instr.immW (A.a.env 0) ⟨.ld, [.hl, .imm (.sym "rt_acc" 0)]⟩) = s4 at S4 hl4 de4 bc4 ⊢
-  simp only [Form.writesH, Form.writesL, Bool.false_and, Bool.not_true, Bool.and_false] at S4
+  simp only [Form.writesH, Form.writesL, Bool.not_true, Bool.and_false] at S4
   -- `ldir`, four rounds: from the accumulator to the bytes at the old `HL`
   have S8 := ldir_eq_rounds D hhi i8A i8B 3 _ _ S4 (by simp only; rw [bc4, bc3, bc2, hn4])
     (by simp only; rw [hl4, hacc4]; exact hacc.1) (by simp only; rw [hl4, hacc4]; omega)
