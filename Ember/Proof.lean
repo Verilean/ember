@@ -138,6 +138,8 @@ import Ember.Proof.Z80StackHTcbObs
 import Ember.Proof.Z80PassLocal
 import Ember.Proof.Z80PassSim
 import Ember.Proof.Z80PassStep
+import Ember.Proof.Z80PassCtl
+import Ember.Proof.Z80PassCheck
 import Ember.Proof.Z80StackDAsm
 import Ember.Proof.Z80World
 import Ember.Proof.Z80Image
@@ -315,6 +317,11 @@ The Z80 back end (M7, begun) — `Ember.Z80.IR.Sem` is the semantics of its IR:
   images that neither jump, call, return nor touch the stack (`Form`), from CPUs equal but for `pc`,
   `R`, the T-states and memory, their memories equal on a range of RAM (`Eqv`), with the same operands
   and bytes read or written in that range (a hypothesis about the addresses), give such CPUs;
+* `Z80PassCtl`: jumps (`jp`, `jr`, with a condition or not), calls and returns as steps of the machine
+  in one image (`jump_mstep`, `call_mstep`, `ret_mstep`: the state after, the item the CPU is at);
+* `Z80PassCheck`: the items of the image without the passes matched with those of one with them
+  (`align`: a kind for each — the same item, a rewrite of a pass, an item dropped — computed by the
+  kernel as at run time); what the match means is not proved yet;
 * `Z80StackDItems`, `Z80StackDAsm`: the image of the stack for the harness **as built by default**
   (with the passes), written out (`#guard`: what `build` gives) and assembled by the kernel
   (`StackD.assemble_items`).  Nothing yet of what it does: the relation between it and the image
