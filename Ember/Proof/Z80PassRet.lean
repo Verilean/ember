@@ -22,6 +22,8 @@ takes one.
 namespace Ember.Proof.PassSim
 open Ember.Z80 Ember.Z80.Asm Ember.Z80.Cpu Ember.Proof.Z80Enc Ember.Proof.Z80Gen Ember.Proof.PassLocal
 
+set_option linter.constructorNameAsVariable false
+
 /-- A state after an instruction: no I/O pending, no `ei` delay. -/
 def normIE (s : Cpu) : Cpu := { s with io := .none, eiDelay := false }
 
@@ -153,18 +155,23 @@ theorem pop_tail (D : Dev) {A B : Code} {lo : Nat} {k r e b : Nat} {G : List Fra
 /-- `A`'s own frames, each `(return point, entry)`. -/
 def tails (ts : List (Nat × Nat)) : List Frame := ts.map fun p => .tail p.1 p.2
 
-/-- **`A` returns through its own frames and then through a frame of both, `B` returns once**: `A` a
-return at `kA` (`RetSeq`), and one at each return point of its own frames; `B` a `ret`.  Then some
+/-- **`A` returns through its own frames and then through a frame of both, `B` returns once**, from a
+state of `A` some steps on (`a`, at a return `k0`: nothing changed but `pc`, `R`, the T-states): `A`
+a return there (`RetSeq`), and one at each return point of its own frames; `B` a `ret`.  Then some
 steps of `A` and one of `B` reach the return points of the frame of both, that frame popped. -/
-theorem seg_retseq (D : Dev) {A B : Code} {lo hi : Nat} {G : List Frame} {rA rB e kA kB : Nat} {th tl : Bool}
-    {ts : List (Nat × Nat)} (hA : RetSeq A kA) (hB : B.items[kB]? = some (.ins ⟨.ret, []⟩))
+theorem seg_retseq_from (D : Dev) {A B : Code} {lo hi : Nat} {G : List Frame} {rA rB e kA kB : Nat}
+    {th tl : Bool} {ts : List (Nat × Nat)} {x y : Cpu × D.W} {ccB : Option Arg} (hccB : ∀ c, ccB = some c → (cc? c).isSome)
+    (hB : B.items[kB]? = some (.ins ⟨.ret, ccB.toList⟩)) (htB : taken ccB y.1 = true)
     (hts : ∀ p, p ∈ ts → RetSeq A p.1)
-    {x y : Cpu × D.W} (S : Sync D A B lo hi (tails ts ++ .ret rA rB e :: G) kA kB th tl x y) :
-    ∃ n, 1 ≤ n ∧ Sync D A B lo hi G rA rB th tl (mrun D n x) (mstep D y) := by
+    (S : Sync D A B lo hi (tails ts ++ .ret rA rB e :: G) kA kB th tl x y)
+    {m0 k0 : Nat} {a : Cpu} (em0 : mrun D m0 x = (a, x.2)) (La : Loaded A a) (hat0 : At A.addrs k0 a)
+    (hk0 : RetSeq A k0) (hr0 : RegsS (normIE x.1) (normIE a)) (hm0 : a.mem = x.1.mem) (hsp0 : a.sp = x.1.sp) :
+    ∃ n, m0 + 1 ≤ n ∧ Sync D A B lo hi G rA rB th tl (mrun D n x) (mstep D y) := by
   obtain ⟨sA, w⟩ := x
   obtain ⟨sB, w'⟩ := y
   have hw : w' = w := S.w
   subst hw
+  simp only at em0 hr0 hm0 hsp0 htB
   -- `A` through its own frames: a state at a return, the frame of both on top
   have core : ∀ (ts : List (Nat × Nat)) (k : Nat) (s : Cpu) (m : Nat), (∀ p, p ∈ ts → RetSeq A p.1) →
       RetSeq A k → mrun D m (sA, w') = (s, w') → Loaded A s → At A.addrs k s → RegsS (normIE sA) (normIE s) →
@@ -187,11 +194,12 @@ theorem seg_retseq (D : Dev) {A B : Code} {lo hi : Nat} {G : List Frame} {rA rB 
         (fun q hq => hts' q (List.mem_cons_of_mem _ hq)) (hts' p (List.mem_cons_self ..)) em' L' at' hr2
         (by rw [hm', hm]) st'
       exact ⟨m', s'', k'', by omega, h2, h3, h4, h5, h6, h7, h8⟩
-  obtain ⟨m, s, k, _, em, L, hat, hk, hr, hm, st⟩ := core ts kA sA 0 hts hA rfl S.LA S.atA rfl rfl S.stk
+  obtain ⟨m, s, k, hm0', em, L, hat, hk, hr, hm, st⟩ := core ts k0 a m0 hts hk0 em0 La hat0 hr0 hm0
+    (by rw [hsp0, hm0]; exact S.stk)
   -- the last return of `A`, the `ret` of `B`
   obtain ⟨n, s', hn, e1, L', hr', hm', hsp, hpc⟩ := retseq_A D hk L hat w'
-  have stB := ret_mstep D (cc := none) (fun _ h => by cases h) hB S.LB S.atB w'
-  simp only [taken, if_true] at stB
+  have stB := ret_mstep D hccB hB S.LB S.atB w'
+  rw [if_pos htB] at stB
   obtain ⟨cB, eB⟩ := stB
   obtain ⟨h1A, h1B, wA, wB, rest⟩ := st
   have bnd := Stk.bounds G _ _ _ _ rest
@@ -214,7 +222,155 @@ theorem seg_retseq (D : Dev) {A B : Code} {lo hi : Nat} {G : List Frame} {rA rB 
     rw [hsp, top_add2 _ (by omega), returned_sp, top_add2 _ (by omega), returned_mem, hm', ← tA1, ← tB1]
     exact rest
 
+/-- **`A` returns through its own frames and then through a frame of both, `B` returns once**: `A` a
+return at `kA` (`RetSeq`), and one at each return point of its own frames; `B` a `ret`.  Then some
+steps of `A` and one of `B` reach the return points of the frame of both, that frame popped. -/
+theorem seg_retseq (D : Dev) {A B : Code} {lo hi : Nat} {G : List Frame} {rA rB e kA kB : Nat} {th tl : Bool}
+    {ts : List (Nat × Nat)} (hA : RetSeq A kA) (hB : B.items[kB]? = some (.ins ⟨.ret, []⟩))
+    (hts : ∀ p, p ∈ ts → RetSeq A p.1)
+    {x y : Cpu × D.W} (S : Sync D A B lo hi (tails ts ++ .ret rA rB e :: G) kA kB th tl x y) :
+    ∃ n, 1 ≤ n ∧ Sync D A B lo hi G rA rB th tl (mrun D n x) (mstep D y) :=
+  seg_retseq_from D (ccB := none) (fun _ h => by cases h) hB rfl hts S (m0 := 0) rfl S.LA S.atA hA rfl rfl rfl
+
 /-- info: 'Ember.Proof.PassSim.seg_retseq' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in #print axioms seg_retseq
+
+/-! ## A return on a condition, the jump over a return, the call that is a jump -/
+
+theorem taken_invert {c c' : Arg} (h : Codegen.invert c = some c') (s : Cpu) :
+    taken (some c') s = !taken (some c) s := by
+  cases c <;> simp [Codegen.invert] at h <;> subst h <;> simp [taken, cc?, Cpu.cond]
+
+/-- **`jp cc,l` in `A` where `l` is a `ret`, `ret cc` in `B`** (`retThr` on a condition): taken,
+`A` jumps and returns through its own frames and the frame of both, `B` returns; not taken, both go
+on. -/
+theorem seg_retThrCC (D : Dev) {A B : Code} {lo hi : Nat} {G : List Frame} {rA rB e kA kB jl : Nat}
+    {th tl : Bool} {ts : List (Nat × Nat)} {c : Arg} {l : String}
+    (hc : c = .nz ∨ c = .z ∨ c = .nc ∨ c = .c)
+    (hA : A.items[kA]? = some (.ins ⟨.jp, [c, .imm (.sym l 0)]⟩)) (hjl : A.items[jl]? = some (.label l))
+    (hr : RetAt A jl) (hB : B.items[kB]? = some (.ins ⟨.ret, [c]⟩)) (hts : ∀ p, p ∈ ts → RetSeq A p.1)
+    {x y : Cpu × D.W} (S : Sync D A B lo hi (tails ts ++ .ret rA rB e :: G) kA kB th tl x y) :
+    if taken (some c) x.1 then ∃ n, 1 ≤ n ∧ Sync D A B lo hi G rA rB th tl (mrun D n x) (mstep D y)
+    else Sync D A B lo hi (tails ts ++ .ret rA rB e :: G) (kA + 1) (kB + 1) th tl (mstep D x) (mstep D y) := by
+  obtain ⟨sA, w⟩ := x
+  obtain ⟨sB, w'⟩ := y
+  have hw : w' = w := S.w
+  subst hw
+  have hcc : (cc? c).isSome := by rcases hc with rfl | rfl | rfl | rfl <;> rfl
+  obtain ⟨p, cy, eA, LA1, atA1⟩ := jump_mstep D (op := .jp) (cc := some c) (Or.inl rfl) (fun _ _ h => by cases h)
+    (fun _ h => by cases h; exact hcc) hA hjl S.LA S.atA w'
+  have stB := ret_mstep D (cc := some c) (fun _ h => by cases h; exact hcc) hB S.LB S.atB w'
+  have ht := taken_eq S.E (some c)
+  simp only at ht ⊢
+  by_cases htk : taken (some c) sA = true
+  · rw [if_pos htk] at atA1 ⊢
+    obtain ⟨n, hn, S'⟩ := seg_retseq_from D (ccB := some c) (fun _ h => by cases h; exact hcc) hB
+      (by rw [← ht]; exact htk) hts S (m0 := 1) (by show mstep D (sA, w') = _; rw [eA]) LA1 atA1 hr.retSeq
+      (by rw [normIE_jumped]; exact regsS_jumped sA p cy) rfl rfl
+    exact ⟨n, by omega, S'⟩
+  · rw [if_neg htk] at atA1 ⊢
+    rw [ht] at htk
+    rw [if_neg htk] at stB
+    obtain ⟨pB, cB, eB, atB⟩ := stB
+    rw [eA, eB]
+    exact ⟨atA1, atB, LA1, ⟨S.LB.1.congr rfl rfl, S.LB.2⟩, S.E.jumped _ _ _ _, S.stk, S.msz, S.rs, rfl⟩
+
+/-- info: 'Ember.Proof.PassSim.seg_retThrCC' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in #print axioms seg_retThrCC
+
+
+/-- **`jp cc,l` over a return in `A`, `ret` on the other condition in `B`** (`condRet`; `l` after the
+return): when `A` jumps, `B` goes on, both after the return; when it does not, `A` returns (through
+its own frames and the frame of both) and so does `B`. -/
+theorem seg_condRet (D : Dev) {A B : Code} {lo hi : Nat} {G : List Frame} {rA rB e kA kB jl : Nat}
+    {th tl : Bool} {ts : List (Nat × Nat)} {c c' : Arg} {l : String}
+    (hc : c = .nz ∨ c = .z ∨ c = .nc ∨ c = .c) (hinv : Codegen.invert c = some c')
+    (hA : A.items[kA]? = some (.ins ⟨.jp, [c, .imm (.sym l 0)]⟩)) (hjl : A.items[jl]? = some (.label l))
+    (hr : RetSeq A (kA + 1)) (hB : B.items[kB]? = some (.ins ⟨.ret, [c']⟩)) (hts : ∀ p, p ∈ ts → RetSeq A p.1)
+    {x y : Cpu × D.W} (S : Sync D A B lo hi (tails ts ++ .ret rA rB e :: G) kA kB th tl x y) :
+    if taken (some c) x.1 then
+      Sync D A B lo hi (tails ts ++ .ret rA rB e :: G) jl (kB + 1) th tl (mstep D x) (mstep D y)
+    else ∃ n, 1 ≤ n ∧ Sync D A B lo hi G rA rB th tl (mrun D n x) (mstep D y) := by
+  obtain ⟨sA, w⟩ := x
+  obtain ⟨sB, w'⟩ := y
+  have hw : w' = w := S.w
+  subst hw
+  have hcc : (cc? c).isSome := by rcases hc with rfl | rfl | rfl | rfl <;> rfl
+  have hcc' : (cc? c').isSome := by
+    rcases hc with rfl | rfl | rfl | rfl <;> simp [Codegen.invert] at hinv <;> subst hinv <;> rfl
+  obtain ⟨p, cy, eA, LA1, atA1⟩ := jump_mstep D (op := .jp) (cc := some c) (Or.inl rfl) (fun _ _ h => by cases h)
+    (fun _ h => by cases h; exact hcc) hA hjl S.LA S.atA w'
+  have stB := ret_mstep D (cc := some c') (fun _ h => by cases h; exact hcc') hB S.LB S.atB w'
+  have ht := taken_eq S.E (some c)
+  have hi := taken_invert hinv sB
+  simp only at ht ⊢
+  by_cases htk : taken (some c) sA = true
+  · rw [if_pos htk] at atA1 ⊢
+    have hnB : ¬ taken (some c') sB = true := by rw [hi, ← ht, htk]; decide
+    rw [if_neg hnB] at stB
+    obtain ⟨pB, cB, eB, atB⟩ := stB
+    rw [eA, eB]
+    exact ⟨atA1, atB, LA1, ⟨S.LB.1.congr rfl rfl, S.LB.2⟩, S.E.jumped _ _ _ _, S.stk, S.msz, S.rs, rfl⟩
+  · rw [if_neg htk] at atA1 ⊢
+    have hB' : taken (some c') sB = true := by
+      rw [hi, ← ht]; cases h : taken (some c) sA <;> simp_all
+    obtain ⟨n, hn, S'⟩ := seg_retseq_from D (ccB := some c') (fun _ h => by cases h; exact hcc') hB hB' hts S
+      (m0 := 1) (by show mstep D (sA, w') = _; rw [eA]) LA1 atA1 hr
+      (by rw [normIE_jumped]; exact regsS_jumped sA p cy) rfl rfl
+    exact ⟨n, by omega, S'⟩
+
+/-- info: 'Ember.Proof.PassSim.seg_condRet' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in #print axioms seg_condRet
+
+theorem regsS_called (s : Cpu) (nn : UInt16) : RegsS (normIE s) (called s nn) := by
+  cases s
+  simp only [RegsS, normIE, PassSim.called, callTo, Cpu.push, Cpu.wr16, Cpu.wr, Cpu.tick, skip, op1, Cpu.bumpR]
+  (repeat' split) <;> rfl
+
+/-- **A call in `A` that is a jump in `B`** (`tail`): room for the return address above the RAM kept
+equal.  One step of each, at the entries: a frame on `A`'s stack only (`tail`). -/
+theorem seg_tail (D : Dev) {A B : Code} {lo hi : Nat} (hhi : hi ≤ 65536) {G : List Frame}
+    {kA kB eA eB : Nat} {th tl : Bool} {l : String} {opB : Op} (hopB : opB = .jp ∨ opB = .jr)
+    (hA : A.items[kA]? = some (.ins ⟨.call, [.imm (.sym l 0)]⟩)) (heA : A.items[eA]? = some (.label l))
+    (hB : B.items[kB]? = some (.ins ⟨opB, [.imm (.sym l 0)]⟩)) (heB : B.items[eB]? = some (.label l))
+    {x y : Cpu × D.W} (S : Sync D A B lo hi G kA kB th tl x y) (hlo : lo ≤ hi) (h1 : 1 ≤ hi)
+    (room : hi + 2 ≤ top x.1.sp) :
+    Sync D A B lo hi (.tail (kA + 1) eA :: G) eA eB th tl (mstep D x) (mstep D y) := by
+  obtain ⟨sA, w⟩ := x
+  obtain ⟨sB, w'⟩ := y
+  have hw : w' = w := S.w
+  subst hw
+  simp only at room
+  obtain ⟨TA, adA, hTA, hrA, hpcA, hltA, eA', atA⟩ := call_mstep D hA heA S.LA S.atA w'
+  obtain ⟨pB, cB, eB', LB1, atB⟩ := jump_mstep D (op := opB) (cc := none) hopB (fun _ h => by cases h)
+    (fun _ h => by cases h) hB heB S.LB S.atB w'
+  simp only [taken, if_true] at atB
+  rw [eA', eB']
+  have hrsA : sA.ramStart.toNat ≤ lo := S.rs
+  have hszA : sA.mem.size = 65536 := S.msz
+  have bnd := Stk.bounds G _ _ _ _ S.stk
+  simp only at bnd
+  obtain ⟨tA1, tA2⟩ := top_sub2 sA.sp (by omega)
+  have rA' : sA.ramStart.toNat ≤ (sA.sp - 2).toNat := by omega
+  have aboveA := called_above sA (UInt16.ofNat TA) hszA (by omega) rA'
+  have keepA : ∀ x, x < sA.ramStart.toNat → (called sA (UInt16.ofNat TA)).mem.get! x = sA.mem.get! x :=
+    fun x hx => aboveA x (Or.inr (by omega))
+  have E' : EqvT lo hi th tl (called sA (UInt16.ofNat TA)) (jumped sB pB cB) :=
+    EqvT.shift S.E (regsS_called _ _) (fun x _ h2 => aboveA x (Or.inr (by omega))) (called_size _ _)
+      (regsS_jumped _ _ _) (fun _ _ _ => rfl) rfl
+  refine ⟨atA, atB, S.LA.keep (called_ramStart _ _) keepA (by rw [called_halted]; exact S.LA.2), LB1, E', ?_,
+    by rw [called_size]; exact hszA, by rw [called_ramStart]; exact hrsA, rfl⟩
+  show Stk A B hi (.tail (kA + 1) eA :: G) (top (called sA _).sp) (top (jumped sB pB cB).sp)
+    (called sA _).mem (jumped sB pB cB).mem
+  rw [called_sp, tA1, show (jumped sB pB cB).sp = sB.sp from rfl, show (jumped sB pB cB).mem = sB.mem from rfl]
+  refine ⟨by omega, ?_, ?_⟩
+  · rw [← tA2, word_called sA _ hszA rA' (by omega), hrA]
+    congr 1
+    rw [UInt16.toNat_add, hpcA]; simp only [show (3 : UInt16).toNat = 3 from rfl]; omega
+  · rw [show top sA.sp - 2 + 2 = top sA.sp by omega]
+    exact Stk.congr G _ _ _ _ _ _ S.stk (fun x hx => aboveA x (Or.inl hx)) (fun _ _ => rfl)
+
+/-- info: 'Ember.Proof.PassSim.seg_tail' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in #print axioms seg_tail
 
 end Ember.Proof.PassSim
