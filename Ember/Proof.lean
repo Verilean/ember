@@ -135,6 +135,7 @@ import Ember.Proof.Z80SimCheck
 import Ember.Proof.TcbCheckpoint
 import Ember.Proof.Z80StackHTcb
 import Ember.Proof.Z80StackHTcbObs
+import Ember.Proof.Z80PassLocal
 import Ember.Proof.Z80World
 import Ember.Proof.Z80Image
 import Ember.Proof.Z80LoopHItems
@@ -298,7 +299,11 @@ The Z80 back end (M7, begun) — `Ember.Z80.IR.Sem` is the semantics of its IR:
   number of its input, the Spec's control block after it** (`stackH_tcb_obs`: sound given the
   observer's own count check, that it gives lines is not proved; what runs, `scan`, is what the proof
   reads, `obsList`: `run_eq`).  Not the Spec's `tcb` lines: an item can write two, or one that is not
-  the state after it.
+  the state after it;
+* `Z80PassLocal`: **the passes on the assembly, begun** — what each rewrites and what its soundness
+  needs (a table); `packHigh`'s rewrite does what the four instructions do but for `pc`, `R` and the
+  T-states (`packHigh_from`, `packHigh_to`, `packHigh_agree`).  Nothing yet of the image as built by
+  default.
 
 By-reference parameters and `inlineCalls` are outside M7.1; of `IR → Z80` (M7.3) not proved: the routines
 of the runtime the stack's image for the harness does not call; interrupts and the board's runtime and
