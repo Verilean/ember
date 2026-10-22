@@ -1070,4 +1070,53 @@ theorem seg_ldhl (D : Dev) {A B : Code} {lo hi : Nat} (hhi : hi ≤ 65536) {G : 
   · rw [hpa] at h; cases h; rfl
   · rw [hpb] at h; cases h; rfl
 
+/-- The state after `inc hl`. -/
+def incHLS (s : Cpu) : Cpu := ((op1 s).setRp .hl 2 ((op1 s).rp .hl 2 + 1)).tick 6
+
+theorem incHLS_eq (s : Cpu) :
+    incHLS s = { jumped s (s.pc + 1) ((op1 s).cycles + 6) with h := Cpu.hi (s.hl + 1), l := Cpu.lo (s.hl + 1) } := by
+  cases s; rfl
+
+/-- **`inc hl` in both machines, `H` and `L` free**: they stay free. -/
+theorem seg_inchl_free (D : Dev) {A B : Code} {lo hi : Nat} (hhi : hi ≤ 65536) {G : List Frame} {kA kB : Nat}
+    (hA : A.items[kA]? = some (.ins ⟨.inc, [.hl]⟩)) (hB : B.items[kB]? = some (.ins ⟨.inc, [.hl]⟩))
+    {x y : Cpu × D.W} (S : Sync D A B lo hi G kA kB true true x y) :
+    Sync D A B lo hi G (kA + 1) (kB + 1) true true (mstep D x) (mstep D y) := by
+  refine seg_gen D hhi hA hB rfl rfl S (incHLS x.1) (incHLS y.1) (fun _ _ => rfl) (fun _ _ => rfl)
+    (by rw [incHLS_eq]; rfl) (by rw [incHLS_eq]; rfl) (by rw [incHLS_eq]; rfl) (by rw [incHLS_eq]; rfl)
+    (by rw [incHLS_eq]; rfl) (by rw [incHLS_eq]; rfl) (by rw [incHLS_eq]; exact S.LA.2) (by rw [incHLS_eq]; exact S.LB.2)
+    (fun z _ => by rw [incHLS_eq]; rfl) (fun z _ => by rw [incHLS_eq]; rfl) (by rw [incHLS_eq]; exact S.msz)
+    (by rw [incHLS_eq, incHLS_eq]; exact eqvT_hl_written S.E _ _ _ _ _ _ _ _)
+
+/-- The state after an operation on `A` with the byte at `(HL)` (`k`: `alu`'s code). -/
+def aluMS (k : UInt8) (s : Cpu) : Cpu := ((op1 s).alu k ((op1 s).rd (op1 s).hl)).tick 7
+
+theorem aluMS_eq (k : UInt8) (s : Cpu) :
+    aluMS k s = { jumped s (s.pc + 1) ((op1 s).cycles + 7) with
+      a := aluA k s.a s.f (s.mem.get! s.hl.toNat), f := aluF k s.a s.f (s.mem.get! s.hl.toNat) } := by
+  simp only [aluMS, alu_struct]; cases s; rfl
+
+/-- **An operation on `A` with the byte at each one's `(HL)`, in both machines**: the bytes the same
+(`H`, `L` free or not) — `A` and the flags the same after. -/
+theorem seg_aluM (D : Dev) {A B : Code} {lo hi : Nat} (hhi : hi ≤ 65536) {G : List Frame} {kA kB : Nat}
+    {th tl : Bool} {i : Instr} (k : UInt8) (hi_ : ∀ env s inp, exec env i s inp = some (aluMS k s))
+    (hf : i.falls = true)
+    (hA : A.items[kA]? = some (.ins i)) (hB : B.items[kB]? = some (.ins i))
+    {x y : Cpu × D.W} (S : Sync D A B lo hi G kA kB th tl x y)
+    (hv : x.1.mem.get! x.1.hl.toNat = y.1.mem.get! y.1.hl.toNat) :
+    Sync D A B lo hi G (kA + 1) (kB + 1) th tl (mstep D x) (mstep D y) := by
+  refine seg_gen D hhi hA hB hf hf S (aluMS k x.1) (aluMS k y.1) (fun _ _ => hi_ _ _ _) (fun _ _ => hi_ _ _ _)
+    (by rw [aluMS_eq]; rfl) (by rw [aluMS_eq]; rfl) (by rw [aluMS_eq]; rfl) (by rw [aluMS_eq]; rfl)
+    (by rw [aluMS_eq]; rfl) (by rw [aluMS_eq]; rfl) (by rw [aluMS_eq]; exact S.LA.2) (by rw [aluMS_eq]; exact S.LB.2)
+    (fun z _ => by rw [aluMS_eq]; rfl) (fun z _ => by rw [aluMS_eq]; rfl) (by rw [aluMS_eq]; exact S.msz) ?_
+  rw [aluMS_eq, aluMS_eq, hv]
+  exact eqvT_alu_read S.E _ _ _ _ _ _
+
+theorem exec_sbc_a_m (env : Env) (s : Cpu) (inp : UInt16 → UInt8) :
+    exec env ⟨.sbc, [.a, .mhl]⟩ s inp = some (aluMS 3 s) := rfl
+theorem exec_adc_a_m (env : Env) (s : Cpu) (inp : UInt16 → UInt8) :
+    exec env ⟨.adc, [.a, .mhl]⟩ s inp = some (aluMS 1 s) := rfl
+theorem exec_or_m (env : Env) (s : Cpu) (inp : UInt16 → UInt8) :
+    exec env ⟨.or, [.mhl]⟩ s inp = some (aluMS 6 s) := rfl
+
 end Ember.Proof.PassSim
