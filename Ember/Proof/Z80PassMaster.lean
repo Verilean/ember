@@ -213,11 +213,12 @@ theorem nnOK_spec {A : Code} {lo hi : Nat} (hhi : hi ≤ 65536) {f : Form} (hf :
 
 /-! ## The facts the segments take -/
 
-/-- **What the theorem takes, besides the certificate's check**: `A`'s run needs no more than `SafeA`;
+/-- **What the theorem takes, besides the certificate's rows checked** (`RowsOK`, from `check` by
+`check_rows`, or checked in parts): `A`'s run needs no more than `SafeA`;
 the RAM kept equal `[lo, hi)` in the memory; the accumulator of the runtime, the same in both, in it. -/
 structure Glob (D : Dev) (A B : Code) (lo hi : Nat) (cert : List Row) (tr : List (Nat × Bool × Bool))
     (x0 : Cpu × D.W) : Prop where
-  chk : check A.items B.items A.a B.a lo hi cert tr = true
+  chk : RowsOK A.items B.items A.a B.a lo hi cert tr
   safe : SafeA D A lo hi x0
   hlo : lo ≤ hi
   h1 : 1 ≤ hi
@@ -230,7 +231,7 @@ theorem Glob.row {D : Dev} {A B : Code} {lo hi : Nat} {cert : List Row} {tr : Li
     {x0 : Cpu × D.W} (Gl : Glob D A B lo hi cert tr x0) {k : Nat} (ht : (rowAt cert k).tag ≠ .none) :
     rowOK (mkCtx A.items B.items A.a B.a lo hi cert tr) (prevOf A.items k) (A.items.drop k)
       (B.items.drop (rowAt cert k).kb) (rowAt cert k) (cert.drop (k + 1)) = true :=
-  (check_rows Gl.chk).2.2 k _ (rowAt_some ht) ht
+  Gl.chk.2.2 k _ (rowAt_some ht) ht
 
 /-- What `A`'s run needs at a meeting point. -/
 theorem Glob.need {D : Dev} {A B : Code} {lo hi : Nat} {cert : List Row} {tr : List (Nat × Bool × Bool)}
@@ -1381,7 +1382,7 @@ theorem passes_halt {D : Dev} {A B : Code} {lo hi : Nat} {cert : List Row} {tr :
     ∀ N, (mrun D N x0).1.halted = true →
       ∃ M, (mrun D M y0).1.halted = true ∧ (mrun D M y0).2 = (mrun D N x0).2 := by
   intro N hN
-  obtain ⟨_, ⟨r, rs, hc, ht, hkb, hth, htl, htop⟩, _⟩ := check_rows Gl.chk
+  obtain ⟨_, ⟨r, rs, hc, ht, hkb, hth, htl, htop⟩, _⟩ := Gl.chk
   have hr0 : rowAt cert 0 = r := by simp [rowAt, hc]
   have hI : Inv D A B lo hi cert tr x0 x0 y0 := by
     refine Or.inr ⟨[], 0, by rw [hr0]; exact ht, ?_, by rw [hr0]; exact htop, trivial, ⟨0, rfl⟩⟩

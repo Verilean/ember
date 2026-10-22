@@ -136,14 +136,20 @@ theorem walk_rows (c : Ctx) (xs ys : List Item) (cert : List Row) :
         rw [show k + 1 + j = k + (j + 1) by omega] at this
         exact this
 
+/-- **A certificate's rows checked**: as many rows as items, the first a meeting point at `B`'s first
+item in the activation of no function, every row of a meeting point checked. -/
+def RowsOK (xs ys : List Item) (a b : Assembled) (lo hi : Nat) (cert : List Row) (tr : List (Nat × Bool × Bool)) :
+    Prop :=
+  cert.length = xs.length ∧
+    (∃ r rs, cert = r :: rs ∧ r.tag ≠ .none ∧ r.kb = 0 ∧ r.th = false ∧ r.tl = false ∧ topE ∈ r.act) ∧
+    ∀ k r, cert[k]? = some r → r.tag ≠ .none →
+      rowOK (mkCtx xs ys a b lo hi cert tr) (prevOf xs k) (xs.drop k) (ys.drop r.kb) r (cert.drop (k + 1)) = true
+
 /-- **The check of a certificate**: as many rows as items, the first a meeting point at `B`'s first
 item in the activation of no function, every row of a meeting point checked. -/
 theorem check_rows {xs ys : List Item} {a b : Assembled} {lo hi : Nat} {cert : List Row}
     {tr : List (Nat × Bool × Bool)} (h : check xs ys a b lo hi cert tr = true) :
-    cert.length = xs.length ∧
-      (∃ r rs, cert = r :: rs ∧ r.tag ≠ .none ∧ r.kb = 0 ∧ r.th = false ∧ r.tl = false ∧ topE ∈ r.act) ∧
-      ∀ k r, cert[k]? = some r → r.tag ≠ .none →
-        rowOK (mkCtx xs ys a b lo hi cert tr) (prevOf xs k) (xs.drop k) (ys.drop r.kb) r (cert.drop (k + 1)) = true := by
+    RowsOK xs ys a b lo hi cert tr := by
   simp only [check, Bool.and_eq_true, beq_iff_eq] at h
   obtain ⟨⟨hlen, hfirst⟩, hw⟩ := h
   refine ⟨hlen, ?_, ?_⟩
@@ -160,6 +166,21 @@ theorem check_rows {xs ys : List Item} {a b : Assembled} {lo hi : Nat} {cert : L
     have := walk_rows (mkCtx xs ys a b lo hi cert tr) xs ys cert xs.length 0 0 (by simpa [prevOf] using hw) k r hk
       (by omega) (by simpa using hr) ht
     simpa using this
+
+/-- **Rows checked in parts**: walks of `n` items from starts that cover every index (each start with
+`B`'s index there). -/
+theorem rows_of_walks (c : Ctx) (xs ys : List Item) (cert : List Row) (n : Nat) (starts : List (Nat × Nat))
+    (hw : ∀ p, p ∈ starts → walk c n (prevOf xs p.1) (xs.drop p.1) (cert.drop p.1) (ys.drop p.2) p.2 = true)
+    (hcov : ∀ k, k < xs.length → ∃ p, p ∈ starts ∧ p.1 ≤ k ∧ k < p.1 + n) (hlen : cert.length = xs.length) :
+    ∀ k r, cert[k]? = some r → r.tag ≠ .none →
+      rowOK c (prevOf xs k) (xs.drop k) (ys.drop r.kb) r (cert.drop (k + 1)) = true := by
+  intro k r hr ht
+  have hk : k < xs.length := by have := (List.getElem?_eq_some_iff.mp hr).1; omega
+  obtain ⟨p, hp, h1, h2⟩ := hcov k hk
+  have := walk_rows c xs ys cert n p.1 p.2 (hw p hp) (k - p.1) r (by omega) (by omega)
+    (by rw [show p.1 + (k - p.1) = k by omega]; exact hr) ht
+  rw [show p.1 + (k - p.1) = k by omega] at this
+  exact this
 
 /-- info: 'Ember.Proof.PassSim.check_rows' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs in #print axioms check_rows
