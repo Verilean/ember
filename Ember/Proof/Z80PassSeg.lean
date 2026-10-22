@@ -253,4 +253,143 @@ theorem seg_jump (D : Dev) {A B : Code} {lo hi : Nat} {G : List Frame} {kA kB jA
 /-- info: 'Ember.Proof.PassSim.seg_jump' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in #print axioms seg_jump
 
+/-! ## Calls and returns -/
+
+theorem byte_lo_hi (v : UInt16) : v.toUInt8.toNat + 256 * (v >>> 8).toUInt8.toNat = v.toNat := by
+  have := v.toNat_lt
+  simp only [UInt16.toNat_toUInt8, UInt16.toNat_shiftRight]
+  rw [show (8 : UInt16).toNat % 16 = 8 from rfl, Nat.shiftRight_eq_div_pow]
+  omega
+
+/-- The word a call pushed is the address after the call. -/
+theorem word_called (s : Cpu) (nn : UInt16) (hsz : s.mem.size = 65536)
+    (hr : s.ramStart.toNat ≤ (s.sp - 2).toNat) (hw : (s.sp - 2).toNat + 1 < 65536) :
+    word (called s nn).mem (s.sp - 2).toNat = (s.pc + 3).toNat := by
+  unfold word
+  rw [called_mem s nn hsz hr hw, called_mem s nn hsz hr hw]
+  simp only [if_true, show ¬ ((s.sp - 2).toNat + 1 = (s.sp - 2).toNat) by omega, if_false]
+  exact byte_lo_hi _
+
+theorem top_sub2 (sp : UInt16) (h : 3 ≤ top sp) : top (sp - 2) = top sp - 2 ∧ (sp - 2).toNat = top sp - 2 := by
+  by_cases h0 : sp = 0
+  · subst h0; decide
+  · have ht : top sp = sp.toNat := by simp only [top, h0, if_false]
+    rw [ht] at h ⊢
+    have h1 : (sp - 2).toNat = sp.toNat - 2 := by
+      rw [UInt16.toNat_sub_of_le]
+      · rfl
+      · rw [UInt16.le_iff_toNat_le]; show 2 ≤ sp.toNat; omega
+    have h2 : sp - 2 ≠ 0 := by
+      intro e
+      have := congrArg UInt16.toNat e
+      rw [h1] at this
+      simp at this
+      omega
+    refine ⟨?_, h1⟩
+    simp only [top, h2, if_false, h1]
+
+/-- A call writes below the stack's top only: the bytes at and above `sp` as they were, and those
+below the two it pushed. -/
+theorem called_above (s : Cpu) (nn : UInt16) (hsz : s.mem.size = 65536) (h2 : 3 ≤ top s.sp)
+    (hr : s.ramStart.toNat ≤ (s.sp - 2).toNat) (x : Nat) (hx : top s.sp ≤ x ∨ x < top s.sp - 2) :
+    (called s nn).mem.get! x = s.mem.get! x := by
+  obtain ⟨t1, t2⟩ := top_sub2 s.sp h2
+  have hb : top s.sp ≤ 65536 := by have := s.sp.toNat_lt; unfold top; split <;> omega
+  rw [called_mem s nn hsz hr (by omega)]
+  rw [if_neg (by omega), if_neg (by omega)]
+
+theorem RegsS.after_call {s t : Cpu} (h : RegsS s t) (p q : UInt16) :
+    RegsS (PassSim.called s p) (PassSim.called t q) := by
+  obtain ⟨p', r', c', m', q', e⟩ := regs_ex h
+  subst e
+  cases s
+  simp only [RegsS, PassSim.called, callTo, Cpu.push, Cpu.wr16, Cpu.wr, Cpu.tick, skip, op1, Cpu.bumpR]
+  (repeat' split) <;> rfl
+
+theorem mask_called (th tl : Bool) (s t : Cpu) (p q : UInt16) :
+    mask th tl (called s p) (called t q) = called (mask th tl s t) q := by
+  cases s with
+  | mk a0 f0 b0 c0 d0 e0 h0 l0 a0' f0' b0' c0' d0' e0' h0' l0' ix0 iy0 sp0 pc0 i0 r0 iff10 iff20 im0 halted0 eiDelay0
+      cycles0 io0 ramStart0 mem0 =>
+  cases t with
+  | mk a f b c d e h l a' f' b' c' d' e' h' l' ix iy sp pc i r iff1 iff2 im halted eiDelay cycles io ramStart mem =>
+  simp only [mask, called, callTo, Cpu.push, Cpu.wr16, Cpu.wr, Cpu.tick, skip, op1, Cpu.bumpR]
+  by_cases h1 : sp - 2 < ramStart <;> by_cases h2 : sp - 2 + 1 < ramStart <;>
+    by_cases h3 : sp0 - 2 < ramStart0 <;> by_cases h4 : sp0 - 2 + 1 < ramStart0 <;> simp [h1, h2, h3, h4]
+
+/-- **A call, in both machines**: at `kA` in `A` and `kB` in `B` a `call` to the same label (at `eA`
+in `A`, at `eB` in `B`); room for the return address above the RAM kept equal.  One step of each
+pushes its own return address, the items after the calls: the relation holds at the entries, a
+frame more on the stacks. -/
+theorem seg_call (D : Dev) {A B : Code} {lo hi : Nat} (hhi : hi ≤ 65536) {G : List Frame}
+    {kA kB eA eB : Nat} {th tl : Bool} {l : String}
+    (hA : A.items[kA]? = some (.ins ⟨.call, [.imm (.sym l 0)]⟩)) (heA : A.items[eA]? = some (.label l))
+    (hB : B.items[kB]? = some (.ins ⟨.call, [.imm (.sym l 0)]⟩)) (heB : B.items[eB]? = some (.label l))
+    {x y : Cpu × D.W} (S : Sync D A B lo hi G kA kB th tl x y) (hlo : lo ≤ hi) (h1 : 1 ≤ hi)
+    (room : hi + 2 ≤ top x.1.sp) :
+    Sync D A B lo hi (.ret (kA + 1) (kB + 1) eA :: G) eA eB th tl (mstep D x) (mstep D y) := by
+  obtain ⟨sA, w⟩ := x
+  obtain ⟨sB, w'⟩ := y
+  have hw : w' = w := S.w
+  subst hw
+  simp only at room
+  obtain ⟨TA, adA, hTA, hrA, hpcA, hltA, eA', atA⟩ := call_mstep D hA heA S.LA S.atA w'
+  obtain ⟨TB, adB, hTB, hrB, hpcB, hltB, eB', atB⟩ := call_mstep D hB heB S.LB S.atB w'
+  rw [eA', eB']
+  have E := S.E
+  have hrsB : sB.ramStart = sA.ramStart := by
+    have := RegsS.ramStart E.regs; rw [mask_ramStart] at this; exact this.symm
+  have hrsA : sA.ramStart.toNat ≤ lo := S.rs
+  have hszA : sA.mem.size = 65536 := S.msz
+  have hmszB : (mask th tl sA sB).mem.size = sB.mem.size := by cases sB; rfl
+  have hszB : sB.mem.size = 65536 := by rw [← hmszB, ← E.msz]; exact hszA
+  have bnd := Stk.bounds G _ _ _ _ S.stk
+  simp only at bnd
+  have hab : top sA.sp ≤ top sB.sp := bnd.1
+  have hbB : top sB.sp ≤ 65536 := bnd.2.1
+  obtain ⟨tA1, tA2⟩ := top_sub2 sA.sp (by omega)
+  obtain ⟨tB1, tB2⟩ := top_sub2 sB.sp (by omega)
+  have rA' : sA.ramStart.toNat ≤ (sA.sp - 2).toNat := by omega
+  have rB' : sB.ramStart.toNat ≤ (sB.sp - 2).toNat := by rw [hrsB]; omega
+  -- the bytes each call wrote: above the RAM kept equal, below its stack's old top
+  have aboveA := called_above sA (UInt16.ofNat TA) hszA (by omega) rA'
+  have aboveB := called_above sB (UInt16.ofNat TB) hszB (by omega) rB'
+  have E' : EqvT lo hi th tl (called sA (UInt16.ofNat TA)) (called sB (UInt16.ofNat TB)) := by
+    unfold EqvT
+    rw [mask_called]
+    obtain ⟨hr, hm, hsz⟩ := E
+    have hmsp : (mask th tl sA sB).sp = sB.sp := by cases sB; rfl
+    have hmr : (mask th tl sA sB).ramStart = sB.ramStart := by cases sB; rfl
+    have hmsz : (mask th tl sA sB).mem.size = 65536 := by rw [hmszB]; exact hszB
+    have aboveM := called_above (mask th tl sA sB) (UInt16.ofNat TB) hmsz (by rw [hmsp]; omega)
+      (by rw [hmsp, hmr]; exact rB')
+    refine ⟨?_, fun x h1 h2 => ?_, ?_⟩
+    · exact hr.after_call _ _
+    · rw [aboveA x (Or.inr (by omega)), aboveM x (Or.inr (by rw [hmsp]; omega))]
+      exact hm x h1 h2
+    · rw [called_size, called_size]; exact hsz
+  have keepA : ∀ x, x < sA.ramStart.toNat → (called sA (UInt16.ofNat TA)).mem.get! x = sA.mem.get! x :=
+    fun x hx => aboveA x (Or.inr (by omega))
+  have keepB : ∀ x, x < sB.ramStart.toNat → (called sB (UInt16.ofNat TB)).mem.get! x = sB.mem.get! x :=
+    fun x hx => aboveB x (Or.inr (by rw [hrsB] at hx; omega))
+  refine ⟨atA, atB, S.LA.keep (called_ramStart _ _) keepA (by rw [called_halted]; exact S.LA.2),
+    S.LB.keep (called_ramStart _ _) keepB (by rw [called_halted]; exact S.LB.2), E', ?_,
+    by rw [called_size]; exact hszA, by rw [called_ramStart]; exact hrsA, rfl⟩
+  -- the new frame: each image's return address at its new top, the frames below as they were
+  show Stk A B hi (.ret (kA + 1) (kB + 1) eA :: G) (top (called sA _).sp) (top (called sB _).sp)
+    (called sA _).mem (called sB _).mem
+  rw [called_sp, called_sp, tA1, tB1]
+  refine ⟨by omega, by omega, ?_, ?_, ?_⟩
+  · rw [← tA2, word_called sA _ hszA rA' (by omega), hrA]
+    congr 1
+    rw [UInt16.toNat_add, hpcA]; simp only [show (3 : UInt16).toNat = 3 from rfl]; omega
+  · rw [← tB2, word_called sB _ hszB rB' (by omega), hrB]
+    congr 1
+    rw [UInt16.toNat_add, hpcB]; simp only [show (3 : UInt16).toNat = 3 from rfl]; omega
+  · rw [show top sA.sp - 2 + 2 = top sA.sp by omega, show top sB.sp - 2 + 2 = top sB.sp by omega]
+    exact Stk.congr G _ _ _ _ _ _ S.stk (fun x hx => aboveA x (Or.inl hx)) (fun x hx => aboveB x (Or.inl hx))
+
+/-- info: 'Ember.Proof.PassSim.seg_call' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in #print axioms seg_call
+
 end Ember.Proof.PassSim

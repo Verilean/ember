@@ -328,7 +328,8 @@ The Z80 back end (M7, begun) — `Ember.Z80.IR.Sem` is the semantics of its IR:
   memory and the stack pointer, `H` and `L` free where the relation says; the RAM below the stack
   equal; the stacks holding the same calls, `Stk`: the return addresses of both images, or of `A`
   alone for a call that is a jump in `B`; the devices in the same state), and segments that keep it:
-  an ordinary instruction (`seg_ord`), a jump (`seg_jump`);
+  an ordinary instruction (`seg_ord`), a jump (`seg_jump`), a call (`seg_call`: each pushes its own
+  return address, a frame more on the stacks);
 * `Z80PassRun`: two machines side by side to the end (`sim_halts`: a relation kept by segments of
   the two runs, the first machine taking at least one step, under which the first halted means the
   second halted with the same devices — then when the first halts so does the second);
