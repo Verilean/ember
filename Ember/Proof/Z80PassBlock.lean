@@ -469,4 +469,183 @@ theorem loop_eq_rounds (D : Dev) {A B : Code} {lo hi : Nat} (hhi : hi ≤ 65536)
 /-- info: 'Ember.Proof.PassSim.loop_eq_rounds' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in #print axioms loop_eq_rounds
 
+/-! ## `rt_add32`, `rt_sub32`, `rt_or32` -/
+
+/-- The state after `ld r,n` (`r` of `B C D E H L A`). -/
+def ldRN (s : Cpu) (y : UInt8) (n : UInt8) : Cpu := ((skip (op1 s) 1).setReg .hl y n).tick 7
+
+theorem exec_ld_b_n (env : Env) (v : Val) (s : Cpu) (inp : UInt16 → UInt8) :
+    exec env ⟨.ld, [.b, .imm v]⟩ s inp = some (ldRN s 0 (Instr.immB env ⟨.ld, [.b, .imm v]⟩)) := rfl
+
+theorem ldRN_b (s : Cpu) (n : UInt8) : (ldRN s 0 n).b = n ∧ (ldRN s 0 n).hl = s.hl ∧ (ldRN s 0 n).de = s.de := by
+  refine ⟨rfl, rfl, rfl⟩
+
+/-- The state after `or a`. -/
+def orAS (s : Cpu) : Cpu := ((op1 s).alu 6 ((op1 s).reg .hl 7)).tick 4
+
+theorem orAS_regs (s : Cpu) : (orAS s).hl = s.hl ∧ (orAS s).de = s.de ∧ (orAS s).b = s.b := by
+  simp only [orAS, alu_struct]; exact ⟨rfl, rfl, rfl⟩
+
+theorem Has.right {C : Code} {r : Nat} {l1 l2 : List Item} (h : Has C r (l1 ++ l2)) : Has C (r + l1.length) l2 := by
+  intro j it hj
+  have := h (l1.length + j) it (by rw [List.getElem?_append_right (by omega)]; simpa using hj)
+  rw [← Nat.add_assoc] at this; exact this
+
+theorem Has.left {C : Code} {r : Nat} {l1 l2 : List Item} (h : Has C r (l1 ++ l2)) : Has C r l1 := by
+  intro j it hj
+  have hlt : j < l1.length := by
+    rcases Nat.lt_or_ge j l1.length with h' | h'
+    · exact h'
+    · rw [List.getElem?_eq_none h'] at hj; cases hj
+  exact h j it (by rw [List.getElem?_append_left hlt]; exact hj)
+
+theorem mrun_25 (D : Dev) (x : Cpu × D.W) : mrun D 25 x = mstep D (mrun D (6 * (3 + 1)) x) := by
+  show mrun D (24 + 1) x = _; rw [mrun_add]; rfl
+
+/-- The loop of four rounds and the `ret` after it, in both machines (the frame of the call on top). -/
+theorem loop_ret (D : Dev) {A B : Code} {lo hi : Nat} (hhi : hi ≤ 65536) {G : List Frame}
+    {L M rA rB e : Nat} {l : String} {i : Instr} (k : UInt8)
+    (hexec : ∀ env s inp, exec env i s inp = some (aluMS k s)) (hfi : i.falls = true)
+    (hLA : Has A L (loopItems l i ++ [.ins ⟨.ret, []⟩])) (hLB : Has B M (loopItems l i ++ [.ins ⟨.ret, []⟩]))
+    {x y : Cpu × D.W} (S : Sync D A B lo hi (.ret rA rB e :: G) (L + 1) (M + 1) false false x y)
+    (hb : x.1.b.toNat = 4) (h1 : lo ≤ x.1.hl.toNat ∧ x.1.hl.toNat + 4 ≤ hi)
+    (d1 : lo ≤ x.1.de.toNat ∧ x.1.de.toNat + 4 ≤ hi) :
+    Sync D A B lo hi G rA rB false false (mrun D 25 x) (mrun D 25 y) := by
+  have S7 := loop_eq_rounds D hhi k hexec hfi hLA.left hLB.left 3 x y S hb h1.1 (by omega) d1.1 (by omega)
+  have iA : A.items[L + 7]? = some (.ins ⟨.ret, (none : Option Arg).toList⟩) := by
+    have := hLA.right; exact this.get 0 rfl
+  have iB : B.items[M + 7]? = some (.ins ⟨.ret, (none : Option Arg).toList⟩) := by
+    have := hLB.right; exact this.get 0 rfl
+  have S8 := seg_ret D (cc := none) (fun _ h => by cases h) iA iB S7
+  simp only [taken, if_true] at S8
+  rw [mrun_25, mrun_25]; exact S8
+
+/-- The beginning of `rt_add32`, `rt_sub32`, `rt_or32`: the call, `ld b,4`, `ld de,rt_acc`; the relation at
+the item after (`r + 7`), `B` four, `DE` the accumulator, `HL` as at the call. -/
+theorem bytes_head (D : Dev) {A B : Code} {lo hi : Nat} (hhi : hi ≤ 65536) (hlo : lo ≤ hi) (h1 : 1 ≤ hi)
+    {G : List Frame} {kA kB r q acc : Nat} {name : String} {rest : List Item}
+    (hA : A.items[kA]? = some (.ins ⟨.call, [.imm (.sym s!"rt_{name}32" 0)]⟩))
+    (hB : B.items[kB]? = some (.ins ⟨.call, [.imm (.sym s!"rt_{name}32" 0)]⟩))
+    (hLA : Has A r ([.label s!"rt_{name}64", .ins ⟨.ld, [.b, .imm (.num 8)]⟩, .ins ⟨.jr, [.imm (.sym s!"rt_{name}w")]⟩,
+      .label s!"rt_{name}32", .ins ⟨.ld, [.b, .imm (.num 4)]⟩,
+      .label s!"rt_{name}w", .ins ⟨.ld, [.de, .imm (.sym "rt_acc")]⟩] ++ rest))
+    (hLB : Has B q ([.label s!"rt_{name}64", .ins ⟨.ld, [.b, .imm (.num 8)]⟩, .ins ⟨.jr, [.imm (.sym s!"rt_{name}w")]⟩,
+      .label s!"rt_{name}32", .ins ⟨.ld, [.b, .imm (.num 4)]⟩,
+      .label s!"rt_{name}w", .ins ⟨.ld, [.de, .imm (.sym "rt_acc")]⟩] ++ rest))
+    (haccA : ∀ pa, (A.a.env pa).val (.sym "rt_acc" 0) = Int.ofNat acc)
+    (haccB : ∀ pb, (B.a.env pb).val (.sym "rt_acc" 0) = Int.ofNat acc)
+    (hacc : acc + 4 ≤ hi)
+    {x y : Cpu × D.W} (S : Sync D A B lo hi G kA kB false false x y) (room : hi + 2 ≤ top x.1.sp) :
+    Sync D A B lo hi (.ret (kA + 1) (kB + 1) (r + 3) :: G) (r + 7) (q + 7) false false (mrun D 3 x) (mrun D 3 y) ∧
+      (mrun D 3 x).1.b.toNat = 4 ∧ (mrun D 3 x).1.hl = x.1.hl ∧ (mrun D 3 x).1.de.toNat = acc := by
+  have l3A : A.items[r + 3]? = some (.label s!"rt_{name}32") := hLA.get 3 rfl
+  have l3B : B.items[q + 3]? = some (.label s!"rt_{name}32") := hLB.get 3 rfl
+  have i4A : A.items[r + 4]? = some (.ins (Form.ldBI (.num 4)).instr) := hLA.get 4 rfl
+  have i4B : B.items[q + 4]? = some (.ins (Form.ldBI (.num 4)).instr) := hLB.get 4 rfl
+  have l5A : A.items[r + 5]? = some (.label s!"rt_{name}w") := hLA.get 5 rfl
+  have l5B : B.items[q + 5]? = some (.label s!"rt_{name}w") := hLB.get 5 rfl
+  have i6A : A.items[r + 6]? = some (.ins (Form.ldDEI (.sym "rt_acc" 0)).instr) := hLA.get 6 rfl
+  have i6B : B.items[q + 6]? = some (.ins (Form.ldDEI (.sym "rt_acc" 0)).instr) := hLB.get 6 rfl
+  have hvacc : ∀ pa pb, (A.a.env pa).val (.sym "rt_acc" 0) = (B.a.env pb).val (.sym "rt_acc" 0) := by
+    intro pa pb; rw [haccA, haccB]
+  obtain ⟨sA, w⟩ := x
+  simp only at room
+  show Sync D A B lo hi _ (r + 7) (q + 7) false false (mstep D (mstep D (mstep D (sA, w)))) (mstep D (mstep D (mstep D y))) ∧
+    (mstep D (mstep D (mstep D (sA, w)))).1.b.toNat = 4 ∧ (mstep D (mstep D (mstep D (sA, w)))).1.hl = sA.hl ∧
+    (mstep D (mstep D (mstep D (sA, w)))).1.de.toNat = acc
+  obtain ⟨T, adA, _, _, _, _, eA1, _⟩ := call_mstep D hA l3A S.LA S.atA w
+  have S1 := (seg_call D hhi hA l3A hB l3B S hlo h1 room).skip l3A l3B
+  rw [eA1] at S1 ⊢
+  obtain ⟨hl1, _, _⟩ := called_regs sA (UInt16.ofNat T)
+  generalize called sA (UInt16.ofNat T) = s1 at S1 hl1 ⊢
+  have S2 := (seg_ord D hhi (Form.ldBI (.num 4)) (by intro h; cases h) i4A i4B
+    (imm_same _ _ rfl ⟨by decide, by decide⟩ (val_num 4)) (by simp) (by simp) S1
+    (by simp [Form.viaHL]) (by simp [Form.viaDE]) (fun _ h => by simp [Form.viaNN] at h)).skip l5A l5B
+  rw [mstep_exec D i4A S1.LA S1.atA w (s' := ldRN s1 0 (Instr.immB (A.a.env 0) ⟨.ld, [.b, .imm (.num 4)]⟩))
+      (fun pa inp => by
+        show exec (A.a.env pa) ⟨.ld, [.b, .imm (.num 4)]⟩ s1 inp = _
+        rw [exec_ld_b_n]; rfl) rfl] at S2 ⊢
+  have hb2 : (ldRN s1 0 (Instr.immB (A.a.env 0) ⟨.ld, [.b, .imm (.num 4)]⟩)).b.toNat = 4 := rfl
+  obtain ⟨_, hl2, _⟩ := ldRN_b s1 (Instr.immB (A.a.env 0) ⟨.ld, [.b, .imm (.num 4)]⟩)
+  generalize ldRN s1 0 (Instr.immB (A.a.env 0) ⟨.ld, [.b, .imm (.num 4)]⟩) = s2 at S2 hb2 hl2 ⊢
+  simp only [Form.writesH, Form.writesL, Bool.false_and] at S2
+  have S3 := seg_ord D hhi (Form.ldDEI (.sym "rt_acc" 0)) (by intro h; cases h) i6A i6B
+    (imm_same _ _ rfl ⟨by decide, by decide⟩ hvacc) (by simp) (by simp) S2
+    (by simp [Form.viaHL]) (by simp [Form.viaDE]) (fun _ h => by simp [Form.viaNN] at h)
+  have e3 : mstep D (s2, w) = (ldRP s2 1 (Instr.immW (A.a.env 0) ⟨.ld, [.de, .imm (.sym "rt_acc" 0)]⟩), w) :=
+    mstep_exec D i6A S2.LA S2.atA w (fun pa inp => by
+      show exec (A.a.env pa) ⟨.ld, [.de, .imm (.sym "rt_acc" 0)]⟩ s2 inp = _
+      rw [exec_ld_rp _ .de 1 rfl (by decide)]
+      congr 2
+      apply UInt16.toNat_inj.mp
+      rw [immW_toNat _ _ _ acc rfl (haccA pa) (by omega), immW_toNat _ _ _ acc rfl (haccA 0) (by omega)]) rfl
+  have hacc3 : (Instr.immW (A.a.env 0) ⟨.ld, [.de, .imm (.sym "rt_acc" 0)]⟩).toNat = acc :=
+    immW_toNat _ _ _ acc rfl (haccA 0) (by omega)
+  rw [e3] at S3 ⊢
+  obtain ⟨de3, hl3, _⟩ := ldRP_de s2 (Instr.immW (A.a.env 0) ⟨.ld, [.de, .imm (.sym "rt_acc" 0)]⟩)
+  have hb3 : (ldRP s2 1 (Instr.immW (A.a.env 0) ⟨.ld, [.de, .imm (.sym "rt_acc" 0)]⟩)).b = s2.b := rfl
+  simp only [Form.writesH, Form.writesL, Bool.false_and] at S3
+  refine ⟨S3, by simp only; rw [hb3]; exact hb2, by simp only; rw [hl3, hl2, hl1], by simp only; rw [de3, hacc3]⟩
+
+theorem bytewise_split (name : String) (pre : List Item) (i : Instr) :
+    bytewiseItems name pre i =
+      [.label s!"rt_{name}64", .ins ⟨.ld, [.b, .imm (.num 8)]⟩, .ins ⟨.jr, [.imm (.sym s!"rt_{name}w")]⟩,
+        .label s!"rt_{name}32", .ins ⟨.ld, [.b, .imm (.num 4)]⟩,
+        .label s!"rt_{name}w", .ins ⟨.ld, [.de, .imm (.sym "rt_acc")]⟩] ++
+      (pre ++ (loopItems s!"rt_{name}w_l" i ++ [.ins ⟨.ret, []⟩])) := by
+  simp only [bytewiseItems, List.append_assoc]
+
+/-- **`call rt_add32`, `rt_sub32`, `rt_or32` in both machines, the four bytes at `HL` in the RAM kept
+equal**: the routine's items in each image (`bytewiseItems`, with `or a` before the loop or nothing),
+the accumulator in that RAM, room for the return address: the relation kept at the items after the
+calls. -/
+theorem blk_bytes (D : Dev) {A B : Code} {lo hi : Nat} (hhi : hi ≤ 65536) (hlo : lo ≤ hi) (h1 : 1 ≤ hi)
+    {G : List Frame} {kA kB r q acc : Nat} {name : String} {pre : List Item} {i : Instr} (k : UInt8)
+    (hpre : pre = [] ∨ pre = [.ins Form.orA.instr])
+    (hexec : ∀ env s inp, exec env i s inp = some (aluMS k s)) (hfi : i.falls = true)
+    (hA : A.items[kA]? = some (.ins ⟨.call, [.imm (.sym s!"rt_{name}32" 0)]⟩))
+    (hB : B.items[kB]? = some (.ins ⟨.call, [.imm (.sym s!"rt_{name}32" 0)]⟩))
+    (hLA : Has A r (bytewiseItems name pre i)) (hLB : Has B q (bytewiseItems name pre i))
+    (haccA : ∀ pa, (A.a.env pa).val (.sym "rt_acc" 0) = Int.ofNat acc)
+    (haccB : ∀ pb, (B.a.env pb).val (.sym "rt_acc" 0) = Int.ofNat acc)
+    (hacc : lo ≤ acc ∧ acc + 4 ≤ hi)
+    {x y : Cpu × D.W} (S : Sync D A B lo hi G kA kB false false x y)
+    (room : hi + 2 ≤ top x.1.sp) (foot : lo ≤ x.1.hl.toNat ∧ x.1.hl.toNat + 4 ≤ hi) :
+    Sync D A B lo hi G (kA + 1) (kB + 1) false false (mrun D (28 + pre.length) x) (mrun D (28 + pre.length) y) := by
+  rw [bytewise_split] at hLA hLB
+  obtain ⟨S3, hb3, hl3, de3⟩ := bytes_head D hhi hlo h1 hA hB hLA hLB haccA haccB hacc.2 S room
+  have tA := hLA.right
+  have tB := hLB.right
+  simp only [List.length_cons, List.length_nil] at tA tB
+  rcases hpre with rfl | rfl
+  · have lA : A.items[r + 7]? = some (.label s!"rt_{name}w_l") := tA.get 0 rfl
+    have lB : B.items[q + 7]? = some (.label s!"rt_{name}w_l") := tB.get 0 rfl
+    have R := loop_ret D hhi k hexec hfi (L := r + 7) (M := q + 7) (by simpa using tA) (by simpa using tB)
+      (S3.skip lA lB) hb3 (by rw [hl3]; exact ⟨foot.1, foot.2⟩) (by rw [de3]; exact ⟨hacc.1, hacc.2⟩)
+    rw [show 28 + ([] : List Item).length = 3 + 25 from rfl, mrun_add, mrun_add]
+    exact R
+  · have iA : A.items[r + 7]? = some (.ins Form.orA.instr) := tA.get 0 rfl
+    have iB : B.items[q + 7]? = some (.ins Form.orA.instr) := tB.get 0 rfl
+    have S4 := seg_ord D hhi Form.orA (by intro h; cases h) iA iB (fun _ _ => ⟨rfl, rfl⟩) (by simp) (by simp) S3
+      (by simp [Form.viaHL]) (by simp [Form.viaDE]) (fun _ h => by simp [Form.viaNN] at h)
+    simp only [Form.writesH, Form.writesL, Bool.false_and] at S4
+    have lA : A.items[r + 7 + 1]? = some (.label s!"rt_{name}w_l") := tA.get 1 rfl
+    have lB : B.items[q + 7 + 1]? = some (.label s!"rt_{name}w_l") := tB.get 1 rfl
+    have e4 : mstep D (mrun D 3 x) = (orAS (mrun D 3 x).1, (mrun D 3 x).2) :=
+      mstep_exec D iA S3.LA S3.atA _ (fun _ _ => rfl) rfl
+    obtain ⟨hl4, de4, b4⟩ := orAS_regs (mrun D 3 x).1
+    have tA' : Has A (r + 7 + 1) (loopItems s!"rt_{name}w_l" i ++ [.ins ⟨.ret, []⟩]) := by
+      have := tA.right; simpa using this
+    have tB' : Has B (q + 7 + 1) (loopItems s!"rt_{name}w_l" i ++ [.ins ⟨.ret, []⟩]) := by
+      have := tB.right; simpa using this
+    have R := loop_ret D hhi k hexec hfi tA' tB' (S4.skip lA lB)
+      (by rw [e4]; simp only; rw [b4]; exact hb3)
+      (by rw [e4]; simp only; rw [hl4, hl3]; exact ⟨foot.1, foot.2⟩)
+      (by rw [e4]; simp only; rw [de4, de3]; exact ⟨hacc.1, hacc.2⟩)
+    rw [show 28 + [Item.ins Form.orA.instr].length = 3 + (1 + 25) from rfl, mrun_add, mrun_add, mrun_add, mrun_add]
+    exact R
+
+/-- info: 'Ember.Proof.PassSim.blk_bytes' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in #print axioms blk_bytes
+
 end Ember.Proof.PassSim
