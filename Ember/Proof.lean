@@ -136,6 +136,8 @@ import Ember.Proof.TcbCheckpoint
 import Ember.Proof.Z80StackHTcb
 import Ember.Proof.Z80StackHTcbObs
 import Ember.Proof.Z80PassLocal
+import Ember.Proof.Z80PassSim
+import Ember.Proof.Z80StackDAsm
 import Ember.Proof.Z80World
 import Ember.Proof.Z80Image
 import Ember.Proof.Z80LoopHItems
@@ -301,9 +303,17 @@ The Z80 back end (M7, begun) — `Ember.Z80.IR.Sem` is the semantics of its IR:
   reads, `obsList`: `run_eq`).  Not the Spec's `tcb` lines: an item can write two, or one that is not
   the state after it;
 * `Z80PassLocal`: **the passes on the assembly, begun** — what each rewrites and what its soundness
-  needs (a table); `packHigh`'s rewrite does what the four instructions do but for `pc`, `R` and the
-  T-states (`packHigh_from`, `packHigh_to`, `packHigh_agree`).  Nothing yet of the image as built by
-  default.
+  needs (a table); the rewrites on `Asm.exec`, from one CPU state: `packHigh`'s (`packHigh_agree`),
+  `Asm.relax`'s (`exec_jp_to`, `exec_jr_to`, `exec_jpcc_to`, `exec_jrcc_to`), `retThreading`'s
+  (`jp_ret`, `jpcc_ret`), `peephole`'s conditional return (`exec_retcc`, `cond_invert`);
+* `Z80PassSim`: two images side by side on the machine of the proofs (`wstep`: the harness's, no
+  interrupt, the code in ROM): `packHigh_steps` — four steps of the image without the passes and two
+  of one with `packHigh`, from states equal but for `pc`, `R`, the T-states and memory, at the items
+  of the rewrite, to such states at the items after it;
+* `Z80StackDItems`, `Z80StackDAsm`: the image of the stack for the harness **as built by default**
+  (with the passes), written out (`#guard`: what `build` gives) and assembled by the kernel
+  (`StackD.assemble_items`).  Nothing yet of what it does: the relation between it and the image
+  without the passes is not proved.
 
 By-reference parameters and `inlineCalls` are outside M7.1; of `IR → Z80` (M7.3) not proved: the routines
 of the runtime the stack's image for the harness does not call; interrupts and the board's runtime and

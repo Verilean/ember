@@ -113,26 +113,48 @@ where
 
 def pairText (p : String × Nat) : String := s!"({repr p.1}, {p.2})"
 
-def itemsFile (img : Image) : String :=
-  let parts := chunks 250 img.items
-  "import Ember.Proof.Z80Image
-import Ember.Proof.Z80StackIR
-import Ember.Z80.Runtime
+/-- Which image of the stack a file is of: the one without the passes (`StackH`, what the
+proofs of M7.3 are about) or the one built by default (`StackD`). -/
+structure Which where
+  /-- `H` or `D`: in the names of the modules and the namespace. -/
+  tag : String := "H"
+  passes : Bool := false
 
-/-!
-# Ember.Proof.Z80StackHItems — the items of the image of the stack for the test harness, written out (plan M7.3)
+def Which.ns (w : Which) : String := s!"Ember.Proof.Z80Gen.Stack{w.tag}"
+
+def itemsDoc (w : Which) : String :=
+  if w.passes then
+    s!"# Ember.Proof.Z80Stack{w.tag}Items — the items of the image of the stack for the test harness as built by default, written out (plan M7.3)
+
+`Stack{w.tag}.items` is what `Codegen.build` assembles for the SLIP build of
+the stack with the runtime of the test harness (`Runtime.harness`), with
+the passes on the assembly (`retThreading`, `sweep`, `peephole`,
+`packHigh`, `Asm.relax`): the image the tests run by default.  That it is
+what `build` gives, and the layout what `build` computes, are `#guard`s —
+evaluated when this file is built, not proved."
+  else
+    "# Ember.Proof.Z80StackHItems — the items of the image of the stack for the test harness, written out (plan M7.3)
 
 `StackH.items` is what `Codegen.build` assembles for the SLIP build of
 the stack with the runtime of the test harness (`Runtime.harness`:
 effects are ports of the model, no interrupts), without the passes on
 the assembly.  That it is what `build` gives, and the layout what
 `build` computes, are `#guard`s — evaluated when this file is built,
-not proved.
+not proved."
+
+def itemsFile (img : Image) (w : Which := {}) : String :=
+  let parts := chunks 250 img.items
+  "import Ember.Proof.Z80Image
+import Ember.Proof.Z80StackIR
+import Ember.Z80.Runtime
+
+/-!
+" ++ itemsDoc w ++ "
 
 Written by `ember-z80 proof-files` (`Ember.Tools.ProofGen`).
 -/
 
-namespace Ember.Proof.Z80Gen.StackH
+namespace " ++ w.ns ++ "
 open Ember.Z80 Ember.Z80.Asm
 
 " ++ String.join ((List.range parts.length).zip parts |>.map fun (k, its) =>
@@ -146,21 +168,21 @@ def layout : IR.Layout :=
     frames := " ++ listText (img.layout.frames.map pairText) ++ ",
     top := " ++ toString img.layout.top ++ " }
 
-/-- The items and the layout are those of the image `build` gives without the passes. -/
+/-- The items and the layout are those of the image `build` gives " ++ (if w.passes then "by default" else "without the passes") ++ ". -/
 def isBuilt : Bool :=
-  match Codegen.build Stack.ir Runtime.harness (passes := false) with
+  match Codegen.build Stack.ir Runtime.harness" ++ (if w.passes then "" else " (passes := false)") ++ " with
   | .ok img => img.items == items && img.layout.globals == layout.globals && img.layout.frames == layout.frames &&
       img.layout.top == layout.top
   | .error _ => false
 
 #guard isBuilt
 
-end Ember.Proof.Z80Gen.StackH
+end " ++ w.ns ++ "
 "
 
 /-- The image assembled, in the stretches of `items` (`chunks 250`):
 for each, its addresses and bytes, and a theorem of each pass on it. -/
-def asmFile (items : List Item) (a : Assembled) : String := Id.run do
+def asmFile (items : List Item) (a : Assembled) (w : Which := {}) : String := Id.run do
   let parts := chunks 250 items
   let n := parts.length
   -- the first item of each stretch, and the labels before it
@@ -174,7 +196,23 @@ def asmFile (items : List Item) (a : Assembled) : String := Id.run do
     if j == 0 then "[]" else if j == n then "asm.labels.reverse" else s!"(asm.labels.take {labsBefore.getD j 0}).reverse"
   let lsChunks := chunks 250 a.labels
   let cat (pre : String) (m : Nat) : String := " ++ ".intercalate ((List.range m).map fun k => s!"{pre}{k}")
-  let mut t := "import Ember.Proof.Z80StackHGen
+  let head := if w.passes then
+    s!"import Ember.Proof.Z80Stack{w.tag}Items
+import Ember.Proof.Z80AsmChunks
+
+/-!
+# Ember.Proof.Z80Stack{w.tag}Asm — the image of the stack for the harness as built by default, assembled (plan M7.3)
+
+`asm`: what `assemble` makes of `Stack{w.tag}.items`, written out, and
+`assemble_items` — that it is, by the kernel, a stretch of the items at a
+time (`Z80AsmChunks`), as `Z80StackHAsm` has it for the image without
+the passes.
+
+Written by `ember-z80 proof-files` (`Ember.Tools.ProofGen`).
+-/
+"
+  else
+    "import Ember.Proof.Z80StackHGen
 import Ember.Proof.Z80AsmChunks
 
 /-!
@@ -193,8 +231,9 @@ not checked at once.
 
 Written by `ember-z80 proof-files` (`Ember.Tools.ProofGen`).
 -/
-
-namespace Ember.Proof.Z80Gen.StackH
+"
+  let mut t := head ++ "
+namespace " ++ w.ns ++ "
 open Ember.Z80 Ember.Z80.Asm
 
 set_option maxRecDepth 100000
@@ -252,7 +291,7 @@ theorem emit_all : emit (fun s => (asm.labels.reverse.lookup s).map Int.ofNat) i
 theorem assemble_items : assemble items = .ok asm :=
   assemble_of items _ {endPc} asm.labels _ place_all (by decide) emit_all
 
-end Ember.Proof.Z80Gen.StackH
+end {w.ns}
 "
   return t
 
@@ -634,7 +673,7 @@ theorem shared_eq : sharedBytes Stack.ir = sharedOf Stack.ir sharedFrames :=
 end Ember.Proof.Z80Gen.StackH
 "
 
-/-- Write the five files into `dir`. -/
+/-- Write the files into `dir`. -/
 def write (dir : System.FilePath) (n : Nat := stretch) : IO UInt32 := do
   let fail (e : String) : IO UInt32 := do IO.eprintln s!"proof-files: {e}"; return 1
   let q ← match Net.prog.check with
@@ -664,6 +703,16 @@ def write (dir : System.FilePath) (n : Nat := stretch) : IO UInt32 := do
   IO.FS.writeFile (dir / "Z80StackIR.lean") (irFile ir)
   IO.FS.writeFile (dir / "Z80StackHItems.lean") (itemsFile img)
   IO.FS.writeFile (dir / "Z80StackHAsm.lean") (asmFile img.items a)
+  -- the image as built by default, for the proofs about the passes
+  let imgD ← match Codegen.build ir Runtime.harness with
+    | .ok img => pure img
+    | .error e => return ← fail e
+  let aD ← match assemble imgD.items with
+    | .ok a => pure a
+    | .error e => return ← fail e
+  let wD : Which := { tag := "D", passes := true }
+  IO.FS.writeFile (dir / "Z80StackDItems.lean") (itemsFile imgD wD)
+  IO.FS.writeFile (dir / "Z80StackDAsm.lean") (asmFile imgD.items aD wD)
   IO.FS.createDirAll (dir / "Z80StackHGen")
   IO.FS.writeFile (dir / "Z80StackHGen" / "Shared.lean") (sharedFile ir)
   let mut prev := ["Ember.Proof.Z80StackHGen.Shared"]
