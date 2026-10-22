@@ -85,6 +85,9 @@ structure World where
   /-- The program reads frame by frame (`input.frame`): the end of a
   chunk is an item of its own, so an exhausted chunk is not skipped. -/
   framed : Bool := false
+  /-- A trap was recorded: a machine's harness sets it when the program
+  writes its trap port.  The Ember semantics never sets it. -/
+  trapped : Bool := false
   deriving Inhabited
 
 def World.done (w : World) : Bool := w.pos ≥ w.inputs.size

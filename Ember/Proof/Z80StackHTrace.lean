@@ -1,4 +1,5 @@
 import Ember.Proof.Z80StackHMachine
+import Ember.Proof.SemTrapped
 import Ember.Z80.Target
 
 /-!
@@ -17,15 +18,24 @@ each with the number of its input, are those of the Spec's trace
 
 `stackH_trace_lines`: the whole trace — for each input its line, then
 that input's events in the world the Ember semantics leaves (`mainIter`),
-notes included — then at most a line saying a trap was recorded.
+notes included — and nothing else: no line saying a trap was recorded.
 
-Not in it: that no trap is recorded (that last line).
+`stackH_no_trap`: the machine the tests run halts a first time, and then
+the harness has recorded no trap (no `HEvent.trap` among its events);
+further steps leave it halted with the same events.
+
+A trap is a write to the port `0xD7` (`rt_trap`).  The proofs' machine
+records it in the world (`World.trapped`, `Z80HarnessW.hdev`), `Sim`
+ties that to the harness's events (`trapIn`), and the Ember semantics
+never sets it (`SemTrapped`): the world at the halt is the Ember
+semantics', so no trap was recorded.
 -/
 
 namespace Ember.Proof.Z80Gen
 open Ember Ember.Z80 Ember.Z80.Asm
 open Ember.Proof.Refine (kept specKept keep)
-open Ember.Proof.Z80Gen.LoopH (Sim mrun harnessMachine step_sim evOf evsOf)
+open Ember.Proof.Refine (mainIter)
+open Ember.Proof.Z80Gen.LoopH (Sim mrun harnessMachine step_sim step_eq afterCpu evOf evsOf trapIn)
 open Ember.Trace (Input Line Event Trace)
 
 /-! ## Until the CPU halts -/
@@ -84,6 +94,54 @@ theorem sim_halted_run {c : IR.Ctx} : ∀ (d : Nat) (m : Machine) (w : HW), Sim 
   | d + 1, m, w, S, h => by
     obtain ⟨S1, h1⟩ := sim_halted S h
     exact sim_halted_run d m.step w S1 h1
+
+/-- A halted CPU's step does nothing on the bus: the events stay. -/
+theorem halted_events {c : IR.Ctx} {m : Machine} {w : HW} (S : Sim c m w) (h : m.cpu.halted = true) :
+    m.step.events = m.events := by
+  rw [step_eq S]
+  unfold afterCpu Machine.applyIo
+  rw [cpu_step_halted m.cpu (hbus w) h]
+  rfl
+
+theorem halted_events_run {c : IR.Ctx} : ∀ (d : Nat) (m : Machine) (w : HW), Sim c m w → m.cpu.halted = true →
+    (mrun d m).events = m.events
+  | 0, _, _, _, _ => rfl
+  | d + 1, m, w, S, h => by
+    obtain ⟨S1, h1⟩ := sim_halted S h
+    show (mrun d m.step).events = _
+    rw [halted_events_run d m.step w S1 h1, halted_events S h]
+
+/-! ## No trap -/
+
+theorem trapIn_of_any {es : Array (Nat × HEvent)} {f : Nat × HEvent → Bool}
+    (hf : ∀ j e, f (j, e) = true → (e matches .trap) = true) (h : es.any f = true) : trapIn es = true := by
+  unfold trapIn
+  rw [Array.any_eq_true'] at h ⊢
+  obtain ⟨⟨j, e⟩, hm, hx⟩ := h
+  exact ⟨(j, e), hm, hf j e hx⟩
+
+theorem not_trap_of {es : Array (Nat × HEvent)} (h : trapIn es = false) : ∀ x ∈ es, x.2 ≠ .trap := by
+  intro x hx he
+  have h2 : trapIn es = true := by
+    unfold trapIn
+    rw [Array.any_eq_true']
+    exact ⟨x, hx, by rw [he]⟩
+  rw [h] at h2
+  cases h2
+
+/-- `main` called again and again sets no trap in the world. -/
+theorem mainIter_trapped (fuel : Nat) (p : Lang.Prog) : ∀ (j : Nat) (st sti : Lang.Sem.St),
+    st.world.trapped = false → mainIter fuel p j st = some sti → sti.world.trapped = false
+  | 0, st, sti, h, hm => by
+    unfold mainIter at hm
+    cases hm
+    exact h
+  | j + 1, st, sti, h, hm => by
+    unfold mainIter at hm
+    split at hm
+    · rename_i st' hc
+      exact mainIter_trapped fuel p j st' sti (Lang.Sem.call_trapped h hc) hm
+    · cases hm
 
 /-! ## The lines -/
 
@@ -310,7 +368,7 @@ end Ember.Proof.Z80Gen
 namespace Ember.Proof.Z80Gen.StackH
 open Ember Ember.Z80 Ember.Z80.Asm
 open Ember.Proof.Refine (kept specKept keep mainIter)
-open Ember.Proof.Z80Gen.LoopH (Sim mrun harnessMachine run_sim_of harness_reset evOf evsOf)
+open Ember.Proof.Z80Gen.LoopH (Sim mrun harnessMachine run_sim_of harness_reset evOf evsOf trapIn)
 open Ember.Trace (Input Line Event Trace)
 
 /-- The machine `Tools.Z80.machineOf` makes of an image whose bytes are those of `a`. -/
@@ -329,7 +387,7 @@ theorem sim0 (a : Assembled) (inputs : Array Input) (hsz : a.bytes.size ≤ 0x80
   have R := harness_reset a inputs hsz
   exact ⟨R.harness, R.noRx, R.rdrf, R.tick, R.prog, R.inputs, R.pos, R.off, R.cur, R.latch, R.mark, R.frame, rfl, by
       rw [R.events]
-      rfl, R.nval⟩
+      rfl, R.nval, by rw [R.events]; show false = _; simp [trapIn]⟩
 
 /-- **The trace the tests print of the image of the stack**: loaded as
 `Tools.Z80.machineOf` loads it and run by `Target.runHarness` with the
@@ -397,24 +455,56 @@ theorem stackH_trace (p : Lang.Prog) (S : StackSrc p) :
 /-- info: 'Ember.Proof.Z80Gen.StackH.stackH_trace' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in #print axioms stackH_trace
 
+/-- **The harness records no trap**: the machine the tests run, the
+image of the stack loaded and any input, halts a first time — and then
+none of the events the harness recorded is a trap; further steps leave
+the CPU halted and the events as they are. -/
+theorem stackH_no_trap (p : Lang.Prog) (S : StackSrc p) :
+    ∃ a : Assembled, assemble items = .ok a ∧
+      ∀ inputs : Array Input, ∃ n0,
+        (∀ k, k < n0 → (mrun k (harnessMachine a inputs)).cpu.halted = false) ∧
+        (mrun n0 (harnessMachine a inputs)).cpu.halted = true ∧
+        (∀ x ∈ (mrun n0 (harnessMachine a inputs)).events, x.2 ≠ .trap) ∧
+        ∀ d, (mrun (n0 + d) (harnessMachine a inputs)).cpu.halted = true ∧
+          (mrun (n0 + d) (harnessMachine a inputs)).events = (mrun n0 (harnessMachine a inputs)).events := by
+  obtain ⟨a, ha, hall⟩ := stackH_halts p S
+  have hsz : a.bytes.size ≤ 0x8000 := by
+    have h := assemble_items
+    rw [ha] at h
+    cases h
+    simpa using rom_size
+  refine ⟨a, ha, fun inputs => ?_⟩
+  obtain ⟨i, sti, n, w', hi, _, hh, Sn, hw, _⟩ := hall inputs
+  obtain ⟨n0, hle, hh0, hfirst⟩ := first_halt (harnessMachine a inputs) n hh
+  obtain ⟨_, S0⟩ := run_sim_of img a [] n0 _ _ (sim0 a inputs hsz)
+  have Sn' := (sim_halted_run (n - n0) _ _ S0 hh0).1
+  rw [← mrun_add, show n0 + (n - n0) = n by omega] at Sn'
+  have htr : trapIn (mrun n0 (harnessMachine a inputs)).events = false := by
+    rw [← S0.trapped, Sn'.trapped, ← Sn.trapped, hw]
+    exact mainIter_trapped 4716 p i _ sti (Lang.Sem.initial_trapped p inputs) hi
+  refine ⟨n0, hfirst, hh0, not_trap_of htr, fun d => ⟨?_, ?_⟩⟩
+  · rw [mrun_add]; exact (sim_halted_run d _ _ S0 hh0).2
+  · rw [mrun_add]; exact halted_events_run d _ _ S0 hh0
+
+/-- info: 'Ember.Proof.Z80Gen.StackH.stackH_no_trap' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in #print axioms stackH_no_trap
+
 /-- **The whole trace the tests print of the image of the stack**: as
 `stackH_trace` runs it, the trace is, for each input in turn, the
 input's line, then the events of that input in the world the Ember
 semantics leaves when the input is used up (`main` called until then:
-`mainIter`) — transmissions, drops and notes, by their names — and after
-the last input at most a line saying that a trap was recorded (that none
-is, is not proved). -/
+`mainIter`) — transmissions, drops and notes, by their names — and
+nothing else (no trap is recorded: `stackH_no_trap`). -/
 theorem stackH_trace_lines (p : Lang.Prog) (S : StackSrc p) :
     ∃ a : Assembled, assemble items = .ok a ∧
       ∀ (h : Trace.Header) (inputs : Array Input), ∃ N, ∀ maxSteps, N ≤ maxSteps → ∃ tr,
         Target.runHarness (loaded a) 0 h inputs p.dropReasons.toArray p.notes.toArray maxSteps = .ok tr ∧
         tr.header = h ∧
-        ∃ (i : Nat) (sti : Lang.Sem.St) (extra : List Line),
+        ∃ (i : Nat) (sti : Lang.Sem.St),
           mainIter 4716 p i (Lang.Sem.initial p inputs) = some sti ∧ sti.world.next.1 = 0xFFFF ∧
-          (extra = [] ∨ ∃ c, extra = [⟨c, .note "trap (z80)"⟩]) ∧
           tr.lines.toList = (List.range inputs.size).flatMap (fun j =>
               ⟨j, Target.inputEvent inputs[j]!⟩ ::
-                (sti.world.events.toList.filter (·.1 == j)).map fun x => (⟨j, x.2⟩ : Line)) ++ extra := by
+                (sti.world.events.toList.filter (·.1 == j)).map fun x => (⟨j, x.2⟩ : Line)) := by
   obtain ⟨a, ha, hall⟩ := stackH_halts p S
   have hsz : a.bytes.size ≤ 0x8000 := by
     have h := assemble_items
@@ -433,17 +523,20 @@ theorem stackH_trace_lines (p : Lang.Prog) (S : StackSrc p) :
   rw [← mrun_add, show n0 + (n - n0) = n by omega] at Sn'
   have hev : evsOf img.ctx (mrun n0 (harnessMachine a inputs)).events = sti.world.events := by
     rw [S0.events, ← Sn'.events, Sn.events, hw]
+  have htr : trapIn (mrun n0 (harnessMachine a inputs)).events = false := by
+    rw [← S0.trapped, Sn'.trapped, ← Sn.trapped, hw]
+    exact mainIter_trapped 4716 p i _ sti (Lang.Sem.initial_trapped p inputs) hi
   have hd : p.dropReasons.toArray = img.ctx.dropReasons.toArray := by rw [S.drops]; rfl
   have hn : p.notes.toArray = img.ctx.notes.toArray := by rw [S.notes]; rfl
-  refine ⟨_, runHarness_lines _ h inputs _ _ maxSteps _ hrun, rfl, i, sti,
-    if (mrun n0 (harnessMachine a inputs)).events.any (fun (j, e) => j < inputs.size && e matches .trap) then
-      [(⟨(mrun n0 (harnessMachine a inputs)).cur, .note "trap (z80)"⟩ : Line)] else [], hi, hnext, ?_, ?_⟩
-  · split
-    · exact Or.inr ⟨_, rfl⟩
-    · exact Or.inl rfl
-  · dsimp only
-    rw [List.toList_toArray, hd, hn]
-    refine congrArg (· ++ _) ?_
+  refine ⟨_, runHarness_lines _ h inputs _ _ maxSteps _ hrun, rfl, i, sti, hi, hnext, ?_⟩
+  dsimp only
+  rw [List.toList_toArray, hd, hn]
+  split
+  · rename_i ht
+    have h2 := trapIn_of_any (fun j e => by cases e <;> simp) ht
+    rw [htr] at h2
+    cases h2
+  · rw [List.append_nil]
     apply flatMap_congr
     intro j _
     have := inputLines_evs img.ctx inputs (mrun n0 (harnessMachine a inputs)).events.toList j

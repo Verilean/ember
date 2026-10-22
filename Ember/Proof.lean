@@ -130,6 +130,8 @@ import Ember.Proof.Z80StackHRun
 import Ember.Proof.Z80StackHSpec
 import Ember.Proof.Z80StackHMachine
 import Ember.Proof.Z80StackHTrace
+import Ember.Proof.SemTrapped
+import Ember.Proof.Z80SimCheck
 import Ember.Proof.Z80World
 import Ember.Proof.Z80Image
 import Ember.Proof.Z80LoopHItems
@@ -279,7 +281,10 @@ The Z80 back end (M7, begun) — `Ember.Z80.IR.Sem` is the semantics of its IR:
   machine the tests run: **the image of the stack, loaded and run as the tests do, processes all its input
   and stops, having transmitted and dropped what the Spec does** (`stackH_spec_halt`, `stackH_halts`);
 * `Z80StackHTrace`: **the trace `Target.runHarness` prints of it has the transmissions and drops of
-  `Spec.run`'s, input by input, and the inputs as its input lines** (`stackH_trace`).
+  `Spec.run`'s, input by input, and the inputs as its input lines** (`stackH_trace`); **the whole trace
+  is the inputs each followed by its events in the world the Ember semantics leaves, notes included, and
+  nothing else** (`stackH_trace_lines`); **the harness records no trap** (`stackH_no_trap`; `SemTrapped`:
+  the Ember semantics never sets `World.trapped`; `Z80SimCheck`: `Sim` on small machines, `#guard`).
 
 By-reference parameters and `inlineCalls` are outside M7.1; of `IR → Z80` (M7.3) not proved: the routines
 of the runtime the stack's image for the harness does not call; interrupts and the board's runtime and

@@ -39,8 +39,9 @@ theorem mnorm : ∀ (n : Nat) (m : Machine), n = m.inputs.size - m.ipos →
     · simp only [h, dite_false]
 
 /-- An event the harness recorded, as the IR's world has it: a drop by
-the name of its reason, a note by its name and with its value.  (The
-trap is not followed.) -/
+the name of its reason, a note by its name and with its value.  (A trap
+is no event of the world: the world records it in `trapped`, and `Sim`
+ties that to `trapIn`.) -/
 def evOf (c : IR.Ctx) : HEvent → Option Trace.Event
   | .tx b => some (.tx b)
   | .drop k => some (.drop (c.dropReasons.getD k.toNat s!"code-{k.toNat}"))
@@ -49,6 +50,13 @@ def evOf (c : IR.Ctx) : HEvent → Option Trace.Event
 
 def evsOf (c : IR.Ctx) (es : Array (Nat × HEvent)) : Array (Nat × Trace.Event) :=
   es.filterMap fun e => (evOf c e.2).map fun x => (e.1, x)
+
+/-- Whether the harness recorded a trap. -/
+def trapIn (es : Array (Nat × HEvent)) : Bool := es.any fun e => e.2 matches .trap
+
+theorem trapIn_push (es : Array (Nat × HEvent)) (i : Nat) (e : HEvent) :
+    trapIn (es.push (i, e)) = (trapIn es || e matches .trap) := by
+  simp [trapIn, Array.any_push]
 
 /-- **The relation**: a `Machine` in harness mode with nothing on the
 serial line and no interrupt pending, and the world and latch it stands
@@ -69,6 +77,8 @@ structure Sim (c : IR.Ctx) (m : Machine) (w : HW) : Prop where
   framed : w.1.framed = false
   events : evsOf c m.events = w.1.events
   nval : m.nval = w.2.2.2
+  /-- The world says a trap was recorded when the harness recorded one. -/
+  trapped : w.1.trapped = trapIn m.events
 
 def mTook (m : Machine) (x : Nat) (l : UInt8) (p : Nat × Nat) : Machine := { m with cur := x, latch := l, ipos := p.1, ioff := p.2 }
 def mAt (m : Machine) (p : Nat × Nat) : Machine := { m with ipos := p.1, ioff := p.2 }
@@ -163,10 +173,10 @@ theorem take_sim {c : IR.Ctx} {m : Machine} {w : HW} (S : Sim c m w) :
     cases hx : w.1.inputs[(normPos w.1.inputs w.1.pos w.1.off).1] with
     | tick =>
       simp only
-      exact ⟨S.harness, S.noRx, S.rdrf, S.tick, S.prog, S.inputs, rfl, rfl, rfl, S.latch, S.mark, S.frame, S.framed, S.events, S.nval⟩
+      exact ⟨S.harness, S.noRx, S.rdrf, S.tick, S.prog, S.inputs, rfl, rfl, rfl, S.latch, S.mark, S.frame, S.framed, S.events, S.nval, S.trapped⟩
     | rx b =>
       simp only
-      refine ⟨S.harness, S.noRx, S.rdrf, S.tick, S.prog, S.inputs, rfl, rfl, rfl, ?_, S.mark, S.frame, S.framed, S.events, S.nval⟩
+      refine ⟨S.harness, S.noRx, S.rdrf, S.tick, S.prog, S.inputs, rfl, rfl, rfl, ?_, S.mark, S.frame, S.framed, S.events, S.nval, S.trapped⟩
       simp only [u8_to16_lt, if_true]
       show b[(normPos w.1.inputs w.1.pos w.1.off).2]! = lo (b.get! _).toUInt16
       apply UInt8.toNat_inj.mp
@@ -175,7 +185,7 @@ theorem take_sim {c : IR.Ctx} {m : Machine} {w : HW} (S : Sim c m w) :
       have := (b.get! (normPos w.1.inputs w.1.pos w.1.off).2).toNat_lt
       rw [Nat.mod_eq_of_lt (by omega), ba_getElem!]
   · simp only [h, dite_false]
-    exact ⟨S.harness, S.noRx, S.rdrf, S.tick, S.prog, S.inputs, rfl, rfl, S.cur, S.latch, S.mark, S.frame, S.framed, S.events, S.nval⟩
+    exact ⟨S.harness, S.noRx, S.rdrf, S.tick, S.prog, S.inputs, rfl, rfl, S.cur, S.latch, S.mark, S.frame, S.framed, S.events, S.nval, S.trapped⟩
 
 /-- The relation does not look at the CPU, the ACIA's registers or the debug port. -/
 theorem Sim.of_eq {c : IR.Ctx} {m m' : Machine} {w : HW} (S : Sim c m w) (h1 : m'.harness = m.harness)
@@ -187,7 +197,7 @@ theorem Sim.of_eq {c : IR.Ctx} {m m' : Machine} {w : HW} (S : Sim c m w) (h1 : m
   ⟨by rw [h1]; exact S.harness, by rw [h2, h3]; exact S.noRx, h4, h5, by rw [h6]; exact S.prog,
     by rw [h7]; exact S.inputs, by rw [h8]; exact S.pos, by rw [h9]; exact S.off, by rw [h10]; exact S.cur,
     by rw [h11]; exact S.latch, by rw [h14]; exact S.mark, by rw [h12]; exact S.frame, S.framed,
-    by rw [h13]; exact S.events, by rw [h15]; exact S.nval⟩
+    by rw [h13]; exact S.events, by rw [h15]; exact S.nval, by rw [h13]; exact S.trapped⟩
 
 theorem evsOf_push (c : IR.Ctx) (es : Array (Nat × HEvent)) (i : Nat) (e : HEvent) :
     evsOf c (es.push (i, e)) = match evOf c e with
@@ -255,7 +265,7 @@ theorem io_sim {c : IR.Ctx} {m : Machine} {w : HW} (S : Sim c m w) (c' : Cpu) :
       rw [this]
       exact ⟨S.harness, S.noRx, S.rdrf, S.tick, S.prog, S.inputs, S.pos, S.off, S.cur, S.latch, by
         show (m.ipos, m.ioff) = (w.1.pos, w.1.off)
-        rw [S.pos, S.off], S.frame, S.framed, S.events, S.nval⟩
+        rw [S.pos, S.off], S.frame, S.framed, S.events, S.nval, S.trapped⟩
     · rename_i h1 h2 h3 h4
       have : hdev c w (.read port) = w := by
         simp only [hdev, hl]
@@ -272,7 +282,7 @@ theorem io_sim {c : IR.Ctx} {m : Machine} {w : HW} (S : Sim c m w) (c' : Cpu) :
       rw [this]
       exact ⟨S.harness, S.noRx, S.rdrf, S.tick, S.prog, S.inputs, S.pos, S.off, S.cur, S.latch, S.mark, by
         show m.frame.push v = w.1.frame.push (UInt8.ofNat (v.toNat % 256))
-        rw [ofNat_toNat_mod, S.frame], S.framed, S.events, S.nval⟩
+        rw [ofNat_toNat_mod, S.frame], S.framed, S.events, S.nval, S.trapped⟩
     · -- 0xD4: the end of the frame
       rename_i h
       have : hdev c w (.write port v) = ((IR.Sem.effect c w.1 .outEnd []).2, w.2) := by simp [hdev, hl, h]
@@ -281,7 +291,9 @@ theorem io_sim {c : IR.Ctx} {m : Machine} {w : HW} (S : Sim c m w) (c' : Cpu) :
         show evsOf c (m.events.push (m.cur, .tx m.frame)) = w.1.events.push (w.1.cur, .tx w.1.frame)
         rw [evsOf_push]
         show (evsOf c m.events).push (m.cur, .tx m.frame) = _
-        rw [S.events, S.cur, S.frame], S.nval⟩
+        rw [S.events, S.cur, S.frame], S.nval, by
+        show w.1.trapped = trapIn (m.events.push (m.cur, .tx m.frame))
+        simp [trapIn_push, S.trapped]⟩
     · -- 0xD5: a drop
       rename_i h
       have : hdev c w (.write port v) = ((IR.Sem.effect c w.1 .drop [v.toNat]).2, w.2) := by simp [hdev, hl, h]
@@ -291,7 +303,9 @@ theorem io_sim {c : IR.Ctx} {m : Machine} {w : HW} (S : Sim c m w) (c' : Cpu) :
           w.1.events.push (w.1.cur, .drop (c.dropReasons.getD v.toNat s!"code-{v.toNat}"))
         rw [evsOf_push]
         show (evsOf c m.events).push (m.cur, .drop _) = _
-        rw [S.events, S.cur], S.nval⟩
+        rw [S.events, S.cur], S.nval, by
+        show w.1.trapped = trapIn (m.events.push (m.cur, .drop v))
+        simp [trapIn_push, S.trapped]⟩
     · -- 0xD6: a note, with the value written before it
       rename_i h
       have : hdev c w (.write port v) =
@@ -302,7 +316,9 @@ theorem io_sim {c : IR.Ctx} {m : Machine} {w : HW} (S : Sim c m w) (c' : Cpu) :
           w.1.events.push (w.1.cur, .note s!"{c.notes.getD v.toNat s!"note-{v.toNat}"} {w.2.2.2.1}")
         rw [evsOf_push]
         show (evsOf c m.events).push (m.cur, .note _) = _
-        rw [S.events, S.cur, S.nval], rfl⟩
+        rw [S.events, S.cur, S.nval], rfl, by
+        show w.1.trapped = trapIn (m.events.push (m.cur, .note v m.nval.1))
+        simp [trapIn_push, S.trapped]⟩
     · -- 0xDA: a byte of the value of the note to come
       rename_i h
       have : hdev c w (.write port v) =
@@ -311,15 +327,17 @@ theorem io_sim {c : IR.Ctx} {m : Machine} {w : HW} (S : Sim c m w) (c' : Cpu) :
       exact ⟨S.harness, S.noRx, S.rdrf, S.tick, S.prog, S.inputs, S.pos, S.off, S.cur, S.latch, S.mark, S.frame, S.framed,
         S.events, by
         show (m.nval.1 + v.toNat * 2 ^ (8 * m.nval.2), m.nval.2 + 1) = _
-        rw [S.nval]⟩
-    · -- 0xD7: the trap (not followed)
+        rw [S.nval], S.trapped⟩
+    · -- 0xD7: the trap, recorded in the world (`trapped`; no line of its own)
       rename_i h
-      have : hdev c w (.write port v) = w := by simp [hdev, hl, h]
+      have : hdev c w (.write port v) = ({ w.1 with trapped := true }, w.2) := by simp [hdev, hl, h]
       rw [this]
       exact ⟨S.harness, S.noRx, S.rdrf, S.tick, S.prog, S.inputs, S.pos, S.off, S.cur, S.latch, S.mark, S.frame, S.framed, by
         show evsOf c (m.events.push (m.cur, .trap)) = _
         rw [evsOf_push]
-        exact S.events, S.nval⟩
+        exact S.events, S.nval, by
+        show true = trapIn (m.events.push (m.cur, .trap))
+        simp [trapIn_push]⟩
     · -- the ACIA's control register
       rename_i h
       have : hdev c w (.write port v) = w := by simp [hdev, hl, h]
@@ -341,7 +359,7 @@ theorem io_sim {c : IR.Ctx} {m : Machine} {w : HW} (S : Sim c m w) (c' : Cpu) :
       have : hdev c w (.write port v) = w := by
         simp only [hdev, hl]
         rw [if_neg (fun e => h1 e), if_neg (fun e => h2 e), if_neg (fun e => h3 e), if_neg (fun e => h5 e),
-          if_neg (fun e => h4 e)]
+          if_neg (fun e => h4 e), if_neg (fun e => h6 e)]
       rw [this]
       exact S'
 
@@ -434,7 +452,7 @@ theorem loopH_machine (p : Lang.Prog) (S : LoopSrc p) :
   have S0 : Sim img.ctx m ((st0 inputs).world, 0, (0, 0), (0, 0)) :=
     ⟨R.harness, R.noRx, R.rdrf, R.tick, R.prog, R.inputs, R.pos, R.off, R.cur, R.latch, R.mark, R.frame, rfl, by
       rw [R.events]
-      rfl, R.nval⟩
+      rfl, R.nval, by rw [R.events]; show false = _; simp [trapIn]⟩
   obtain ⟨st', hj, hcase⟩ := hspec inputs m.cpu R.pc R.img R.run R.rs R.msz j
   rcases hcase with ⟨s', w', ⟨n, hn⟩, hat, hsp, hw⟩ | ⟨i, sti, s', w', hi, hci, ⟨n, hn⟩, hh, hif, hw, hwhy⟩
   · obtain ⟨hc, Sn⟩ := run_sim a addrs n m _ S0
@@ -547,7 +565,7 @@ theorem loopH_halts (p : Lang.Prog) (S : LoopSrc p) :
   have S0 : Sim img.ctx (harnessMachine a inputs) ((st0 inputs).world, 0, (0, 0), (0, 0)) :=
     ⟨R.harness, R.noRx, R.rdrf, R.tick, R.prog, R.inputs, R.pos, R.off, R.cur, R.latch, R.mark, R.frame, rfl, by
       rw [R.events]
-      rfl, R.nval⟩
+      rfl, R.nval, by rw [R.events]; show false = _; simp [trapIn]⟩
   obtain ⟨i, sti, s', w', hi, hex, ⟨n, hn⟩, hh, _, hw⟩ := hspec inputs _ R.pc R.img R.run R.rs R.msz
   obtain ⟨hc, Sn⟩ := run_sim a addrs n _ _ S0
   rw [hn] at hc Sn

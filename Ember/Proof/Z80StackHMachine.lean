@@ -59,7 +59,7 @@ theorem stackH_halts (p : Lang.Prog) (S : StackSrc p) :
   have S0 : Sim img.ctx (harnessMachine a inputs) ((st0 inputs).world, 0, (0, 0), (0, 0)) :=
     ⟨R.harness, R.noRx, R.rdrf, R.tick, R.prog, R.inputs, R.pos, R.off, R.cur, R.latch, R.mark, R.frame, rfl, by
       rw [R.events]
-      rfl, R.nval⟩
+      rfl, R.nval, by rw [R.events]; show false = _; simp [LoopH.trapIn]⟩
   obtain ⟨i, sti, s', w', hi, hex, ⟨n, hn⟩, hh, _, hw, hk⟩ := hspec inputs _ R.pc R.img R.run R.rs R.msz
   obtain ⟨hc, Sn⟩ := run_sim_of img a addrs n _ _ S0
   have hn' : wrun (img.ZH a addrs (0, 0)) n ((harnessMachine a inputs).cpu, ((st0 inputs).world, 0, (0, 0), (0, 0))) =

@@ -29,7 +29,7 @@ theorem wnorm : ∀ (n : Nat) (w : World), n = w.inputs.size - w.pos → w.frame
   induction n using Nat.strongRecOn with
   | _ n ih =>
     intro w hn hf
-    obtain ⟨inputs, pos, off, cur, events, frame, mmio, framed⟩ := w
+    obtain ⟨inputs, pos, off, cur, events, frame, mmio, framed, trapped⟩ := w
     simp only at hf hn
     subst hf
     rw [World.normalize, normPos]

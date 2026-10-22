@@ -44,6 +44,7 @@ def hdev (c : IR.Ctx) (w : HW) : IoEvent → HW
     else if lo p = 0xD5 then ((IR.Sem.effect c w.1 .drop [v.toNat]).2, w.2)
     else if lo p = 0xDA then (w.1, w.2.1, w.2.2.1, (w.2.2.2.1 + v.toNat * 2 ^ (8 * w.2.2.2.2), w.2.2.2.2 + 1))
     else if lo p = 0xD6 then ((IR.Sem.effect c w.1 .note [v.toNat, w.2.2.2.1]).2, w.2.1, w.2.2.1, (0, 0))
+    else if lo p = 0xD7 then ({ w.1 with trapped := true }, w.2)  -- the trap, recorded in the world
     else w
 
 /-- The machine stands for the world `wd`, its mark at `μ`, no byte of
