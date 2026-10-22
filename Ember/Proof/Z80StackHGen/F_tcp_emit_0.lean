@@ -166,7 +166,7 @@ def p1code_tcp_emit : List Item := [
 def e1_tcp_emit : GEnv := fnEnv Stack.fn_tcp_emit (Array.replicate Stack.fn_tcp_emit.tmps.size true) none
 
 def s1_tcp_emit_pre : GS :=
-  { out := ⟨p1code_tcp_emit.take 2⟩,
+  { out := ⟨(p1code_tcp_emit.drop 0).take 2⟩,
     regs := { a := [], hl := [IR.Opd.slot { area := IR.Area.frame "tcp_emit", off := 22 }], acc := none },
     missed := #[false, false, false, false, false, false, false], lits := #[(4, 167772161), (4, 4294967295), (4, 0), (4, 1)], labels := 0,
     atLabel := [],
@@ -177,7 +177,7 @@ def s1_tcp_emit_pre : GS :=
 theorem pre1_tcp_emit : runG (genPre Stack.fn_tcp_emit false) e1_tcp_emit (fnStart Stack.fn_tcp_emit #[(4, 167772161), (4, 4294967295), (4, 0), (4, 1)]) = .ok ((), s1_tcp_emit_pre) := by
   decide +kernel
 def s1_tcp_emit_20 : GS :=
-  { out := ⟨p1code_tcp_emit.take 58⟩,
+  { out := ⟨(p1code_tcp_emit.drop 2).take 56⟩,
     regs := { a := [], hl := [], acc := none },
     missed := #[false, false, false, false, false, false, false], lits := #[(4, 167772161), (4, 4294967295), (4, 0), (4, 1)], labels := 0,
     atLabel := [(1, { a := [IR.Opd.tmp 1], hl := [IR.Opd.slot { area := IR.Area.frame "tcp_emit", off := 26 }], acc := none }), (2, { a := [], hl := [IR.Opd.slot { area := IR.Area.frame "tcp_emit", off := 26 }], acc := none }), (0, { a := [IR.Opd.slot { area := IR.Area.frame "tcp_emit", off := 19 }], hl := [IR.Opd.slot { area := IR.Area.frame "tcp_emit", off := 24 }, IR.Opd.const 20], acc := none })],
@@ -185,12 +185,12 @@ def s1_tcp_emit_20 : GS :=
     jumps := [(1, { a := [IR.Opd.tmp 1], hl := [IR.Opd.slot { area := IR.Area.frame "tcp_emit", off := 26 }], acc := none }), (2, { a := [], hl := [IR.Opd.slot { area := IR.Area.frame "tcp_emit", off := 26 }], acc := none }), (1, { a := [IR.Opd.slot { area := IR.Area.frame "tcp_emit", off := 19 }], hl := [IR.Opd.slot { area := IR.Area.frame "tcp_emit", off := 28 }, IR.Opd.slot { area := IR.Area.frame "tcp_emit", off := 22 }], acc := none }), (0, { a := [IR.Opd.slot { area := IR.Area.frame "tcp_emit", off := 19 }], hl := [IR.Opd.slot { area := IR.Area.frame "tcp_emit", off := 24 }, IR.Opd.const 24], acc := none }), (0, { a := [IR.Opd.slot { area := IR.Area.frame "tcp_emit", off := 19 }], hl := [IR.Opd.slot { area := IR.Area.frame "tcp_emit", off := 24 }, IR.Opd.const 20], acc := none })],
     labelRegs := [(2, { a := [], hl := [IR.Opd.slot { area := IR.Area.frame "tcp_emit", off := 26 }], acc := none }), (1, { a := [], hl := [], acc := none }), (0, { a := [IR.Opd.slot { area := IR.Area.frame "tcp_emit", off := 19 }], hl := [IR.Opd.slot { area := IR.Area.frame "tcp_emit", off := 24 }], acc := none })] }
 
-theorem c1_tcp_emit_0 : runG (genBody Stack.fn_tcp_emit false 0 ((Stack.fn_tcp_emit.body.toList.drop 0).take 20)) e1_tcp_emit s1_tcp_emit_pre =
+theorem c1_tcp_emit_0 : runG (genBody Stack.fn_tcp_emit false 0 ((Stack.fn_tcp_emit.body.toList.drop 0).take 20)) e1_tcp_emit (noItems s1_tcp_emit_pre) =
     .ok ((), s1_tcp_emit_20) := by
   decide +kernel
 
 def s1_tcp_emit_40 : GS :=
-  { out := ⟨p1code_tcp_emit.take 109⟩,
+  { out := ⟨(p1code_tcp_emit.drop 58).take 51⟩,
     regs := { a := [], hl := [], acc := none },
     missed := #[false, false, false, false, false, false, false], lits := #[(4, 167772161), (4, 4294967295), (4, 0), (4, 1)], labels := 0,
     atLabel := [(3, { a := [IR.Opd.slot { area := IR.Area.frame "tcp_emit", off := 19 }], hl := [], acc := none }), (1, { a := [IR.Opd.tmp 1], hl := [IR.Opd.slot { area := IR.Area.frame "tcp_emit", off := 26 }], acc := none }), (2, { a := [], hl := [IR.Opd.slot { area := IR.Area.frame "tcp_emit", off := 26 }], acc := none }), (0, { a := [IR.Opd.slot { area := IR.Area.frame "tcp_emit", off := 19 }], hl := [IR.Opd.slot { area := IR.Area.frame "tcp_emit", off := 24 }, IR.Opd.const 20], acc := none })],
@@ -198,12 +198,12 @@ def s1_tcp_emit_40 : GS :=
     jumps := [(3, { a := [], hl := [], acc := none }), (3, { a := [IR.Opd.slot { area := IR.Area.frame "tcp_emit", off := 19 }], hl := [], acc := none }), (1, { a := [IR.Opd.tmp 1], hl := [IR.Opd.slot { area := IR.Area.frame "tcp_emit", off := 26 }], acc := none }), (2, { a := [], hl := [IR.Opd.slot { area := IR.Area.frame "tcp_emit", off := 26 }], acc := none }), (1, { a := [IR.Opd.slot { area := IR.Area.frame "tcp_emit", off := 19 }], hl := [IR.Opd.slot { area := IR.Area.frame "tcp_emit", off := 28 }, IR.Opd.slot { area := IR.Area.frame "tcp_emit", off := 22 }], acc := none }), (0, { a := [IR.Opd.slot { area := IR.Area.frame "tcp_emit", off := 19 }], hl := [IR.Opd.slot { area := IR.Area.frame "tcp_emit", off := 24 }, IR.Opd.const 24], acc := none }), (0, { a := [IR.Opd.slot { area := IR.Area.frame "tcp_emit", off := 19 }], hl := [IR.Opd.slot { area := IR.Area.frame "tcp_emit", off := 24 }, IR.Opd.const 20], acc := none })],
     labelRegs := [(3, { a := [], hl := [], acc := none }), (2, { a := [], hl := [IR.Opd.slot { area := IR.Area.frame "tcp_emit", off := 26 }], acc := none }), (1, { a := [], hl := [], acc := none }), (0, { a := [IR.Opd.slot { area := IR.Area.frame "tcp_emit", off := 19 }], hl := [IR.Opd.slot { area := IR.Area.frame "tcp_emit", off := 24 }], acc := none })] }
 
-theorem c1_tcp_emit_20 : runG (genBody Stack.fn_tcp_emit false 20 ((Stack.fn_tcp_emit.body.toList.drop 20).take 20)) e1_tcp_emit s1_tcp_emit_20 =
+theorem c1_tcp_emit_20 : runG (genBody Stack.fn_tcp_emit false 20 ((Stack.fn_tcp_emit.body.toList.drop 20).take 20)) e1_tcp_emit (noItems s1_tcp_emit_20) =
     .ok ((), s1_tcp_emit_40) := by
   decide +kernel
 
 def s1_tcp_emit_55 : GS :=
-  { out := ⟨p1code_tcp_emit.take 148⟩,
+  { out := ⟨(p1code_tcp_emit.drop 109).take 39⟩,
     regs := { a := [], hl := [], acc := none },
     missed := #[false, false, false, false, false, false, false], lits := #[(4, 167772161), (4, 4294967295), (4, 0), (4, 1)], labels := 0,
     atLabel := [(3, { a := [IR.Opd.slot { area := IR.Area.frame "tcp_emit", off := 19 }], hl := [], acc := none }), (1, { a := [IR.Opd.tmp 1], hl := [IR.Opd.slot { area := IR.Area.frame "tcp_emit", off := 26 }], acc := none }), (2, { a := [], hl := [IR.Opd.slot { area := IR.Area.frame "tcp_emit", off := 26 }], acc := none }), (0, { a := [IR.Opd.slot { area := IR.Area.frame "tcp_emit", off := 19 }], hl := [IR.Opd.slot { area := IR.Area.frame "tcp_emit", off := 24 }, IR.Opd.const 20], acc := none })],
@@ -211,20 +211,21 @@ def s1_tcp_emit_55 : GS :=
     jumps := [(3, { a := [], hl := [], acc := none }), (3, { a := [IR.Opd.slot { area := IR.Area.frame "tcp_emit", off := 19 }], hl := [], acc := none }), (1, { a := [IR.Opd.tmp 1], hl := [IR.Opd.slot { area := IR.Area.frame "tcp_emit", off := 26 }], acc := none }), (2, { a := [], hl := [IR.Opd.slot { area := IR.Area.frame "tcp_emit", off := 26 }], acc := none }), (1, { a := [IR.Opd.slot { area := IR.Area.frame "tcp_emit", off := 19 }], hl := [IR.Opd.slot { area := IR.Area.frame "tcp_emit", off := 28 }, IR.Opd.slot { area := IR.Area.frame "tcp_emit", off := 22 }], acc := none }), (0, { a := [IR.Opd.slot { area := IR.Area.frame "tcp_emit", off := 19 }], hl := [IR.Opd.slot { area := IR.Area.frame "tcp_emit", off := 24 }, IR.Opd.const 24], acc := none }), (0, { a := [IR.Opd.slot { area := IR.Area.frame "tcp_emit", off := 19 }], hl := [IR.Opd.slot { area := IR.Area.frame "tcp_emit", off := 24 }, IR.Opd.const 20], acc := none })],
     labelRegs := [(3, { a := [], hl := [], acc := none }), (2, { a := [], hl := [IR.Opd.slot { area := IR.Area.frame "tcp_emit", off := 26 }], acc := none }), (1, { a := [], hl := [], acc := none }), (0, { a := [IR.Opd.slot { area := IR.Area.frame "tcp_emit", off := 19 }], hl := [IR.Opd.slot { area := IR.Area.frame "tcp_emit", off := 24 }], acc := none })] }
 
-theorem c1_tcp_emit_40 : runG (genBody Stack.fn_tcp_emit false 40 ((Stack.fn_tcp_emit.body.toList.drop 40).take 15)) e1_tcp_emit s1_tcp_emit_40 =
+theorem c1_tcp_emit_40 : runG (genBody Stack.fn_tcp_emit false 40 ((Stack.fn_tcp_emit.body.toList.drop 40).take 15)) e1_tcp_emit (noItems s1_tcp_emit_40) =
     .ok ((), s1_tcp_emit_55) := by
   decide +kernel
 
-theorem body1_tcp_emit : runG (genBody Stack.fn_tcp_emit false 0 (Stack.fn_tcp_emit.body.toList.drop 0)) e1_tcp_emit s1_tcp_emit_pre = .ok ((), s1_tcp_emit_55) :=
-  body_step _ _ _ _ 0 20 _ _ _ (by decide +kernel) c1_tcp_emit_0
-    (body_step _ _ _ _ 20 20 _ _ _ (by decide +kernel) c1_tcp_emit_20
-    (body_step _ _ _ _ 40 15 _ _ _ (by decide +kernel) c1_tcp_emit_40
-    (body_end _ _ _ _ 55 _ (by decide +kernel))))
+theorem body1_tcp_emit : RunsTo Stack.fn_tcp_emit false e1_tcp_emit Stack.fn_tcp_emit.body.toList 0 s1_tcp_emit_pre s1_tcp_emit_55
+    (s1_tcp_emit_20.out ++ (s1_tcp_emit_40.out ++ (s1_tcp_emit_55.out ++ (#[])))) :=
+  body_step_out _ _ _ _ 0 20 _ _ _ _ (by decide +kernel) c1_tcp_emit_0
+    (body_step_out _ _ _ _ 20 20 _ _ _ _ (by decide +kernel) c1_tcp_emit_20
+    (body_step_out _ _ _ _ 40 15 _ _ _ _ (by decide +kernel) c1_tcp_emit_40
+    (body_end_out _ _ _ _ 55 _ (by decide +kernel))))
 theorem jumps1_tcp_emit : jumpsOk s1_tcp_emit_55 = true := by decide +kernel
 theorem gen1_tcp_emit : genFn Stack.fn_tcp_emit (Array.replicate Stack.fn_tcp_emit.tmps.size true) #[(4, 167772161), (4, 4294967295), (4, 0), (4, 1)] false none false =
-    .ok (s1_tcp_emit_55.out, s1_tcp_emit_55.missed, s1_tcp_emit_55.lits, (tmpLayout Stack.fn_tcp_emit (Array.replicate Stack.fn_tcp_emit.tmps.size true)).2,
+    .ok (s1_tcp_emit_pre.out ++ (s1_tcp_emit_20.out ++ (s1_tcp_emit_40.out ++ (s1_tcp_emit_55.out ++ (#[])))), s1_tcp_emit_55.missed, s1_tcp_emit_55.lits, (tmpLayout Stack.fn_tcp_emit (Array.replicate Stack.fn_tcp_emit.tmps.size true)).2,
       if s1_tcp_emit_55.addrTaken then none else some s1_tcp_emit_55.reads) :=
-  genFn_of _ _ _ _ _ _ _ _ pre1_tcp_emit body1_tcp_emit jumps1_tcp_emit
+  genFn_of_out _ _ _ _ _ _ _ _ _ pre1_tcp_emit body1_tcp_emit jumps1_tcp_emit
 
 
 end Ember.Proof.Z80Gen.StackH

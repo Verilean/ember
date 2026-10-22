@@ -352,9 +352,7 @@ def gsText (s : GS) (out : String) : String :=
   s!"    labelRegs := {regsListText s.labelRegs} }"
 
 /-- Stretches checked in one module (a pass can be spread over modules;
-measured, it does not lower the peak: each stretch's check compares the
-generator's whole output so far, and costs about the same wherever it
-is checked — so a pass is one module). -/
+it is not: each stretch is checked by its own items, `Z80GenOut`). -/
 def stretchesAModule : Nat := 1000
 
 /-- The stretches of pass `j` of `g` — states, a theorem a stretch, the
@@ -363,47 +361,58 @@ def cutsText (items : List Item) (g : Part) (j : Nat) (c : Cuts) (isEntry : Bool
   let f := s!"Stack.fn_{g.name}"
   let tag := s!"{j}_{g.name}"
   let last := (c.stops.getLast?.map (·.2)).getD c.pre
-  -- the items so far: pass 2's are those of the image, pass 1's written out
-  let outOf (st : GS) : Except String String :=
+  -- a state's own items, from the `a`-th of the pass: pass 2's are those of the image, pass 1's written out
+  let outOf (st : GS) (a : Nat) : Except String String := do
+    let m := st.out.size - a
     if j == 2 then
-      if st.out.toList == (items.drop g.off).take st.out.size then pure s!"⟨(items.drop {g.off}).take {st.out.size}⟩"
+      if st.out.toList.drop a == (items.drop (g.off + a)).take m then pure s!"⟨(items.drop {g.off + a}).take {m}⟩"
       else throw s!"{g.name}: pass 2's items are not those of the image"
-    else pure s!"⟨p1code_{g.name}.take {st.out.size}⟩"
+    else pure s!"⟨(p1code_{g.name}.drop {a}).take {m}⟩"
   let env := if j == 1 then s!"fnEnv {f} (Array.replicate {f}.tmps.size true) none"
     else s!"fnEnv {f} g_{g.name}.missed g_{g.name}.live"
   let mut t := ""
   if j == 1 then
     t := t ++ s!"def p1code_{g.name} : List Item := [\n" ++ ",\n".intercalate (last.out.toList.map fun it => "  " ++ itemText it) ++ "]\n\n"
   t := t ++ s!"def e{tag} : GEnv := {env}\n\n"
-  t := t ++ s!"def s{tag}_pre : GS :=\n  {gsText c.pre (← outOf c.pre)}\n\n"
+  t := t ++ s!"def s{tag}_pre : GS :=\n  {gsText c.pre (← outOf c.pre 0)}\n\n"
   t := t ++ s!"theorem pre{tag} : runG (genPre {f} {boolText isEntry}) e{tag} (fnStart {f} {litsText g.litsIn}) = .ok ((), s{tag}_pre) := by\n  decide +kernel\n"
   let mut groups : Array String := #[]
   let mut prev := s!"s{tag}_pre"
   let mut k0 := 0
+  let mut a := c.pre.out.size
   let mut n := 0
+  -- each state at a cut holds the items of the stretch before it only: the stretch is checked from
+  -- the state before it with no items (`noItems`), so the kernel compares its items, not all those before
   for (k, st) in c.stops do
     if n > 0 && n % stretchesAModule == 0 then
       groups := groups.push t
       t := ""
-    t := t ++ s!"def s{tag}_{k} : GS :=\n  {gsText st (← outOf st)}\n\n"
-    t := t ++ s!"theorem c{tag}_{k0} : runG (genBody {f} false {k0} (({f}.body.toList.drop {k0}).take {k - k0})) e{tag} {prev} =\n    .ok ((), s{tag}_{k}) := by\n  decide +kernel\n\n"
+    t := t ++ s!"def s{tag}_{k} : GS :=\n  {gsText st (← outOf st a)}\n\n"
+    t := t ++ s!"theorem c{tag}_{k0} : runG (genBody {f} false {k0} (({f}.body.toList.drop {k0}).take {k - k0})) e{tag} (noItems {prev}) =\n    .ok ((), s{tag}_{k}) := by\n  decide +kernel\n\n"
     prev := s!"s{tag}_{k}"
     k0 := k
+    a := st.out.size
     n := n + 1
-  -- the body from its stretches
-  let mut proof := s!"body_end _ _ _ _ {g.instrs} _ (by decide +kernel)"
+  -- the body from its stretches; its items, those of the stretches in turn
+  let items_ := (c.stops.map fun (k, _) => s!"s{tag}_{k}.out").foldr (fun x d => s!"{x} ++ ({d})") "#[]"
+  let mut proof := s!"body_end_out _ _ _ _ {g.instrs} _ (by decide +kernel)"
   let mut k1 := g.instrs
   for (k, _) in c.stops.reverse.drop 1 ++ [(0, c.pre)] do
-    proof := s!"body_step _ _ _ _ {k} {k1 - k} _ _ _ (by decide +kernel) c{tag}_{k}\n    ({proof})"
+    proof := s!"body_step_out _ _ _ _ {k} {k1 - k} _ _ _ _ (by decide +kernel) c{tag}_{k}\n    ({proof})"
     k1 := k
-  t := t ++ s!"theorem body{tag} : runG (genBody {f} false 0 ({f}.body.toList.drop 0)) e{tag} s{tag}_pre = .ok ((), {prev}) :=\n  {proof}\n"
+  t := t ++ s!"theorem body{tag} : RunsTo {f} false e{tag} {f}.body.toList 0 s{tag}_pre {prev}\n    ({items_}) :=\n  {proof}\n"
   t := t ++ s!"theorem jumps{tag} : jumpsOk {prev} = true := by decide +kernel\n"
   let spilled := if j == 1 then s!"(Array.replicate {f}.tmps.size true)" else s!"g_{g.name}.missed"
   let live := if j == 1 then "none" else s!"g_{g.name}.live"
   t := t ++ s!"theorem gen{tag} : genFn {f} {spilled} {litsText g.litsIn} {boolText isEntry} {live} false =\n" ++
-    s!"    .ok ({prev}.out, {prev}.missed, {prev}.lits, (tmpLayout {f} {spilled}).2,\n" ++
+    s!"    .ok (s{tag}_pre.out ++ ({items_}), {prev}.missed, {prev}.lits, (tmpLayout {f} {spilled}).2,\n" ++
     s!"      if {prev}.addrTaken then none else some {prev}.reads) :=\n" ++
-    s!"  genFn_of _ _ _ _ _ _ _ _ pre{tag} body{tag} jumps{tag}\n\n"
+    s!"  genFn_of_out _ _ _ _ _ _ _ _ _ pre{tag} body{tag} jumps{tag}\n\n"
+  if j == 2 then
+    let sizes := c.pre.out.size :: (c.stops.foldl (fun (acc, b) (_, st) => (acc.push (st.out.size - b), st.out.size))
+      (#[], c.pre.out.size)).1.toList
+    t := t ++ s!"theorem code{tag} : (s{tag}_pre.out ++ ({items_})).toList = (items.drop {g.off}).take {g.len} :=\n" ++
+      s!"  slices_toList items {g.off} {listText (sizes.map toString)}\n\n"
   return (groups.push t).toList
 
 def partText (items : List Item) (entry : String) (g : Part) : Except String (List String) := do
@@ -421,9 +430,9 @@ def partText (items : List Item) (entry : String) (g : Part) : Except String (Li
       s!"  pass1B_of gen1_{g.name} (by rw [shared_eq]; decide +kernel)\n" ++
       s!"theorem entry_{g.name} : (Stack.fn_{g.name}.name == Stack.ir.entry) = {boolText isEntry} := by decide +kernel\n" ++
       s!"theorem p2_{g.name} : pass2B Stack.ir {litsText g.litsIn} g_{g.name} = true :=\n" ++
-      s!"  pass2B_of (g := g_{g.name}) rfl\n" ++
+      s!"  pass2B_of' (g := g_{g.name}) rfl\n" ++
       s!"    ((congrArg (fun b => genFn Stack.fn_{g.name} g_{g.name}.missed {litsText g.litsIn} b g_{g.name}.live false)\n" ++
-      s!"      entry_{g.name}).trans gen2_{g.name}) (by decide +kernel)\n"
+      s!"      entry_{g.name}).trans gen2_{g.name}) code2_{g.name} (by decide +kernel)\n"
     let n := m.length
     return (List.range n).zip m |>.map fun (i, t) =>
       (if i == 0 then gdef else "") ++ t ++ (if i + 1 == n then last else "")
@@ -455,7 +464,10 @@ A module a function (`Z80StackHGen/F_<name>.lean`), each importing the
 one before, so that the kernel checks one function at a time; a
 function of more than " ++ toString cutAbove ++ " instructions a stretch of " ++ toString stretch ++ " at a time
 (`Z80GenChunks`: the states of the generator between the stretches
-written out), which keeps what the kernel holds at once small.
+written out, each with the items of the stretch before it only —
+`Z80GenOut`: the generator never reads the items it has generated, so a
+stretch is checked from the state before it with none), which keeps what
+the kernel holds at once small.
 `gens_ok` chains them (`Gens`): `progEnvs` and `genProg` of `Stack.ir`
 are known without the kernel running the generator over the program at
 once.
@@ -587,7 +599,7 @@ end Ember.Proof.Z80Gen.StackH
 /-- The frames of the layout `sharedBytes` computes, written out, and that they are. -/
 def sharedFile (ir : IR.Prog) : String :=
   let frames := (IR.layout ir (fun f => ((ir.fn? f).map (·.frame)).getD 0) 0).frames
-  "import Ember.Proof.Z80GenChunks
+  "import Ember.Proof.Z80GenOut
 import Ember.Proof.Z80StackHItems
 
 /-!

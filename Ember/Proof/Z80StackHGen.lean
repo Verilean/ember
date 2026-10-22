@@ -12,7 +12,10 @@ A module a function (`Z80StackHGen/F_<name>.lean`), each importing the
 one before, so that the kernel checks one function at a time; a
 function of more than 40 instructions a stretch of 20 at a time
 (`Z80GenChunks`: the states of the generator between the stretches
-written out), which keeps what the kernel holds at once small.
+written out, each with the items of the stretch before it only —
+`Z80GenOut`: the generator never reads the items it has generated, so a
+stretch is checked from the state before it with none), which keeps what
+the kernel holds at once small.
 `gens_ok` chains them (`Gens`): `progEnvs` and `genProg` of `Stack.ir`
 are known without the kernel running the generator over the program at
 once.

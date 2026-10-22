@@ -134,7 +134,7 @@ def p1code_parse_mss : List Item := [
 def e1_parse_mss : GEnv := fnEnv Stack.fn_parse_mss (Array.replicate Stack.fn_parse_mss.tmps.size true) none
 
 def s1_parse_mss_pre : GS :=
-  { out := ⟨p1code_parse_mss.take 2⟩,
+  { out := ⟨(p1code_parse_mss.drop 0).take 2⟩,
     regs := { a := [], hl := [IR.Opd.slot { area := IR.Area.frame "parse_mss", off := 0 }], acc := none },
     missed := #[false, false, false, false, false, false, false, false, false], lits := #[(4, 167772161), (4, 4294967295), (4, 0), (4, 1), (4, 65536), (4, 2147483648)], labels := 0,
     atLabel := [],
@@ -145,7 +145,7 @@ def s1_parse_mss_pre : GS :=
 theorem pre1_parse_mss : runG (genPre Stack.fn_parse_mss false) e1_parse_mss (fnStart Stack.fn_parse_mss #[(4, 167772161), (4, 4294967295), (4, 0), (4, 1), (4, 65536), (4, 2147483648)]) = .ok ((), s1_parse_mss_pre) := by
   decide +kernel
 def s1_parse_mss_20 : GS :=
-  { out := ⟨p1code_parse_mss.take 49⟩,
+  { out := ⟨(p1code_parse_mss.drop 2).take 47⟩,
     regs := { a := [IR.Opd.slot { area := IR.Area.frame "parse_mss", off := 5 }], hl := [], acc := none },
     missed := #[false, false, false, false, false, false, false, false, false], lits := #[(4, 167772161), (4, 4294967295), (4, 0), (4, 1), (4, 65536), (4, 2147483648)], labels := 0,
     atLabel := [(1, { a := [], hl := [], acc := none }), (6, { a := [IR.Opd.slot { area := IR.Area.frame "parse_mss", off := 5 }], hl := [], acc := none }), (5, { a := [IR.Opd.slot { area := IR.Area.frame "parse_mss", off := 5 }], hl := [IR.Opd.slot { area := IR.Area.frame "parse_mss", off := 2 }], acc := none }), (4, { a := [IR.Opd.slot { area := IR.Area.frame "parse_mss", off := 5 }], hl := [], acc := none }), (3, { a := [IR.Opd.slot { area := IR.Area.frame "parse_mss", off := 5 }], hl := [], acc := none }), (2, { a := [], hl := [IR.Opd.slot { area := IR.Area.frame "parse_mss", off := 2 }], acc := none })],
@@ -153,12 +153,12 @@ def s1_parse_mss_20 : GS :=
     jumps := [(1, { a := [IR.Opd.slot { area := IR.Area.frame "parse_mss", off := 5 }], hl := [], acc := none }), (6, { a := [IR.Opd.slot { area := IR.Area.frame "parse_mss", off := 5 }], hl := [], acc := none }), (5, { a := [IR.Opd.slot { area := IR.Area.frame "parse_mss", off := 5 }], hl := [IR.Opd.slot { area := IR.Area.frame "parse_mss", off := 2 }], acc := none }), (4, { a := [IR.Opd.slot { area := IR.Area.frame "parse_mss", off := 5 }], hl := [], acc := none }), (1, { a := [IR.Opd.slot { area := IR.Area.frame "parse_mss", off := 5 }], hl := [], acc := none }), (3, { a := [IR.Opd.slot { area := IR.Area.frame "parse_mss", off := 5 }], hl := [], acc := none }), (1, { a := [], hl := [IR.Opd.slot { area := IR.Area.frame "parse_mss", off := 2 }], acc := none }), (2, { a := [], hl := [IR.Opd.slot { area := IR.Area.frame "parse_mss", off := 2 }], acc := none }), (0, { a := [IR.Opd.slot { area := IR.Area.frame "parse_mss", off := 4 }, IR.Opd.const 40], hl := [IR.Opd.slot { area := IR.Area.frame "parse_mss", off := 2 }, IR.Opd.const 20], acc := none })],
     labelRegs := [(4, { a := [IR.Opd.slot { area := IR.Area.frame "parse_mss", off := 5 }], hl := [], acc := none }), (3, { a := [IR.Opd.slot { area := IR.Area.frame "parse_mss", off := 5 }], hl := [], acc := none }), (2, { a := [], hl := [IR.Opd.slot { area := IR.Area.frame "parse_mss", off := 2 }], acc := none }), (0, { a := [], hl := [], acc := none })] }
 
-theorem c1_parse_mss_0 : runG (genBody Stack.fn_parse_mss false 0 ((Stack.fn_parse_mss.body.toList.drop 0).take 20)) e1_parse_mss s1_parse_mss_pre =
+theorem c1_parse_mss_0 : runG (genBody Stack.fn_parse_mss false 0 ((Stack.fn_parse_mss.body.toList.drop 0).take 20)) e1_parse_mss (noItems s1_parse_mss_pre) =
     .ok ((), s1_parse_mss_20) := by
   decide +kernel
 
 def s1_parse_mss_40 : GS :=
-  { out := ⟨p1code_parse_mss.take 108⟩,
+  { out := ⟨(p1code_parse_mss.drop 49).take 59⟩,
     regs := { a := [], hl := [IR.Opd.slot { area := IR.Area.frame "parse_mss", off := 2 }], acc := none },
     missed := #[false, false, false, false, false, false, false, false, false], lits := #[(4, 167772161), (4, 4294967295), (4, 0), (4, 1), (4, 65536), (4, 2147483648)], labels := 0,
     atLabel := [(9, { a := [], hl := [], acc := none }), (1, { a := [], hl := [], acc := none }), (7, { a := [IR.Opd.tmp 4], hl := [], acc := none }), (8, { a := [IR.Opd.tmp 4], hl := [IR.Opd.slot { area := IR.Area.frame "parse_mss", off := 6 }], acc := none }), (6, { a := [IR.Opd.slot { area := IR.Area.frame "parse_mss", off := 5 }], hl := [], acc := none }), (5, { a := [IR.Opd.slot { area := IR.Area.frame "parse_mss", off := 5 }], hl := [IR.Opd.slot { area := IR.Area.frame "parse_mss", off := 2 }], acc := none }), (4, { a := [IR.Opd.slot { area := IR.Area.frame "parse_mss", off := 5 }], hl := [], acc := none }), (3, { a := [IR.Opd.slot { area := IR.Area.frame "parse_mss", off := 5 }], hl := [], acc := none }), (2, { a := [], hl := [IR.Opd.slot { area := IR.Area.frame "parse_mss", off := 2 }], acc := none })],
@@ -166,12 +166,12 @@ def s1_parse_mss_40 : GS :=
     jumps := [(9, { a := [], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 18 }, IR.Opd.tmp 8], acc := none }), (9, { a := [], hl := [IR.Opd.slot { area := IR.Area.frame "parse_mss", off := 6 }], acc := none }), (9, { a := [IR.Opd.slot { area := IR.Area.frame "parse_mss", off := 5 }], hl := [], acc := none }), (1, { a := [IR.Opd.tmp 4], hl := [], acc := none }), (8, { a := [IR.Opd.tmp 4], hl := [], acc := none }), (7, { a := [IR.Opd.tmp 4], hl := [], acc := none }), (8, { a := [IR.Opd.tmp 4], hl := [IR.Opd.slot { area := IR.Area.frame "parse_mss", off := 6 }], acc := none }), (1, { a := [IR.Opd.slot { area := IR.Area.frame "parse_mss", off := 5 }], hl := [], acc := none }), (6, { a := [IR.Opd.slot { area := IR.Area.frame "parse_mss", off := 5 }], hl := [], acc := none }), (5, { a := [IR.Opd.slot { area := IR.Area.frame "parse_mss", off := 5 }], hl := [IR.Opd.slot { area := IR.Area.frame "parse_mss", off := 2 }], acc := none }), (4, { a := [IR.Opd.slot { area := IR.Area.frame "parse_mss", off := 5 }], hl := [], acc := none }), (1, { a := [IR.Opd.slot { area := IR.Area.frame "parse_mss", off := 5 }], hl := [], acc := none }), (3, { a := [IR.Opd.slot { area := IR.Area.frame "parse_mss", off := 5 }], hl := [], acc := none }), (1, { a := [], hl := [IR.Opd.slot { area := IR.Area.frame "parse_mss", off := 2 }], acc := none }), (2, { a := [], hl := [IR.Opd.slot { area := IR.Area.frame "parse_mss", off := 2 }], acc := none }), (0, { a := [IR.Opd.slot { area := IR.Area.frame "parse_mss", off := 4 }, IR.Opd.const 40], hl := [IR.Opd.slot { area := IR.Area.frame "parse_mss", off := 2 }, IR.Opd.const 20], acc := none })],
     labelRegs := [(9, { a := [], hl := [], acc := none }), (7, { a := [IR.Opd.tmp 4], hl := [], acc := none }), (8, { a := [IR.Opd.tmp 4], hl := [], acc := none }), (6, { a := [IR.Opd.slot { area := IR.Area.frame "parse_mss", off := 5 }], hl := [], acc := none }), (4, { a := [IR.Opd.slot { area := IR.Area.frame "parse_mss", off := 5 }], hl := [], acc := none }), (3, { a := [IR.Opd.slot { area := IR.Area.frame "parse_mss", off := 5 }], hl := [], acc := none }), (2, { a := [], hl := [IR.Opd.slot { area := IR.Area.frame "parse_mss", off := 2 }], acc := none }), (0, { a := [], hl := [], acc := none })] }
 
-theorem c1_parse_mss_20 : runG (genBody Stack.fn_parse_mss false 20 ((Stack.fn_parse_mss.body.toList.drop 20).take 20)) e1_parse_mss s1_parse_mss_20 =
+theorem c1_parse_mss_20 : runG (genBody Stack.fn_parse_mss false 20 ((Stack.fn_parse_mss.body.toList.drop 20).take 20)) e1_parse_mss (noItems s1_parse_mss_20) =
     .ok ((), s1_parse_mss_40) := by
   decide +kernel
 
 def s1_parse_mss_45 : GS :=
-  { out := ⟨p1code_parse_mss.take 116⟩,
+  { out := ⟨(p1code_parse_mss.drop 108).take 8⟩,
     regs := { a := [], hl := [], acc := none },
     missed := #[false, false, false, false, false, false, false, false, false], lits := #[(4, 167772161), (4, 4294967295), (4, 0), (4, 1), (4, 65536), (4, 2147483648)], labels := 0,
     atLabel := [(0, { a := [IR.Opd.slot { area := IR.Area.frame "parse_mss", off := 4 }], hl := [IR.Opd.slot { area := IR.Area.frame "parse_mss", off := 2 }], acc := none }), (9, { a := [], hl := [], acc := none }), (1, { a := [], hl := [], acc := none }), (7, { a := [IR.Opd.tmp 4], hl := [], acc := none }), (8, { a := [IR.Opd.tmp 4], hl := [IR.Opd.slot { area := IR.Area.frame "parse_mss", off := 6 }], acc := none }), (6, { a := [IR.Opd.slot { area := IR.Area.frame "parse_mss", off := 5 }], hl := [], acc := none }), (5, { a := [IR.Opd.slot { area := IR.Area.frame "parse_mss", off := 5 }], hl := [IR.Opd.slot { area := IR.Area.frame "parse_mss", off := 2 }], acc := none }), (4, { a := [IR.Opd.slot { area := IR.Area.frame "parse_mss", off := 5 }], hl := [], acc := none }), (3, { a := [IR.Opd.slot { area := IR.Area.frame "parse_mss", off := 5 }], hl := [], acc := none }), (2, { a := [], hl := [IR.Opd.slot { area := IR.Area.frame "parse_mss", off := 2 }], acc := none })],
@@ -179,20 +179,21 @@ def s1_parse_mss_45 : GS :=
     jumps := [(1, { a := [IR.Opd.slot { area := IR.Area.frame "parse_mss", off := 4 }], hl := [IR.Opd.slot { area := IR.Area.frame "parse_mss", off := 2 }], acc := none }), (0, { a := [IR.Opd.slot { area := IR.Area.frame "parse_mss", off := 4 }], hl := [IR.Opd.slot { area := IR.Area.frame "parse_mss", off := 2 }], acc := none }), (5, { a := [], hl := [IR.Opd.slot { area := IR.Area.frame "parse_mss", off := 2 }], acc := none }), (9, { a := [], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 18 }, IR.Opd.tmp 8], acc := none }), (9, { a := [], hl := [IR.Opd.slot { area := IR.Area.frame "parse_mss", off := 6 }], acc := none }), (9, { a := [IR.Opd.slot { area := IR.Area.frame "parse_mss", off := 5 }], hl := [], acc := none }), (1, { a := [IR.Opd.tmp 4], hl := [], acc := none }), (8, { a := [IR.Opd.tmp 4], hl := [], acc := none }), (7, { a := [IR.Opd.tmp 4], hl := [], acc := none }), (8, { a := [IR.Opd.tmp 4], hl := [IR.Opd.slot { area := IR.Area.frame "parse_mss", off := 6 }], acc := none }), (1, { a := [IR.Opd.slot { area := IR.Area.frame "parse_mss", off := 5 }], hl := [], acc := none }), (6, { a := [IR.Opd.slot { area := IR.Area.frame "parse_mss", off := 5 }], hl := [], acc := none }), (5, { a := [IR.Opd.slot { area := IR.Area.frame "parse_mss", off := 5 }], hl := [IR.Opd.slot { area := IR.Area.frame "parse_mss", off := 2 }], acc := none }), (4, { a := [IR.Opd.slot { area := IR.Area.frame "parse_mss", off := 5 }], hl := [], acc := none }), (1, { a := [IR.Opd.slot { area := IR.Area.frame "parse_mss", off := 5 }], hl := [], acc := none }), (3, { a := [IR.Opd.slot { area := IR.Area.frame "parse_mss", off := 5 }], hl := [], acc := none }), (1, { a := [], hl := [IR.Opd.slot { area := IR.Area.frame "parse_mss", off := 2 }], acc := none }), (2, { a := [], hl := [IR.Opd.slot { area := IR.Area.frame "parse_mss", off := 2 }], acc := none }), (0, { a := [IR.Opd.slot { area := IR.Area.frame "parse_mss", off := 4 }, IR.Opd.const 40], hl := [IR.Opd.slot { area := IR.Area.frame "parse_mss", off := 2 }, IR.Opd.const 20], acc := none })],
     labelRegs := [(1, { a := [], hl := [], acc := none }), (5, { a := [], hl := [IR.Opd.slot { area := IR.Area.frame "parse_mss", off := 2 }], acc := none }), (9, { a := [], hl := [], acc := none }), (7, { a := [IR.Opd.tmp 4], hl := [], acc := none }), (8, { a := [IR.Opd.tmp 4], hl := [], acc := none }), (6, { a := [IR.Opd.slot { area := IR.Area.frame "parse_mss", off := 5 }], hl := [], acc := none }), (4, { a := [IR.Opd.slot { area := IR.Area.frame "parse_mss", off := 5 }], hl := [], acc := none }), (3, { a := [IR.Opd.slot { area := IR.Area.frame "parse_mss", off := 5 }], hl := [], acc := none }), (2, { a := [], hl := [IR.Opd.slot { area := IR.Area.frame "parse_mss", off := 2 }], acc := none }), (0, { a := [], hl := [], acc := none })] }
 
-theorem c1_parse_mss_40 : runG (genBody Stack.fn_parse_mss false 40 ((Stack.fn_parse_mss.body.toList.drop 40).take 5)) e1_parse_mss s1_parse_mss_40 =
+theorem c1_parse_mss_40 : runG (genBody Stack.fn_parse_mss false 40 ((Stack.fn_parse_mss.body.toList.drop 40).take 5)) e1_parse_mss (noItems s1_parse_mss_40) =
     .ok ((), s1_parse_mss_45) := by
   decide +kernel
 
-theorem body1_parse_mss : runG (genBody Stack.fn_parse_mss false 0 (Stack.fn_parse_mss.body.toList.drop 0)) e1_parse_mss s1_parse_mss_pre = .ok ((), s1_parse_mss_45) :=
-  body_step _ _ _ _ 0 20 _ _ _ (by decide +kernel) c1_parse_mss_0
-    (body_step _ _ _ _ 20 20 _ _ _ (by decide +kernel) c1_parse_mss_20
-    (body_step _ _ _ _ 40 5 _ _ _ (by decide +kernel) c1_parse_mss_40
-    (body_end _ _ _ _ 45 _ (by decide +kernel))))
+theorem body1_parse_mss : RunsTo Stack.fn_parse_mss false e1_parse_mss Stack.fn_parse_mss.body.toList 0 s1_parse_mss_pre s1_parse_mss_45
+    (s1_parse_mss_20.out ++ (s1_parse_mss_40.out ++ (s1_parse_mss_45.out ++ (#[])))) :=
+  body_step_out _ _ _ _ 0 20 _ _ _ _ (by decide +kernel) c1_parse_mss_0
+    (body_step_out _ _ _ _ 20 20 _ _ _ _ (by decide +kernel) c1_parse_mss_20
+    (body_step_out _ _ _ _ 40 5 _ _ _ _ (by decide +kernel) c1_parse_mss_40
+    (body_end_out _ _ _ _ 45 _ (by decide +kernel))))
 theorem jumps1_parse_mss : jumpsOk s1_parse_mss_45 = true := by decide +kernel
 theorem gen1_parse_mss : genFn Stack.fn_parse_mss (Array.replicate Stack.fn_parse_mss.tmps.size true) #[(4, 167772161), (4, 4294967295), (4, 0), (4, 1), (4, 65536), (4, 2147483648)] false none false =
-    .ok (s1_parse_mss_45.out, s1_parse_mss_45.missed, s1_parse_mss_45.lits, (tmpLayout Stack.fn_parse_mss (Array.replicate Stack.fn_parse_mss.tmps.size true)).2,
+    .ok (s1_parse_mss_pre.out ++ (s1_parse_mss_20.out ++ (s1_parse_mss_40.out ++ (s1_parse_mss_45.out ++ (#[])))), s1_parse_mss_45.missed, s1_parse_mss_45.lits, (tmpLayout Stack.fn_parse_mss (Array.replicate Stack.fn_parse_mss.tmps.size true)).2,
       if s1_parse_mss_45.addrTaken then none else some s1_parse_mss_45.reads) :=
-  genFn_of _ _ _ _ _ _ _ _ pre1_parse_mss body1_parse_mss jumps1_parse_mss
+  genFn_of_out _ _ _ _ _ _ _ _ _ pre1_parse_mss body1_parse_mss jumps1_parse_mss
 
 
 end Ember.Proof.Z80Gen.StackH

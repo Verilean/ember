@@ -116,6 +116,7 @@ import Ember.Proof.Z80Bytes
 import Ember.Proof.Z80HarnessW
 import Ember.Proof.Z80ImageParts
 import Ember.Proof.Z80GenChunks
+import Ember.Proof.Z80GenOut
 import Ember.Proof.Z80AsmChunks
 import Ember.Proof.Z80StackIR
 import Ember.Proof.Z80StackHItems
@@ -267,10 +268,10 @@ The Z80 back end (M7, begun) — `Ember.Z80.IR.Sem` is the semantics of its IR:
 
 * `Z80Note`, `Z80Wide`, `Z80Bytes`: the harness's `rt_note`, and the routines on the accumulator, `rt_shr8`,
   proved from their items;
-* `Z80HarnessW`, `Z80ImageParts`, `Z80GenChunks`, `Z80AsmChunks`, `Z80StackIR`, `Z80StackHItems`,
+* `Z80HarnessW`, `Z80ImageParts`, `Z80GenChunks`, `Z80GenOut`, `Z80AsmChunks`, `Z80StackIR`, `Z80StackHItems`,
   `Z80StackHGen` (and `Z80StackHGen/`), `Z80StackHAsm`, `Z80StackHPlan`, `Z80StackH`: **the image of the stack
   (SLIP build) for the harness** — the literal pool checked, the generator run by the kernel a function at a
-  time (a long one a stretch at a time), the assembler a stretch of items at a time: every function does what
+  time (a long one a stretch at a time, each stretch by its own items), the assembler a stretch of items at a time: every function does what
   the IR's does, nothing taken of the runtime (`stackH_ok`);
 * `Z80BootInit`, `Z80HarnessLoop`, `Z80StackHRun`: the copy of an initial value at start-up, the harness's
   loop for any image, and the image of the stack from reset (`stackH_run`);

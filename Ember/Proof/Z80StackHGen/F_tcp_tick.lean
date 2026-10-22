@@ -23,7 +23,7 @@ def s2_tcp_tick_pre : GS :=
 theorem pre2_tcp_tick : runG (genPre Stack.fn_tcp_tick false) e2_tcp_tick (fnStart Stack.fn_tcp_tick #[(4, 167772161), (4, 4294967295), (4, 0), (4, 1), (4, 65536), (4, 2147483648)]) = .ok ((), s2_tcp_tick_pre) := by
   decide +kernel
 def s2_tcp_tick_20 : GS :=
-  { out := ⟨(items.drop 2388).take 36⟩,
+  { out := ⟨(items.drop 2389).take 35⟩,
     regs := { a := [IR.Opd.slot { area := IR.Area.global "t", off := 33 }], hl := [], acc := none },
     missed := #[false, false, false], lits := #[(4, 167772161), (4, 4294967295), (4, 0), (4, 1), (4, 65536), (4, 2147483648)], labels := 0,
     atLabel := [(6, { a := [], hl := [], acc := none }), (5, { a := [IR.Opd.tmp 0], hl := [], acc := none }), (4, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [], acc := none }), (3, { a := [], hl := [], acc := none }), (2, { a := [IR.Opd.const 1], hl := [], acc := none }), (1, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [], acc := none }), (0, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [], acc := none })],
@@ -31,12 +31,12 @@ def s2_tcp_tick_20 : GS :=
     jumps := [(6, { a := [], hl := [], acc := none }), (5, { a := [IR.Opd.tmp 0], hl := [], acc := none }), (4, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [], acc := none }), (3, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 32 }], hl := [], acc := none }), (3, { a := [], hl := [], acc := none }), (2, { a := [IR.Opd.const 1], hl := [], acc := none }), (1, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [], acc := none }), (0, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [], acc := none })],
     labelRegs := [(5, { a := [IR.Opd.tmp 0], hl := [], acc := none }), (1, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [], acc := none }), (3, { a := [], hl := [], acc := none }), (2, { a := [IR.Opd.const 1], hl := [], acc := none }), (0, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [], acc := none })] }
 
-theorem c2_tcp_tick_0 : runG (genBody Stack.fn_tcp_tick false 0 ((Stack.fn_tcp_tick.body.toList.drop 0).take 20)) e2_tcp_tick s2_tcp_tick_pre =
+theorem c2_tcp_tick_0 : runG (genBody Stack.fn_tcp_tick false 0 ((Stack.fn_tcp_tick.body.toList.drop 0).take 20)) e2_tcp_tick (noItems s2_tcp_tick_pre) =
     .ok ((), s2_tcp_tick_20) := by
   decide +kernel
 
 def s2_tcp_tick_40 : GS :=
-  { out := ⟨(items.drop 2388).take 85⟩,
+  { out := ⟨(items.drop 2424).take 49⟩,
     regs := { a := [], hl := [], acc := none },
     missed := #[false, false, false], lits := #[(4, 167772161), (4, 4294967295), (4, 0), (4, 1), (4, 65536), (4, 2147483648)], labels := 0,
     atLabel := [(10, { a := [], hl := [], acc := none }), (9, { a := [IR.Opd.const 8], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "t", off := 7 }) }), (8, { a := [IR.Opd.const 1], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "t", off := 7 }) }), (7, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "t", off := 7 }) }), (6, { a := [], hl := [], acc := none }), (5, { a := [IR.Opd.tmp 0], hl := [], acc := none }), (4, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [], acc := none }), (3, { a := [], hl := [], acc := none }), (2, { a := [IR.Opd.const 1], hl := [], acc := none }), (1, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [], acc := none }), (0, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [], acc := none })],
@@ -44,12 +44,12 @@ def s2_tcp_tick_40 : GS :=
     jumps := [(10, { a := [], hl := [], acc := none }), (9, { a := [IR.Opd.const 8], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "t", off := 7 }) }), (8, { a := [IR.Opd.const 1], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "t", off := 7 }) }), (7, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "t", off := 7 }) }), (6, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 33 }], hl := [], acc := none }), (6, { a := [], hl := [], acc := none }), (5, { a := [IR.Opd.tmp 0], hl := [], acc := none }), (4, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [], acc := none }), (3, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 32 }], hl := [], acc := none }), (3, { a := [], hl := [], acc := none }), (2, { a := [IR.Opd.const 1], hl := [], acc := none }), (1, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [], acc := none }), (0, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [], acc := none })],
     labelRegs := [(4, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [], acc := none }), (6, { a := [], hl := [], acc := none }), (5, { a := [IR.Opd.tmp 0], hl := [], acc := none }), (1, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [], acc := none }), (3, { a := [], hl := [], acc := none }), (2, { a := [IR.Opd.const 1], hl := [], acc := none }), (0, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [], acc := none })] }
 
-theorem c2_tcp_tick_20 : runG (genBody Stack.fn_tcp_tick false 20 ((Stack.fn_tcp_tick.body.toList.drop 20).take 20)) e2_tcp_tick s2_tcp_tick_20 =
+theorem c2_tcp_tick_20 : runG (genBody Stack.fn_tcp_tick false 20 ((Stack.fn_tcp_tick.body.toList.drop 20).take 20)) e2_tcp_tick (noItems s2_tcp_tick_20) =
     .ok ((), s2_tcp_tick_40) := by
   decide +kernel
 
 def s2_tcp_tick_60 : GS :=
-  { out := ⟨(items.drop 2388).take 118⟩,
+  { out := ⟨(items.drop 2473).take 33⟩,
     regs := { a := [], hl := [], acc := none },
     missed := #[false, false, false], lits := #[(4, 167772161), (4, 4294967295), (4, 0), (4, 1), (4, 65536), (4, 2147483648)], labels := 0,
     atLabel := [(14, { a := [], hl := [], acc := none }), (13, { a := [IR.Opd.tmp 2], hl := [IR.Opd.slot { area := IR.Area.global "t", off := 19 }], acc := some (4, IR.Opd.slot { area := IR.Area.global "t", off := 7 }) }), (12, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "t", off := 7 }) }), (11, { a := [], hl := [], acc := none }), (10, { a := [], hl := [], acc := none }), (9, { a := [IR.Opd.const 8], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "t", off := 7 }) }), (8, { a := [IR.Opd.const 1], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "t", off := 7 }) }), (7, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "t", off := 7 }) }), (6, { a := [], hl := [], acc := none }), (5, { a := [IR.Opd.tmp 0], hl := [], acc := none }), (4, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [], acc := none }), (3, { a := [], hl := [], acc := none }), (2, { a := [IR.Opd.const 1], hl := [], acc := none }), (1, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [], acc := none }), (0, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [], acc := none })],
@@ -57,12 +57,12 @@ def s2_tcp_tick_60 : GS :=
     jumps := [(14, { a := [], hl := [], acc := none }), (13, { a := [IR.Opd.tmp 2], hl := [IR.Opd.slot { area := IR.Area.global "t", off := 19 }], acc := some (4, IR.Opd.slot { area := IR.Area.global "t", off := 7 }) }), (12, { a := [], hl := [IR.Opd.slot { area := IR.Area.global "t", off := 19 }], acc := some (4, IR.Opd.slot { area := IR.Area.global "t", off := 7 }) }), (12, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "t", off := 7 }) }), (11, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 30 }], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "t", off := 7 }) }), (11, { a := [], hl := [], acc := none }), (10, { a := [], hl := [], acc := none }), (10, { a := [], hl := [], acc := none }), (9, { a := [IR.Opd.const 8], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "t", off := 7 }) }), (8, { a := [IR.Opd.const 1], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "t", off := 7 }) }), (7, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "t", off := 7 }) }), (6, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 33 }], hl := [], acc := none }), (6, { a := [], hl := [], acc := none }), (5, { a := [IR.Opd.tmp 0], hl := [], acc := none }), (4, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [], acc := none }), (3, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 32 }], hl := [], acc := none }), (3, { a := [], hl := [], acc := none }), (2, { a := [IR.Opd.const 1], hl := [], acc := none }), (1, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [], acc := none }), (0, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [], acc := none })],
     labelRegs := [(7, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "t", off := 7 }) }), (11, { a := [], hl := [], acc := none }), (8, { a := [IR.Opd.const 1], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "t", off := 7 }) }), (10, { a := [], hl := [], acc := none }), (9, { a := [IR.Opd.const 8], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "t", off := 7 }) }), (4, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [], acc := none }), (6, { a := [], hl := [], acc := none }), (5, { a := [IR.Opd.tmp 0], hl := [], acc := none }), (1, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [], acc := none }), (3, { a := [], hl := [], acc := none }), (2, { a := [IR.Opd.const 1], hl := [], acc := none }), (0, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [], acc := none })] }
 
-theorem c2_tcp_tick_40 : runG (genBody Stack.fn_tcp_tick false 40 ((Stack.fn_tcp_tick.body.toList.drop 40).take 20)) e2_tcp_tick s2_tcp_tick_40 =
+theorem c2_tcp_tick_40 : runG (genBody Stack.fn_tcp_tick false 40 ((Stack.fn_tcp_tick.body.toList.drop 40).take 20)) e2_tcp_tick (noItems s2_tcp_tick_40) =
     .ok ((), s2_tcp_tick_60) := by
   decide +kernel
 
 def s2_tcp_tick_65 : GS :=
-  { out := ⟨(items.drop 2388).take 125⟩,
+  { out := ⟨(items.drop 2506).take 7⟩,
     regs := { a := [], hl := [], acc := none },
     missed := #[false, false, false], lits := #[(4, 167772161), (4, 4294967295), (4, 0), (4, 1), (4, 65536), (4, 2147483648)], labels := 0,
     atLabel := [(14, { a := [], hl := [], acc := none }), (13, { a := [IR.Opd.tmp 2], hl := [IR.Opd.slot { area := IR.Area.global "t", off := 19 }], acc := some (4, IR.Opd.slot { area := IR.Area.global "t", off := 7 }) }), (12, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "t", off := 7 }) }), (11, { a := [], hl := [], acc := none }), (10, { a := [], hl := [], acc := none }), (9, { a := [IR.Opd.const 8], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "t", off := 7 }) }), (8, { a := [IR.Opd.const 1], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "t", off := 7 }) }), (7, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "t", off := 7 }) }), (6, { a := [], hl := [], acc := none }), (5, { a := [IR.Opd.tmp 0], hl := [], acc := none }), (4, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [], acc := none }), (3, { a := [], hl := [], acc := none }), (2, { a := [IR.Opd.const 1], hl := [], acc := none }), (1, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [], acc := none }), (0, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [], acc := none })],
@@ -70,28 +70,32 @@ def s2_tcp_tick_65 : GS :=
     jumps := [(12, { a := [], hl := [], acc := none }), (14, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 33 }], hl := [IR.Opd.slot { area := IR.Area.global "t", off := 19 }], acc := some (4, IR.Opd.slot { area := IR.Area.global "t", off := 7 }) }), (14, { a := [], hl := [], acc := none }), (13, { a := [IR.Opd.tmp 2], hl := [IR.Opd.slot { area := IR.Area.global "t", off := 19 }], acc := some (4, IR.Opd.slot { area := IR.Area.global "t", off := 7 }) }), (12, { a := [], hl := [IR.Opd.slot { area := IR.Area.global "t", off := 19 }], acc := some (4, IR.Opd.slot { area := IR.Area.global "t", off := 7 }) }), (12, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "t", off := 7 }) }), (11, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 30 }], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "t", off := 7 }) }), (11, { a := [], hl := [], acc := none }), (10, { a := [], hl := [], acc := none }), (10, { a := [], hl := [], acc := none }), (9, { a := [IR.Opd.const 8], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "t", off := 7 }) }), (8, { a := [IR.Opd.const 1], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "t", off := 7 }) }), (7, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "t", off := 7 }) }), (6, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 33 }], hl := [], acc := none }), (6, { a := [], hl := [], acc := none }), (5, { a := [IR.Opd.tmp 0], hl := [], acc := none }), (4, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [], acc := none }), (3, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 32 }], hl := [], acc := none }), (3, { a := [], hl := [], acc := none }), (2, { a := [IR.Opd.const 1], hl := [], acc := none }), (1, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [], acc := none }), (0, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [], acc := none })],
     labelRegs := [(12, { a := [], hl := [], acc := none }), (14, { a := [], hl := [], acc := none }), (13, { a := [IR.Opd.tmp 2], hl := [IR.Opd.slot { area := IR.Area.global "t", off := 19 }], acc := some (4, IR.Opd.slot { area := IR.Area.global "t", off := 7 }) }), (7, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "t", off := 7 }) }), (11, { a := [], hl := [], acc := none }), (8, { a := [IR.Opd.const 1], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "t", off := 7 }) }), (10, { a := [], hl := [], acc := none }), (9, { a := [IR.Opd.const 8], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "t", off := 7 }) }), (4, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [], acc := none }), (6, { a := [], hl := [], acc := none }), (5, { a := [IR.Opd.tmp 0], hl := [], acc := none }), (1, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [], acc := none }), (3, { a := [], hl := [], acc := none }), (2, { a := [IR.Opd.const 1], hl := [], acc := none }), (0, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [], acc := none })] }
 
-theorem c2_tcp_tick_60 : runG (genBody Stack.fn_tcp_tick false 60 ((Stack.fn_tcp_tick.body.toList.drop 60).take 5)) e2_tcp_tick s2_tcp_tick_60 =
+theorem c2_tcp_tick_60 : runG (genBody Stack.fn_tcp_tick false 60 ((Stack.fn_tcp_tick.body.toList.drop 60).take 5)) e2_tcp_tick (noItems s2_tcp_tick_60) =
     .ok ((), s2_tcp_tick_65) := by
   decide +kernel
 
-theorem body2_tcp_tick : runG (genBody Stack.fn_tcp_tick false 0 (Stack.fn_tcp_tick.body.toList.drop 0)) e2_tcp_tick s2_tcp_tick_pre = .ok ((), s2_tcp_tick_65) :=
-  body_step _ _ _ _ 0 20 _ _ _ (by decide +kernel) c2_tcp_tick_0
-    (body_step _ _ _ _ 20 20 _ _ _ (by decide +kernel) c2_tcp_tick_20
-    (body_step _ _ _ _ 40 20 _ _ _ (by decide +kernel) c2_tcp_tick_40
-    (body_step _ _ _ _ 60 5 _ _ _ (by decide +kernel) c2_tcp_tick_60
-    (body_end _ _ _ _ 65 _ (by decide +kernel)))))
+theorem body2_tcp_tick : RunsTo Stack.fn_tcp_tick false e2_tcp_tick Stack.fn_tcp_tick.body.toList 0 s2_tcp_tick_pre s2_tcp_tick_65
+    (s2_tcp_tick_20.out ++ (s2_tcp_tick_40.out ++ (s2_tcp_tick_60.out ++ (s2_tcp_tick_65.out ++ (#[]))))) :=
+  body_step_out _ _ _ _ 0 20 _ _ _ _ (by decide +kernel) c2_tcp_tick_0
+    (body_step_out _ _ _ _ 20 20 _ _ _ _ (by decide +kernel) c2_tcp_tick_20
+    (body_step_out _ _ _ _ 40 20 _ _ _ _ (by decide +kernel) c2_tcp_tick_40
+    (body_step_out _ _ _ _ 60 5 _ _ _ _ (by decide +kernel) c2_tcp_tick_60
+    (body_end_out _ _ _ _ 65 _ (by decide +kernel)))))
 theorem jumps2_tcp_tick : jumpsOk s2_tcp_tick_65 = true := by decide +kernel
 theorem gen2_tcp_tick : genFn Stack.fn_tcp_tick g_tcp_tick.missed #[(4, 167772161), (4, 4294967295), (4, 0), (4, 1), (4, 65536), (4, 2147483648)] false g_tcp_tick.live false =
-    .ok (s2_tcp_tick_65.out, s2_tcp_tick_65.missed, s2_tcp_tick_65.lits, (tmpLayout Stack.fn_tcp_tick g_tcp_tick.missed).2,
+    .ok (s2_tcp_tick_pre.out ++ (s2_tcp_tick_20.out ++ (s2_tcp_tick_40.out ++ (s2_tcp_tick_60.out ++ (s2_tcp_tick_65.out ++ (#[]))))), s2_tcp_tick_65.missed, s2_tcp_tick_65.lits, (tmpLayout Stack.fn_tcp_tick g_tcp_tick.missed).2,
       if s2_tcp_tick_65.addrTaken then none else some s2_tcp_tick_65.reads) :=
-  genFn_of _ _ _ _ _ _ _ _ pre2_tcp_tick body2_tcp_tick jumps2_tcp_tick
+  genFn_of_out _ _ _ _ _ _ _ _ _ pre2_tcp_tick body2_tcp_tick jumps2_tcp_tick
+
+theorem code2_tcp_tick : (s2_tcp_tick_pre.out ++ (s2_tcp_tick_20.out ++ (s2_tcp_tick_40.out ++ (s2_tcp_tick_60.out ++ (s2_tcp_tick_65.out ++ (#[])))))).toList = (items.drop 2388).take 125 :=
+  slices_toList items 2388 [1, 35, 49, 33, 7]
 
 theorem p1_tcp_tick : pass1B Stack.ir #[(4, 167772161), (4, 4294967295), (4, 0), (4, 1), (4, 65536), (4, 2147483648)] g_tcp_tick = true :=
   pass1B_of gen1_tcp_tick (by rw [shared_eq]; decide +kernel)
 theorem entry_tcp_tick : (Stack.fn_tcp_tick.name == Stack.ir.entry) = false := by decide +kernel
 theorem p2_tcp_tick : pass2B Stack.ir #[(4, 167772161), (4, 4294967295), (4, 0), (4, 1), (4, 65536), (4, 2147483648)] g_tcp_tick = true :=
-  pass2B_of (g := g_tcp_tick) rfl
+  pass2B_of' (g := g_tcp_tick) rfl
     ((congrArg (fun b => genFn Stack.fn_tcp_tick g_tcp_tick.missed #[(4, 167772161), (4, 4294967295), (4, 0), (4, 1), (4, 65536), (4, 2147483648)] b g_tcp_tick.live false)
-      entry_tcp_tick).trans gen2_tcp_tick) (by decide +kernel)
+      entry_tcp_tick).trans gen2_tcp_tick) code2_tcp_tick (by decide +kernel)
 
 end Ember.Proof.Z80Gen.StackH

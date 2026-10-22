@@ -118,7 +118,7 @@ def p1code_listen_input : List Item := [
 def e1_listen_input : GEnv := fnEnv Stack.fn_listen_input (Array.replicate Stack.fn_listen_input.tmps.size true) none
 
 def s1_listen_input_pre : GS :=
-  { out := ⟨p1code_listen_input.take 1⟩,
+  { out := ⟨(p1code_listen_input.drop 0).take 1⟩,
     regs := { a := [], hl := [], acc := none },
     missed := #[false, false, false, false], lits := #[(4, 167772161), (4, 4294967295), (4, 0), (4, 1)], labels := 0,
     atLabel := [],
@@ -129,7 +129,7 @@ def s1_listen_input_pre : GS :=
 theorem pre1_listen_input : runG (genPre Stack.fn_listen_input false) e1_listen_input (fnStart Stack.fn_listen_input #[(4, 167772161), (4, 4294967295), (4, 0), (4, 1)]) = .ok ((), s1_listen_input_pre) := by
   decide +kernel
 def s1_listen_input_20 : GS :=
-  { out := ⟨p1code_listen_input.take 36⟩,
+  { out := ⟨(p1code_listen_input.drop 1).take 35⟩,
     regs := { a := [], hl := [], acc := none },
     missed := #[false, false, false, false], lits := #[(4, 167772161), (4, 4294967295), (4, 0), (4, 1)], labels := 0,
     atLabel := [(4, { a := [IR.Opd.tmp 2], hl := [], acc := none }), (3, { a := [IR.Opd.tmp 1], hl := [], acc := none }), (2, { a := [], hl := [], acc := none }), (1, { a := [IR.Opd.tmp 0], hl := [], acc := none }), (0, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [], acc := none })],
@@ -137,12 +137,12 @@ def s1_listen_input_20 : GS :=
     jumps := [(4, { a := [IR.Opd.tmp 2], hl := [], acc := none }), (3, { a := [IR.Opd.tmp 1], hl := [], acc := none }), (2, { a := [], hl := [], acc := none }), (2, { a := [], hl := [], acc := none }), (1, { a := [IR.Opd.tmp 0], hl := [], acc := none }), (0, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [], acc := none })],
     labelRegs := [(3, { a := [IR.Opd.tmp 1], hl := [], acc := none }), (0, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [], acc := none }), (2, { a := [], hl := [], acc := none }), (1, { a := [IR.Opd.tmp 0], hl := [], acc := none })] }
 
-theorem c1_listen_input_0 : runG (genBody Stack.fn_listen_input false 0 ((Stack.fn_listen_input.body.toList.drop 0).take 20)) e1_listen_input s1_listen_input_pre =
+theorem c1_listen_input_0 : runG (genBody Stack.fn_listen_input false 0 ((Stack.fn_listen_input.body.toList.drop 0).take 20)) e1_listen_input (noItems s1_listen_input_pre) =
     .ok ((), s1_listen_input_20) := by
   decide +kernel
 
 def s1_listen_input_40 : GS :=
-  { out := ⟨p1code_listen_input.take 92⟩,
+  { out := ⟨(p1code_listen_input.drop 36).take 56⟩,
     regs := { a := [], hl := [IR.Opd.slot { area := IR.Area.global "t", off := 24 }, IR.Opd.const 1], acc := some (4, IR.Opd.slot { area := IR.Area.global "t", off := 11 }) },
     missed := #[false, false, false, false], lits := #[(4, 167772161), (4, 4294967295), (4, 0), (4, 1), (4, 65536)], labels := 0,
     atLabel := [(8, { a := [], hl := [IR.Opd.slot { area := IR.Area.global "t", off := 24 }, IR.Opd.const 1], acc := some (4, IR.Opd.slot { area := IR.Area.global "t", off := 11 }) }), (7, { a := [], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 18 }], acc := some (4, IR.Opd.slot { area := IR.Area.global "t", off := 11 }) }), (6, { a := [IR.Opd.slot { area := IR.Area.global "sg", off := 17 }], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "t", off := 11 }) }), (5, { a := [IR.Opd.tmp 3], hl := [], acc := none }), (4, { a := [IR.Opd.tmp 2], hl := [], acc := none }), (3, { a := [IR.Opd.tmp 1], hl := [], acc := none }), (2, { a := [], hl := [], acc := none }), (1, { a := [IR.Opd.tmp 0], hl := [], acc := none }), (0, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [], acc := none })],
@@ -150,12 +150,12 @@ def s1_listen_input_40 : GS :=
     jumps := [(8, { a := [], hl := [IR.Opd.slot { area := IR.Area.global "t", off := 24 }, IR.Opd.const 1], acc := some (4, IR.Opd.slot { area := IR.Area.global "t", off := 11 }) }), (7, { a := [], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 18 }], acc := some (4, IR.Opd.slot { area := IR.Area.global "t", off := 11 }) }), (6, { a := [IR.Opd.slot { area := IR.Area.global "sg", off := 17 }], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "t", off := 11 }) }), (5, { a := [IR.Opd.tmp 3], hl := [], acc := none }), (4, { a := [IR.Opd.tmp 2], hl := [], acc := none }), (3, { a := [IR.Opd.tmp 1], hl := [], acc := none }), (2, { a := [], hl := [], acc := none }), (2, { a := [], hl := [], acc := none }), (1, { a := [IR.Opd.tmp 0], hl := [], acc := none }), (0, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [], acc := none })],
     labelRegs := [(5, { a := [IR.Opd.tmp 3], hl := [], acc := none }), (4, { a := [IR.Opd.tmp 2], hl := [], acc := none }), (3, { a := [IR.Opd.tmp 1], hl := [], acc := none }), (0, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [], acc := none }), (2, { a := [], hl := [], acc := none }), (1, { a := [IR.Opd.tmp 0], hl := [], acc := none })] }
 
-theorem c1_listen_input_20 : runG (genBody Stack.fn_listen_input false 20 ((Stack.fn_listen_input.body.toList.drop 20).take 20)) e1_listen_input s1_listen_input_20 =
+theorem c1_listen_input_20 : runG (genBody Stack.fn_listen_input false 20 ((Stack.fn_listen_input.body.toList.drop 20).take 20)) e1_listen_input (noItems s1_listen_input_20) =
     .ok ((), s1_listen_input_40) := by
   decide +kernel
 
 def s1_listen_input_47 : GS :=
-  { out := ⟨p1code_listen_input.take 100⟩,
+  { out := ⟨(p1code_listen_input.drop 92).take 8⟩,
     regs := { a := [], hl := [], acc := none },
     missed := #[false, false, false, false], lits := #[(4, 167772161), (4, 4294967295), (4, 0), (4, 1), (4, 65536)], labels := 0,
     atLabel := [(8, { a := [], hl := [IR.Opd.slot { area := IR.Area.global "t", off := 24 }, IR.Opd.const 1], acc := some (4, IR.Opd.slot { area := IR.Area.global "t", off := 11 }) }), (7, { a := [], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 18 }], acc := some (4, IR.Opd.slot { area := IR.Area.global "t", off := 11 }) }), (6, { a := [IR.Opd.slot { area := IR.Area.global "sg", off := 17 }], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "t", off := 11 }) }), (5, { a := [IR.Opd.tmp 3], hl := [], acc := none }), (4, { a := [IR.Opd.tmp 2], hl := [], acc := none }), (3, { a := [IR.Opd.tmp 1], hl := [], acc := none }), (2, { a := [], hl := [], acc := none }), (1, { a := [IR.Opd.tmp 0], hl := [], acc := none }), (0, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [], acc := none })],
@@ -163,20 +163,21 @@ def s1_listen_input_47 : GS :=
     jumps := [(6, { a := [], hl := [IR.Opd.slot { area := IR.Area.global "t", off := 24 }], acc := some (4, IR.Opd.slot { area := IR.Area.global "t", off := 11 }) }), (8, { a := [], hl := [IR.Opd.slot { area := IR.Area.global "t", off := 24 }, IR.Opd.slot { area := IR.Area.global "sg", off := 18 }], acc := some (4, IR.Opd.slot { area := IR.Area.global "t", off := 11 }) }), (8, { a := [], hl := [IR.Opd.slot { area := IR.Area.global "t", off := 24 }, IR.Opd.const 1], acc := some (4, IR.Opd.slot { area := IR.Area.global "t", off := 11 }) }), (7, { a := [], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 18 }], acc := some (4, IR.Opd.slot { area := IR.Area.global "t", off := 11 }) }), (6, { a := [IR.Opd.slot { area := IR.Area.global "sg", off := 17 }], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "t", off := 11 }) }), (5, { a := [IR.Opd.tmp 3], hl := [], acc := none }), (4, { a := [IR.Opd.tmp 2], hl := [], acc := none }), (3, { a := [IR.Opd.tmp 1], hl := [], acc := none }), (2, { a := [], hl := [], acc := none }), (2, { a := [], hl := [], acc := none }), (1, { a := [IR.Opd.tmp 0], hl := [], acc := none }), (0, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [], acc := none })],
     labelRegs := [(6, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "t", off := 11 }) }), (8, { a := [], hl := [IR.Opd.slot { area := IR.Area.global "t", off := 24 }], acc := some (4, IR.Opd.slot { area := IR.Area.global "t", off := 11 }) }), (7, { a := [], hl := [IR.Opd.slot { area := IR.Area.global "sg", off := 18 }], acc := some (4, IR.Opd.slot { area := IR.Area.global "t", off := 11 }) }), (5, { a := [IR.Opd.tmp 3], hl := [], acc := none }), (4, { a := [IR.Opd.tmp 2], hl := [], acc := none }), (3, { a := [IR.Opd.tmp 1], hl := [], acc := none }), (0, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [], acc := none }), (2, { a := [], hl := [], acc := none }), (1, { a := [IR.Opd.tmp 0], hl := [], acc := none })] }
 
-theorem c1_listen_input_40 : runG (genBody Stack.fn_listen_input false 40 ((Stack.fn_listen_input.body.toList.drop 40).take 7)) e1_listen_input s1_listen_input_40 =
+theorem c1_listen_input_40 : runG (genBody Stack.fn_listen_input false 40 ((Stack.fn_listen_input.body.toList.drop 40).take 7)) e1_listen_input (noItems s1_listen_input_40) =
     .ok ((), s1_listen_input_47) := by
   decide +kernel
 
-theorem body1_listen_input : runG (genBody Stack.fn_listen_input false 0 (Stack.fn_listen_input.body.toList.drop 0)) e1_listen_input s1_listen_input_pre = .ok ((), s1_listen_input_47) :=
-  body_step _ _ _ _ 0 20 _ _ _ (by decide +kernel) c1_listen_input_0
-    (body_step _ _ _ _ 20 20 _ _ _ (by decide +kernel) c1_listen_input_20
-    (body_step _ _ _ _ 40 7 _ _ _ (by decide +kernel) c1_listen_input_40
-    (body_end _ _ _ _ 47 _ (by decide +kernel))))
+theorem body1_listen_input : RunsTo Stack.fn_listen_input false e1_listen_input Stack.fn_listen_input.body.toList 0 s1_listen_input_pre s1_listen_input_47
+    (s1_listen_input_20.out ++ (s1_listen_input_40.out ++ (s1_listen_input_47.out ++ (#[])))) :=
+  body_step_out _ _ _ _ 0 20 _ _ _ _ (by decide +kernel) c1_listen_input_0
+    (body_step_out _ _ _ _ 20 20 _ _ _ _ (by decide +kernel) c1_listen_input_20
+    (body_step_out _ _ _ _ 40 7 _ _ _ _ (by decide +kernel) c1_listen_input_40
+    (body_end_out _ _ _ _ 47 _ (by decide +kernel))))
 theorem jumps1_listen_input : jumpsOk s1_listen_input_47 = true := by decide +kernel
 theorem gen1_listen_input : genFn Stack.fn_listen_input (Array.replicate Stack.fn_listen_input.tmps.size true) #[(4, 167772161), (4, 4294967295), (4, 0), (4, 1)] false none false =
-    .ok (s1_listen_input_47.out, s1_listen_input_47.missed, s1_listen_input_47.lits, (tmpLayout Stack.fn_listen_input (Array.replicate Stack.fn_listen_input.tmps.size true)).2,
+    .ok (s1_listen_input_pre.out ++ (s1_listen_input_20.out ++ (s1_listen_input_40.out ++ (s1_listen_input_47.out ++ (#[])))), s1_listen_input_47.missed, s1_listen_input_47.lits, (tmpLayout Stack.fn_listen_input (Array.replicate Stack.fn_listen_input.tmps.size true)).2,
       if s1_listen_input_47.addrTaken then none else some s1_listen_input_47.reads) :=
-  genFn_of _ _ _ _ _ _ _ _ pre1_listen_input body1_listen_input jumps1_listen_input
+  genFn_of_out _ _ _ _ _ _ _ _ _ pre1_listen_input body1_listen_input jumps1_listen_input
 
 
 end Ember.Proof.Z80Gen.StackH

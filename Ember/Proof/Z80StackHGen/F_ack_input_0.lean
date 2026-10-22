@@ -171,7 +171,7 @@ def p1code_ack_input : List Item := [
 def e1_ack_input : GEnv := fnEnv Stack.fn_ack_input (Array.replicate Stack.fn_ack_input.tmps.size true) none
 
 def s1_ack_input_pre : GS :=
-  { out := ⟨p1code_ack_input.take 1⟩,
+  { out := ⟨(p1code_ack_input.drop 0).take 1⟩,
     regs := { a := [], hl := [], acc := none },
     missed := #[false, false, false, false], lits := #[(4, 167772161), (4, 4294967295), (4, 0), (4, 1), (4, 65536)], labels := 0,
     atLabel := [],
@@ -182,7 +182,7 @@ def s1_ack_input_pre : GS :=
 theorem pre1_ack_input : runG (genPre Stack.fn_ack_input false) e1_ack_input (fnStart Stack.fn_ack_input #[(4, 167772161), (4, 4294967295), (4, 0), (4, 1), (4, 65536)]) = .ok ((), s1_ack_input_pre) := by
   decide +kernel
 def s1_ack_input_20 : GS :=
-  { out := ⟨p1code_ack_input.take 57⟩,
+  { out := ⟨(p1code_ack_input.drop 1).take 56⟩,
     regs := { a := [], hl := [], acc := some (4, IR.Opd.tmp 1) },
     missed := #[true, false, false, false], lits := #[(4, 167772161), (4, 4294967295), (4, 0), (4, 1), (4, 65536)], labels := 0,
     atLabel := [(2, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.frame "ack_input", off := 0 }) }), (1, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.frame "ack_input", off := 0 }) }), (0, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.frame "ack_input", off := 4 }) })],
@@ -190,12 +190,12 @@ def s1_ack_input_20 : GS :=
     jumps := [(2, { a := [], hl := [IR.Opd.slot { area := IR.Area.frame "ack_input", off := 8 }, IR.Opd.slot { area := IR.Area.frame "ack_input", off := 0 }], acc := some (4, IR.Opd.slot { area := IR.Area.frame "ack_input", off := 0 }) }), (2, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.frame "ack_input", off := 0 }) }), (1, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.frame "ack_input", off := 0 }) }), (0, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.frame "ack_input", off := 4 }) })],
     labelRegs := [(2, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.frame "ack_input", off := 0 }) }), (1, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.frame "ack_input", off := 0 }) }), (0, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.frame "ack_input", off := 4 }) })] }
 
-theorem c1_ack_input_0 : runG (genBody Stack.fn_ack_input false 0 ((Stack.fn_ack_input.body.toList.drop 0).take 20)) e1_ack_input s1_ack_input_pre =
+theorem c1_ack_input_0 : runG (genBody Stack.fn_ack_input false 0 ((Stack.fn_ack_input.body.toList.drop 0).take 20)) e1_ack_input (noItems s1_ack_input_pre) =
     .ok ((), s1_ack_input_20) := by
   decide +kernel
 
 def s1_ack_input_40 : GS :=
-  { out := ⟨p1code_ack_input.take 123⟩,
+  { out := ⟨(p1code_ack_input.drop 57).take 66⟩,
     regs := { a := [IR.Opd.slot { area := IR.Area.global "t", off := 30 }, IR.Opd.const 0], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "t", off := 7 }) },
     missed := #[true, false, false, false], lits := #[(4, 167772161), (4, 4294967295), (4, 0), (4, 1), (4, 65536)], labels := 0,
     atLabel := [(6, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 30 }, IR.Opd.const 3], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "t", off := 7 }) }), (5, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "t", off := 7 }) }), (3, { a := [IR.Opd.tmp 3], hl := [IR.Opd.slot { area := IR.Area.frame "ack_input", off := 11 }], acc := none }), (4, { a := [], hl := [IR.Opd.slot { area := IR.Area.frame "ack_input", off := 11 }], acc := none }), (2, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.frame "ack_input", off := 0 }) }), (1, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.frame "ack_input", off := 0 }) }), (0, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.frame "ack_input", off := 4 }) })],
@@ -203,12 +203,12 @@ def s1_ack_input_40 : GS :=
     jumps := [(6, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 30 }, IR.Opd.const 3], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "t", off := 7 }) }), (5, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "t", off := 7 }) }), (3, { a := [IR.Opd.tmp 3], hl := [IR.Opd.slot { area := IR.Area.frame "ack_input", off := 11 }], acc := none }), (4, { a := [], hl := [IR.Opd.slot { area := IR.Area.frame "ack_input", off := 11 }], acc := none }), (3, { a := [IR.Opd.slot { area := IR.Area.frame "ack_input", off := 10 }], hl := [IR.Opd.slot { area := IR.Area.frame "ack_input", off := 13 }], acc := some (4, IR.Opd.tmp 1) }), (2, { a := [], hl := [IR.Opd.slot { area := IR.Area.frame "ack_input", off := 8 }, IR.Opd.slot { area := IR.Area.frame "ack_input", off := 0 }], acc := some (4, IR.Opd.slot { area := IR.Area.frame "ack_input", off := 0 }) }), (2, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.frame "ack_input", off := 0 }) }), (1, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.frame "ack_input", off := 0 }) }), (0, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.frame "ack_input", off := 4 }) })],
     labelRegs := [(5, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "t", off := 7 }) }), (4, { a := [], hl := [IR.Opd.slot { area := IR.Area.frame "ack_input", off := 11 }], acc := none }), (3, { a := [], hl := [], acc := none }), (2, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.frame "ack_input", off := 0 }) }), (1, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.frame "ack_input", off := 0 }) }), (0, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.frame "ack_input", off := 4 }) })] }
 
-theorem c1_ack_input_20 : runG (genBody Stack.fn_ack_input false 20 ((Stack.fn_ack_input.body.toList.drop 20).take 20)) e1_ack_input s1_ack_input_20 =
+theorem c1_ack_input_20 : runG (genBody Stack.fn_ack_input false 20 ((Stack.fn_ack_input.body.toList.drop 20).take 20)) e1_ack_input (noItems s1_ack_input_20) =
     .ok ((), s1_ack_input_40) := by
   decide +kernel
 
 def s1_ack_input_59 : GS :=
-  { out := ⟨p1code_ack_input.take 153⟩,
+  { out := ⟨(p1code_ack_input.drop 123).take 30⟩,
     regs := { a := [IR.Opd.const 1], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "t", off := 7 }) },
     missed := #[true, false, false, false], lits := #[(4, 167772161), (4, 4294967295), (4, 0), (4, 1), (4, 65536)], labels := 0,
     atLabel := [(12, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "t", off := 7 }) }), (11, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 32 }, IR.Opd.const 20], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "t", off := 7 }) }), (10, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "t", off := 7 }) }), (9, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }, IR.Opd.const 6], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "t", off := 7 }) }), (8, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "t", off := 7 }) }), (7, { a := [IR.Opd.slot { area := IR.Area.frame "ack_input", off := 10 }], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "t", off := 7 }) }), (6, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 30 }, IR.Opd.const 3], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "t", off := 7 }) }), (5, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "t", off := 7 }) }), (3, { a := [IR.Opd.tmp 3], hl := [IR.Opd.slot { area := IR.Area.frame "ack_input", off := 11 }], acc := none }), (4, { a := [], hl := [IR.Opd.slot { area := IR.Area.frame "ack_input", off := 11 }], acc := none }), (2, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.frame "ack_input", off := 0 }) }), (1, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.frame "ack_input", off := 0 }) }), (0, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.frame "ack_input", off := 4 }) })],
@@ -216,20 +216,21 @@ def s1_ack_input_59 : GS :=
     jumps := [(7, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "t", off := 7 }) }), (9, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "t", off := 7 }) }), (11, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "t", off := 7 }) }), (12, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "t", off := 7 }) }), (11, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 32 }, IR.Opd.const 20], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "t", off := 7 }) }), (10, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "t", off := 7 }) }), (9, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }, IR.Opd.const 6], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "t", off := 7 }) }), (8, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "t", off := 7 }) }), (7, { a := [IR.Opd.slot { area := IR.Area.frame "ack_input", off := 10 }], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "t", off := 7 }) }), (6, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 30 }, IR.Opd.const 0], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "t", off := 7 }) }), (6, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 30 }, IR.Opd.const 3], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "t", off := 7 }) }), (5, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "t", off := 7 }) }), (3, { a := [IR.Opd.tmp 3], hl := [IR.Opd.slot { area := IR.Area.frame "ack_input", off := 11 }], acc := none }), (4, { a := [], hl := [IR.Opd.slot { area := IR.Area.frame "ack_input", off := 11 }], acc := none }), (3, { a := [IR.Opd.slot { area := IR.Area.frame "ack_input", off := 10 }], hl := [IR.Opd.slot { area := IR.Area.frame "ack_input", off := 13 }], acc := some (4, IR.Opd.tmp 1) }), (2, { a := [], hl := [IR.Opd.slot { area := IR.Area.frame "ack_input", off := 8 }, IR.Opd.slot { area := IR.Area.frame "ack_input", off := 0 }], acc := some (4, IR.Opd.slot { area := IR.Area.frame "ack_input", off := 0 }) }), (2, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.frame "ack_input", off := 0 }) }), (1, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.frame "ack_input", off := 0 }) }), (0, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.frame "ack_input", off := 4 }) })],
     labelRegs := [(7, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "t", off := 7 }) }), (9, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "t", off := 7 }) }), (11, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "t", off := 7 }) }), (12, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "t", off := 7 }) }), (10, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "t", off := 7 }) }), (8, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 0 }], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "t", off := 7 }) }), (6, { a := [IR.Opd.slot { area := IR.Area.global "t", off := 30 }], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "t", off := 7 }) }), (5, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.global "t", off := 7 }) }), (4, { a := [], hl := [IR.Opd.slot { area := IR.Area.frame "ack_input", off := 11 }], acc := none }), (3, { a := [], hl := [], acc := none }), (2, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.frame "ack_input", off := 0 }) }), (1, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.frame "ack_input", off := 0 }) }), (0, { a := [], hl := [], acc := some (4, IR.Opd.slot { area := IR.Area.frame "ack_input", off := 4 }) })] }
 
-theorem c1_ack_input_40 : runG (genBody Stack.fn_ack_input false 40 ((Stack.fn_ack_input.body.toList.drop 40).take 19)) e1_ack_input s1_ack_input_40 =
+theorem c1_ack_input_40 : runG (genBody Stack.fn_ack_input false 40 ((Stack.fn_ack_input.body.toList.drop 40).take 19)) e1_ack_input (noItems s1_ack_input_40) =
     .ok ((), s1_ack_input_59) := by
   decide +kernel
 
-theorem body1_ack_input : runG (genBody Stack.fn_ack_input false 0 (Stack.fn_ack_input.body.toList.drop 0)) e1_ack_input s1_ack_input_pre = .ok ((), s1_ack_input_59) :=
-  body_step _ _ _ _ 0 20 _ _ _ (by decide +kernel) c1_ack_input_0
-    (body_step _ _ _ _ 20 20 _ _ _ (by decide +kernel) c1_ack_input_20
-    (body_step _ _ _ _ 40 19 _ _ _ (by decide +kernel) c1_ack_input_40
-    (body_end _ _ _ _ 59 _ (by decide +kernel))))
+theorem body1_ack_input : RunsTo Stack.fn_ack_input false e1_ack_input Stack.fn_ack_input.body.toList 0 s1_ack_input_pre s1_ack_input_59
+    (s1_ack_input_20.out ++ (s1_ack_input_40.out ++ (s1_ack_input_59.out ++ (#[])))) :=
+  body_step_out _ _ _ _ 0 20 _ _ _ _ (by decide +kernel) c1_ack_input_0
+    (body_step_out _ _ _ _ 20 20 _ _ _ _ (by decide +kernel) c1_ack_input_20
+    (body_step_out _ _ _ _ 40 19 _ _ _ _ (by decide +kernel) c1_ack_input_40
+    (body_end_out _ _ _ _ 59 _ (by decide +kernel))))
 theorem jumps1_ack_input : jumpsOk s1_ack_input_59 = true := by decide +kernel
 theorem gen1_ack_input : genFn Stack.fn_ack_input (Array.replicate Stack.fn_ack_input.tmps.size true) #[(4, 167772161), (4, 4294967295), (4, 0), (4, 1), (4, 65536)] false none false =
-    .ok (s1_ack_input_59.out, s1_ack_input_59.missed, s1_ack_input_59.lits, (tmpLayout Stack.fn_ack_input (Array.replicate Stack.fn_ack_input.tmps.size true)).2,
+    .ok (s1_ack_input_pre.out ++ (s1_ack_input_20.out ++ (s1_ack_input_40.out ++ (s1_ack_input_59.out ++ (#[])))), s1_ack_input_59.missed, s1_ack_input_59.lits, (tmpLayout Stack.fn_ack_input (Array.replicate Stack.fn_ack_input.tmps.size true)).2,
       if s1_ack_input_59.addrTaken then none else some s1_ack_input_59.reads) :=
-  genFn_of _ _ _ _ _ _ _ _ pre1_ack_input body1_ack_input jumps1_ack_input
+  genFn_of_out _ _ _ _ _ _ _ _ _ pre1_ack_input body1_ack_input jumps1_ack_input
 
 
 end Ember.Proof.Z80Gen.StackH

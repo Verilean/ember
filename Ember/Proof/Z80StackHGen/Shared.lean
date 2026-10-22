@@ -1,4 +1,4 @@
-import Ember.Proof.Z80GenChunks
+import Ember.Proof.Z80GenOut
 import Ember.Proof.Z80StackHItems
 
 /-!
