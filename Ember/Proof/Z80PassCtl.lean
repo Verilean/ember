@@ -298,4 +298,95 @@ theorem ret_mstep (D : Dev) {C : Code} {k : Nat} {cc : Option Arg} (hcc : ∀ c,
         simp only [jumped, op1, Cpu.bumpR, hlen]
         rw [UInt16.toNat_add, hpc]; simp only [UInt16.toNat_one]; omega
 
+/-! ## `djnz`, `halt`, `ld sp,nn` -/
+
+/-- The state after `djnz`: `B` one less, then a jump or not. -/
+def djnzed (s : Cpu) (p : UInt16) (c : UInt64) : Cpu := { op1 s with b := s.b - 1, pc := p, cycles := c }
+
+/-- **`djnz` to a label**: `B` one less; at the label when it is not zero, at the next item when it is. -/
+theorem djnz_mstep (D : Dev) {C : Code} {k j : Nat} {l : String}
+    (hk : C.items[k]? = some (.ins ⟨.djnz, [.imm (.sym l 0)]⟩)) (hj : C.items[j]? = some (.label l))
+    {s : Cpu} (L : Loaded C s) (hat : At C.addrs k s) (w : D.W) :
+    ∃ p c, mstep D (s, w) = (djnzed s p c, w) ∧ Loaded C (djnzed s p c) ∧
+      (if (s.b - 1 != 0) = true then At C.addrs j (djnzed s p c) else At C.addrs (k + 1) (djnzed s p c)) := by
+  obtain ⟨ad, had, hpc⟩ := hat
+  obtain ⟨T, hT, hval, hTlt⟩ := label_addr L hj
+  obtain ⟨bs, hbs, hnext, hlt⟩ := C.placed.next L.1 hk had
+  have h' := encode_run hbs
+  have he' : ((rel (.sym l 0)).run (C.a.env ad)).bind _ = Except.ok bs := h'
+  obtain ⟨lst, hl, hb⟩ := bind_ok he'
+  obtain ⟨r1, r2⟩ := rel_range hl rfl
+  have hlst := rel_bytes hl
+  subst hlst; cases hb
+  have hpcv : (C.a.env ad).pc = Int.ofNat ad := rfl
+  rw [hval, hpcv] at r1 r2
+  have hlt' := hlt (by intro e; cases e)
+  simp only [List.length_append, List.length_cons, List.length_nil] at hlt' hnext
+  have himm : Instr.immB (C.a.env ad) ⟨.djnz, [.imm (.sym l 0)]⟩ = byteOf (Int.ofNat T - (Int.ofNat ad + 2)) := by
+    show byteOf ((C.a.env ad).val (.sym l 0) - ((C.a.env ad).pc + 2)) = _
+    rw [hval]; rfl
+  have hs := sext_val _ r1 r2
+  have eT : s.pc + 1 + 1 + Cpu.sext (byteOf (Int.ofNat T - (Int.ofNat ad + 2))) = UInt16.ofNat T := by
+    apply UInt16.toNat_inj.mp
+    rw [UInt16.toNat_add, UInt16.toNat_add, UInt16.toNat_add, ofNat_toNat16 hTlt, hpc]
+    simp only [UInt16.toNat_one, Int.ofNat_eq_natCast] at hs r1 r2 ⊢
+    omega
+  have hL : ∀ p c, Loaded C (djnzed s p c) := fun p c => ⟨L.1.congr rfl rfl, L.2⟩
+  by_cases hb : (s.b - 1 != 0) = true
+  · have hx : exec (C.a.env ad) ⟨.djnz, [.imm (.sym l 0)]⟩ s (D.bus w) =
+        some (djnzed s (UInt16.ofNat T) ((op1 s).cycles + 13)) := by
+      show execI _ (Instr.immB (C.a.env ad) _) _ _ _ = _
+      rw [himm]
+      simp only [execI, exec1, op1, Cpu.bumpR, skip, Cpu.tick, djnzed]
+      rw [if_pos hb]
+      simp only [eT]
+    obtain ⟨hs1, _⟩ := step_of hk L had hpc w hx
+    refine ⟨UInt16.ofNat T, (op1 s).cycles + 13, ?_, hL _ _, ?_⟩
+    · show (s.step (D.bus w), D.dev w (s.step (D.bus w)).io) = _
+      rw [hs1]; exact congrArg (Prod.mk _) (D.quiet w)
+    · rw [if_pos hb]; exact ⟨T, hT, by simp only [djnzed, ofNat_toNat16 hTlt]⟩
+  · have hx : exec (C.a.env ad) ⟨.djnz, [.imm (.sym l 0)]⟩ s (D.bus w) =
+        some (djnzed s (s.pc + 1 + 1) ((op1 s).cycles + 8)) := by
+      show execI _ (Instr.immB (C.a.env ad) _) _ _ _ = _
+      simp only [execI, exec1, op1, Cpu.bumpR, skip, Cpu.tick, djnzed]
+      rw [if_neg hb]
+    obtain ⟨hs1, _⟩ := step_of hk L had hpc w hx
+    refine ⟨s.pc + 1 + 1, (op1 s).cycles + 8, ?_, hL _ _, ?_⟩
+    · show (s.step (D.bus w), D.dev w (s.step (D.bus w)).io) = _
+      rw [hs1]; exact congrArg (Prod.mk _) (D.quiet w)
+    · rw [if_neg hb]
+      refine ⟨ad + 2, hnext, ?_⟩
+      simp only [djnzed]
+      rw [UInt16.toNat_add, UInt16.toNat_add, hpc]; simp only [UInt16.toNat_one]; omega
+
+/-- **`halt`**: the CPU halted, nothing else of note changed. -/
+theorem halt_mstep (D : Dev) {C : Code} {k : Nat} (hk : C.items[k]? = some (.ins ⟨.halt, []⟩))
+    {s : Cpu} (L : Loaded C s) (hat : At C.addrs k s) (w : D.W) :
+    mstep D (s, w) = ((({ op1 s with halted := true }) : Cpu).tick 4, w) := by
+  obtain ⟨ad, had, hpc⟩ := hat
+  have hx : exec (C.a.env ad) ⟨.halt, []⟩ s (D.bus w) = some ((({ op1 s with halted := true }) : Cpu).tick 4) := rfl
+  obtain ⟨hs1, _⟩ := step_of hk L had hpc w hx
+  show (s.step (D.bus w), D.dev w (s.step (D.bus w)).io) = _
+  rw [hs1]; exact congrArg (Prod.mk _) (D.quiet w)
+
+/-- **`ld sp,nn`**: the stack pointer `nn`, the CPU at the next item. -/
+theorem ldsp_mstep (D : Dev) {C : Code} {k : Nat} (n : Nat) (hn : n < 65536)
+    (hk : C.items[k]? = some (.ins ⟨.ld, [.sp, .imm (.num (Int.ofNat n))]⟩))
+    {s : Cpu} (L : Loaded C s) (hat : At C.addrs k s) (w : D.W) :
+    ∃ p c, mstep D (s, w) = ({ op1 s with sp := UInt16.ofNat n, pc := p, cycles := c }, w) ∧
+      At C.addrs (k + 1) { op1 s with sp := UInt16.ofNat n, pc := p, cycles := c } ∧
+      Loaded C { op1 s with sp := UInt16.ofNat n, pc := p, cycles := c } := by
+  obtain ⟨ad, had, hpc⟩ := hat
+  have hw : Instr.immW (C.a.env ad) ⟨.ld, [.sp, .imm (.num (Int.ofNat n))]⟩ = UInt16.ofNat n := by
+    apply UInt16.toNat_inj.mp
+    rw [immW_toNat _ _ (.num (Int.ofNat n)) n rfl rfl hn, ofNat_toNat16 hn]
+  have hx : exec (C.a.env ad) ⟨.ld, [.sp, .imm (.num (Int.ofNat n))]⟩ s (D.bus w) =
+      some { op1 s with sp := UInt16.ofNat n, pc := s.pc + 1 + 2, cycles := (op1 s).cycles + 10 } := by
+    show execI _ _ (Instr.immW (C.a.env ad) _) _ _ = _
+    rw [hw]; rfl
+  obtain ⟨hs1, hat'⟩ := step_of hk L had hpc w hx
+  refine ⟨_, _, ?_, hat' rfl, ⟨L.1.congr rfl rfl, L.2⟩⟩
+  show (s.step (D.bus w), D.dev w (s.step (D.bus w)).io) = _
+  rw [hs1]; exact congrArg (Prod.mk _) (D.quiet w)
+
 end Ember.Proof.PassSim
