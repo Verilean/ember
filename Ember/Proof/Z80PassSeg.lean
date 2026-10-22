@@ -34,6 +34,8 @@ inductive Frame where
   | ret (rA rB e : Nat)
   /-- A call of `A` that is a jump in `B`: `A`'s return point and the entry; nothing on `B`'s stack. -/
   | tail (rA e : Nat)
+  /-- A word pushed by both (`push af`), the same in both. -/
+  | data
   deriving DecidableEq, Repr
 
 /-- Where the stack's top is: `sp`, or the top of memory when `sp` is 0 (the stack empty). -/
@@ -51,6 +53,8 @@ def Stk (A B : Code) (lo : Nat) : List Frame → Nat → Nat → ByteArray → B
       Stk A B lo G (a + 2) (b + 2) mA mB
   | .tail rA _ :: G, a, b, mA, mB =>
     lo ≤ a ∧ A.addrs[rA]? = some (word mA a) ∧ Stk A B lo G (a + 2) b mA mB
+  | .data :: G, a, b, mA, mB =>
+    lo ≤ a ∧ lo ≤ b ∧ word mA a = word mB b ∧ Stk A B lo G (a + 2) (b + 2) mA mB
 
 /-- The stacks depend on the bytes from their tops up only. -/
 theorem Stk.congr {A B : Code} {lo : Nat} : ∀ (G : List Frame) (a b : Nat) (mA mB mA' mB' : ByteArray),
@@ -65,6 +69,10 @@ theorem Stk.congr {A B : Code} {lo : Nat} : ∀ (G : List Frame) (a b : Nat) (mA
   | .tail rA e :: G, a, b, mA, mB, mA', mB', ⟨h1, h3, h5⟩, hA, hB => by
     refine ⟨h1, ?_, Stk.congr G (a + 2) b mA mB mA' mB' h5 (fun x hx => hA x (by omega)) hB⟩
     unfold word; rw [hA a (by omega), hA (a + 1) (by omega)]; exact h3
+  | .data :: G, a, b, mA, mB, mA', mB', ⟨h1, h2, h3, h5⟩, hA, hB => by
+    refine ⟨h1, h2, ?_, Stk.congr G (a + 2) (b + 2) mA mB mA' mB' h5
+      (fun x hx => hA x (by omega)) (fun x hx => hB x (by omega))⟩
+    unfold word; rw [hA a (by omega), hA (a + 1) (by omega), hB b (by omega), hB (b + 1) (by omega)]; exact h3
 
 /-- The tops are at or above `lo`, and `A`'s is at or below `B`'s (`B` has fewer frames). -/
 theorem Stk.bounds {A B : Code} {lo : Nat} : ∀ (G : List Frame) (a b : Nat) (mA mB : ByteArray),
@@ -74,6 +82,9 @@ theorem Stk.bounds {A B : Code} {lo : Nat} : ∀ (G : List Frame) (a b : Nat) (m
     have := Stk.bounds G _ _ _ _ h5
     exact ⟨by omega, by omega, by simp; omega, fun _ => h1⟩
   | .tail _ _ :: G, a, b, mA, mB, ⟨h1, _, h5⟩ => by
+    have := Stk.bounds G _ _ _ _ h5
+    exact ⟨by omega, by omega, by simp; omega, fun _ => h1⟩
+  | .data :: G, a, b, mA, mB, ⟨h1, _, _, h5⟩ => by
     have := Stk.bounds G _ _ _ _ h5
     exact ⟨by omega, by omega, by simp; omega, fun _ => h1⟩
 
@@ -632,5 +643,183 @@ theorem seg_pack (D : Dev) {A B : Code} {lo hi : Nat} {G : List Frame} {kA kB : 
 
 /-- info: 'Ember.Proof.PassSim.seg_pack' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in #print axioms seg_pack
+
+/-! ## `push af`, `pop af` -/
+
+theorem pushedAF_sp (s : Cpu) : (pushedAF s).sp = s.sp - 2 := by
+  simp only [pushedAF, Cpu.push, Cpu.wr16, Cpu.wr, Cpu.tick, op1, Cpu.bumpR]; (repeat' split) <;> rfl
+theorem pushedAF_ramStart (s : Cpu) : (pushedAF s).ramStart = s.ramStart := by
+  simp only [pushedAF, Cpu.push, Cpu.wr16, Cpu.wr, Cpu.tick, op1, Cpu.bumpR]; (repeat' split) <;> rfl
+theorem pushedAF_halted (s : Cpu) : (pushedAF s).halted = s.halted := by
+  simp only [pushedAF, Cpu.push, Cpu.wr16, Cpu.wr, Cpu.tick, op1, Cpu.bumpR]; (repeat' split) <;> rfl
+theorem pushedAF_size (s : Cpu) : (pushedAF s).mem.size = s.mem.size := by
+  simp only [pushedAF, Cpu.push, Cpu.wr16, Cpu.wr, Cpu.tick, op1, Cpu.bumpR]; (repeat' split) <;> simp
+
+theorem pushedAF_mem (s : Cpu) (hsz : s.mem.size = 65536)
+    (hr : s.ramStart.toNat ≤ (s.sp - 2).toNat) (hw : (s.sp - 2).toNat + 1 < 65536) (x : Nat) :
+    (pushedAF s).mem.get! x =
+      if x = (s.sp - 2).toNat then s.af.toUInt8
+      else if x = (s.sp - 2).toNat + 1 then (s.af >>> 8).toUInt8 else s.mem.get! x := by
+  have h1 : (s.sp - 2 + 1).toNat = (s.sp - 2).toNat + 1 := by
+    rw [UInt16.toNat_add]; simp only [UInt16.toNat_one]; omega
+  have hnl : ¬ (s.sp - 2) < s.ramStart := by rw [UInt16.lt_iff_toNat_lt]; omega
+  have hnl' : ¬ (s.sp - 2 + 1) < s.ramStart := by rw [UInt16.lt_iff_toNat_lt, h1]; omega
+  have hm : (pushedAF s).mem = (s.mem.set! (s.sp - 2).toNat s.af.toUInt8).set! ((s.sp - 2).toNat + 1)
+      (s.af >>> 8).toUInt8 := by
+    simp only [pushedAF, Cpu.push, Cpu.wr16, Cpu.wr, Cpu.tick, op1, Cpu.bumpR, hnl, hnl', if_false, h1]; rfl
+  rw [hm, Ember.Proof.IRSim.get_set, Ember.Proof.IRSim.get_set, Ember.Proof.IRSim.size_set, hsz]
+  by_cases hx : x = (s.sp - 2).toNat
+  · subst hx
+    have : ¬ ((s.sp - 2).toNat + 1 = (s.sp - 2).toNat) := by omega
+    simp only [this, false_and, if_false, true_and, if_true]
+    rw [if_pos (by omega)]
+  · by_cases hx' : x = (s.sp - 2).toNat + 1
+    · subst hx'
+      have : ¬ ((s.sp - 2).toNat + 1 = (s.sp - 2).toNat) := by omega
+      simp only [true_and, if_true, this, if_false]
+      rw [if_pos (by omega)]
+    · have a1 : ¬ ((s.sp - 2).toNat + 1 = x ∧ (s.sp - 2).toNat + 1 < 65536) := fun h => hx' h.1.symm
+      have a2 : ¬ ((s.sp - 2).toNat = x ∧ (s.sp - 2).toNat < 65536) := fun h => hx h.1.symm
+      simp only [hx, hx', a1, a2, if_false]
+
+theorem RegsS.pushedAF {s t : Cpu} (h : RegsS s t) : RegsS (PassSim.pushedAF s) (PassSim.pushedAF t) := by
+  obtain ⟨p', r', c', m', q', e⟩ := regs_ex h
+  subst e
+  cases s
+  simp only [RegsS, PassSim.pushedAF, Cpu.push, Cpu.wr16, Cpu.wr, Cpu.tick, op1, Cpu.bumpR]
+  (repeat' split) <;> rfl
+
+theorem mask_pushedAF (th tl : Bool) (s t : Cpu) : mask th tl (pushedAF s) (pushedAF t) = pushedAF (mask th tl s t) := by
+  cases s with
+  | mk a0 f0 b0 c0 d0 e0 h0 l0 a0' f0' b0' c0' d0' e0' h0' l0' ix0 iy0 sp0 pc0 i0 r0 iff10 iff20 im0 halted0 eiDelay0
+      cycles0 io0 ramStart0 mem0 =>
+  cases t with
+  | mk a f b c d e h l a' f' b' c' d' e' h' l' ix iy sp pc i r iff1 iff2 im halted eiDelay cycles io ramStart mem =>
+  simp only [mask, pushedAF, Cpu.push, Cpu.wr16, Cpu.wr, Cpu.tick, op1, Cpu.bumpR, Cpu.af]
+  by_cases h1 : sp - 2 < ramStart <;> by_cases h2 : sp - 2 + 1 < ramStart <;>
+    by_cases h3 : sp0 - 2 < ramStart0 <;> by_cases h4 : sp0 - 2 + 1 < ramStart0 <;> simp [h1, h2, h3, h4]
+
+theorem EqvT.af {lo hi : Nat} {th tl : Bool} {s t : Cpu} (E : EqvT lo hi th tl s t) : s.af = t.af := by
+  obtain ⟨_, _, _, _, _, e⟩ := regs_ex E.regs
+  have h1 : (mask th tl s t).a = t.a := by cases t; rfl
+  have h2 : (mask th tl s t).f = t.f := by cases t; rfl
+  simp only [Cpu.af]
+  rw [← h1, ← h2, e]
+
+/-- **`push af` in both machines**: each pushes `AF`, the same word: a frame of data more. -/
+theorem seg_push_af (D : Dev) {A B : Code} {lo hi : Nat} {G : List Frame} {kA kB : Nat} {th tl : Bool}
+    (hA : A.items[kA]? = some (.ins ⟨.push, [.af]⟩)) (hB : B.items[kB]? = some (.ins ⟨.push, [.af]⟩))
+    {x y : Cpu × D.W} (S : Sync D A B lo hi G kA kB th tl x y) (hlo : lo ≤ hi) (h1 : 1 ≤ hi)
+    (room : hi + 2 ≤ top x.1.sp) :
+    Sync D A B lo hi (.data :: G) (kA + 1) (kB + 1) th tl (mstep D x) (mstep D y) := by
+  obtain ⟨sA, w⟩ := x
+  obtain ⟨sB, w'⟩ := y
+  have hw : w' = w := S.w
+  subst hw
+  simp only at room
+  obtain ⟨eA, atA⟩ := push_af_mstep D hA S.LA S.atA w'
+  obtain ⟨eB, atB⟩ := push_af_mstep D hB S.LB S.atB w'
+  rw [eA, eB]
+  have E := S.E
+  have hrsB : sB.ramStart = sA.ramStart := by
+    have := RegsS.ramStart E.regs; rw [mask_ramStart] at this; exact this.symm
+  have hrsA : sA.ramStart.toNat ≤ lo := S.rs
+  have hszA : sA.mem.size = 65536 := S.msz
+  have hmszB : (mask th tl sA sB).mem.size = sB.mem.size := by cases sB; rfl
+  have hszB : sB.mem.size = 65536 := by rw [← hmszB, ← E.msz]; exact hszA
+  have bnd := Stk.bounds G _ _ _ _ S.stk
+  simp only at bnd
+  have hab : top sA.sp ≤ top sB.sp := bnd.1
+  have hbB : top sB.sp ≤ 65536 := bnd.2.1
+  obtain ⟨tA1, tA2⟩ := top_sub2 sA.sp (by omega)
+  obtain ⟨tB1, tB2⟩ := top_sub2 sB.sp (by omega)
+  have rA' : sA.ramStart.toNat ≤ (sA.sp - 2).toNat := by omega
+  have rB' : sB.ramStart.toNat ≤ (sB.sp - 2).toNat := by rw [hrsB]; omega
+  have aboveA : ∀ x, top sA.sp ≤ x ∨ x < top sA.sp - 2 → (pushedAF sA).mem.get! x = sA.mem.get! x := by
+    intro x hx; rw [pushedAF_mem sA hszA rA' (by omega)]; rw [if_neg (by omega), if_neg (by omega)]
+  have aboveB : ∀ x, top sB.sp ≤ x ∨ x < top sB.sp - 2 → (pushedAF sB).mem.get! x = sB.mem.get! x := by
+    intro x hx; rw [pushedAF_mem sB hszB rB' (by omega)]; rw [if_neg (by omega), if_neg (by omega)]
+  have E' : EqvT lo hi th tl (pushedAF sA) (pushedAF sB) := by
+    unfold EqvT
+    rw [mask_pushedAF]
+    obtain ⟨hr, hm, hsz⟩ := E
+    have hmsp : (mask th tl sA sB).sp = sB.sp := by cases sB; rfl
+    have hmr : (mask th tl sA sB).ramStart = sB.ramStart := by cases sB; rfl
+    have hmsz : (mask th tl sA sB).mem.size = 65536 := by rw [hmszB]; exact hszB
+    have rM : (mask th tl sA sB).ramStart.toNat ≤ ((mask th tl sA sB).sp - 2).toNat := by rw [hmsp, hmr]; exact rB'
+    refine ⟨hr.pushedAF, fun x h1 h2 => ?_, ?_⟩
+    · rw [aboveA x (Or.inr (by omega)), pushedAF_mem _ hmsz rM (by rw [hmsp]; omega),
+        if_neg (by rw [hmsp]; omega), if_neg (by rw [hmsp]; omega)]
+      exact hm x h1 h2
+    · rw [pushedAF_size, pushedAF_size]; exact hsz
+  refine ⟨atA, atB, S.LA.keep (pushedAF_ramStart _) (fun x (hx : x < sA.ramStart.toNat) => aboveA x (Or.inr (by omega)))
+      (by rw [pushedAF_halted]; exact S.LA.2),
+    S.LB.keep (pushedAF_ramStart _) (fun x (hx : x < sB.ramStart.toNat) => aboveB x (Or.inr (by rw [hrsB] at hx; omega)))
+      (by rw [pushedAF_halted]; exact S.LB.2), E', ?_,
+    by rw [pushedAF_size]; exact hszA, by rw [pushedAF_ramStart]; exact hrsA, rfl⟩
+  show Stk A B hi (.data :: G) (top (pushedAF sA).sp) (top (pushedAF sB).sp) (pushedAF sA).mem (pushedAF sB).mem
+  rw [pushedAF_sp, pushedAF_sp, tA1, tB1]
+  refine ⟨by omega, by omega, ?_, ?_⟩
+  · rw [← tA2, ← tB2]
+    unfold word
+    rw [pushedAF_mem sA hszA rA' (by omega), pushedAF_mem sA hszA rA' (by omega),
+      pushedAF_mem sB hszB rB' (by omega), pushedAF_mem sB hszB rB' (by omega)]
+    simp only [if_true, show ¬ ((sA.sp - 2).toNat + 1 = (sA.sp - 2).toNat) by omega,
+      show ¬ ((sB.sp - 2).toNat + 1 = (sB.sp - 2).toNat) by omega, if_false]
+    rw [byte_lo_hi, byte_lo_hi, S.E.af]
+  · rw [show top sA.sp - 2 + 2 = top sA.sp by omega, show top sB.sp - 2 + 2 = top sB.sp by omega]
+    exact Stk.congr G _ _ _ _ _ _ S.stk (fun x hx => aboveA x (Or.inl hx)) (fun x hx => aboveB x (Or.inl hx))
+
+/-- info: 'Ember.Proof.PassSim.seg_push_af' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in #print axioms seg_push_af
+
+theorem mask_poppedAF (th tl : Bool) (s t : Cpu) : mask th tl (poppedAF s) (poppedAF t) = poppedAF (mask th tl s t) := by
+  cases s; cases t; rfl
+
+theorem Eqv.poppedAF {lo hi : Nat} {s u : Cpu} (E : Eqv lo hi s u) (hrd : s.rd16 s.sp = u.rd16 u.sp) :
+    Eqv lo hi (PassSim.poppedAF s) (PassSim.poppedAF u) := by
+  obtain ⟨p', r', c', m', q', e⟩ := regs_ex E.regs
+  subst e
+  refine ⟨?_, E.mem, E.msz⟩
+  revert hrd
+  cases s
+  simp only [RegsS, PassSim.poppedAF, op1, Cpu.bumpR, Cpu.tick]
+  intro hrd
+  rw [hrd]
+
+/-- **`pop af` in both machines**, a frame of data on top: `AF` the same word in both, the frame popped. -/
+theorem seg_pop_af (D : Dev) {A B : Code} {lo hi : Nat} {G : List Frame} {kA kB : Nat} {th tl : Bool}
+    (hA : A.items[kA]? = some (.ins ⟨.pop, [.af]⟩)) (hB : B.items[kB]? = some (.ins ⟨.pop, [.af]⟩))
+    {x y : Cpu × D.W} (S : Sync D A B lo hi (.data :: G) kA kB th tl x y) :
+    Sync D A B lo hi G (kA + 1) (kB + 1) th tl (mstep D x) (mstep D y) := by
+  obtain ⟨sA, w⟩ := x
+  obtain ⟨sB, w'⟩ := y
+  have hw : w' = w := S.w
+  subst hw
+  obtain ⟨eA, atA, LA⟩ := pop_af_mstep D hA S.LA S.atA w'
+  obtain ⟨eB, atB, LB⟩ := pop_af_mstep D hB S.LB S.atB w'
+  rw [eA, eB]
+  have stk := S.stk
+  obtain ⟨hA1, hB1, wd, rest⟩ := stk
+  have bnd := Stk.bounds G _ _ _ _ rest
+  simp only at hA1 hB1 wd rest bnd
+  have hspA : sA.sp ≠ 0 := by intro h0; simp only [top, h0, if_true] at bnd; omega
+  have hspB : sB.sp ≠ 0 := by intro h0; simp only [top, h0, if_true] at bnd; omega
+  have tA : top sA.sp = sA.sp.toNat := by simp only [top, hspA, if_false]
+  have tB : top sB.sp = sB.sp.toNat := by simp only [top, hspB, if_false]
+  rw [tA, tB] at wd bnd rest
+  have hrd : sA.rd16 sA.sp = sB.rd16 sB.sp := by
+    apply UInt16.toNat_inj.mp
+    rw [rd16_word sA (by omega), rd16_word sB (by omega), wd]
+  have hmrd : (mask th tl sA sB).rd16 (mask th tl sA sB).sp = sB.rd16 sB.sp := by cases sB; rfl
+  refine ⟨atA, atB, LA, LB, ?_, ?_, S.msz, S.rs, rfl⟩
+  · unfold EqvT; rw [mask_poppedAF]; exact Eqv.poppedAF S.E (by rw [hmrd]; exact hrd)
+  · show Stk A B hi G (top (poppedAF sA).sp) (top (poppedAF sB).sp) (poppedAF sA).mem (poppedAF sB).mem
+    have e1 : ∀ s : Cpu, (poppedAF s).sp = s.sp + 2 ∧ (poppedAF s).mem = s.mem := fun s => ⟨rfl, rfl⟩
+    rw [(e1 sA).1, (e1 sB).1, (e1 sA).2, (e1 sB).2, top_add2 _ (by omega), top_add2 _ (by omega)]
+    exact rest
+
+/-- info: 'Ember.Proof.PassSim.seg_pop_af' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in #print axioms seg_pop_af
 
 end Ember.Proof.PassSim

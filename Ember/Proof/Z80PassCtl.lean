@@ -389,4 +389,36 @@ theorem ldsp_mstep (D : Dev) {C : Code} {k : Nat} (n : Nat) (hn : n < 65536)
   show (s.step (D.bus w), D.dev w (s.step (D.bus w)).io) = _
   rw [hs1]; exact congrArg (Prod.mk _) (D.quiet w)
 
+/-! ## `push af`, `pop af` -/
+
+/-- The state after `push af`. -/
+def pushedAF (s : Cpu) : Cpu := ((op1 s).push (op1 s).af).tick 11
+
+/-- The state after `pop af`. -/
+def poppedAF (s : Cpu) : Cpu :=
+  ({ ({ op1 s with sp := s.sp + 2 } : Cpu) with a := hi (s.rd16 s.sp), f := lo (s.rd16 s.sp) } : Cpu).tick 10
+
+theorem push_af_mstep (D : Dev) {C : Code} {k : Nat} (hk : C.items[k]? = some (.ins ⟨.push, [.af]⟩))
+    {s : Cpu} (L : Loaded C s) (hat : At C.addrs k s) (w : D.W) :
+    mstep D (s, w) = (pushedAF s, w) ∧ At C.addrs (k + 1) (pushedAF s) := by
+  obtain ⟨ad, had, hpc⟩ := hat
+  have hx : exec (C.a.env ad) ⟨.push, [.af]⟩ s (D.bus w) = some (pushedAF s) := rfl
+  obtain ⟨hs1, hat'⟩ := step_of hk L had hpc w hx
+  refine ⟨?_, hat' rfl⟩
+  show (s.step (D.bus w), D.dev w (s.step (D.bus w)).io) = _
+  rw [hs1]
+  have : (pushedAF s).io = .none := by
+    simp only [pushedAF, Cpu.push, Cpu.wr16, Cpu.wr, Cpu.tick, op1, Cpu.bumpR]; (repeat' split) <;> rfl
+  rw [this, D.quiet]
+
+theorem pop_af_mstep (D : Dev) {C : Code} {k : Nat} (hk : C.items[k]? = some (.ins ⟨.pop, [.af]⟩))
+    {s : Cpu} (L : Loaded C s) (hat : At C.addrs k s) (w : D.W) :
+    mstep D (s, w) = (poppedAF s, w) ∧ At C.addrs (k + 1) (poppedAF s) ∧ Loaded C (poppedAF s) := by
+  obtain ⟨ad, had, hpc⟩ := hat
+  have hx : exec (C.a.env ad) ⟨.pop, [.af]⟩ s (D.bus w) = some (poppedAF s) := rfl
+  obtain ⟨hs1, hat'⟩ := step_of hk L had hpc w hx
+  refine ⟨?_, hat' rfl, ⟨L.1.congr rfl rfl, L.2⟩⟩
+  show (s.step (D.bus w), D.dev w (s.step (D.bus w)).io) = _
+  rw [hs1]; exact congrArg (Prod.mk _) (D.quiet w)
+
 end Ember.Proof.PassSim
