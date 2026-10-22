@@ -341,7 +341,8 @@ The Z80 back end (M7, begun) — `Ember.Z80.IR.Sem` is the semantics of its IR:
 * `Z80PassBlock`: a call of a routine of the runtime that works through `HL`, as one segment of the two
   runs: `blk_ld32` (`rt_ld32`, the four bytes at `HL` in the RAM kept equal: eight steps of each from
   the call to the item after it), `blk_st32` (`rt_st32`, the accumulator's first four bytes to those at `HL`),
-  `blk_bytes` (`rt_add32`, `rt_sub32`, `rt_or32`: the loop over the bytes, `loop_eq_rounds`);
+  `blk_bytes` (`rt_add32`, `rt_sub32`, `rt_or32`: the loop over the bytes, `loop_eq_rounds`), `blk_cmp32`
+  (`rt_cmp32`, its loop keeping `AF` on the stack, `loop_cmp_rounds`);
   `ldir_eq_rounds`: all the rounds of an `ldir` within that RAM;
 * `Z80PassRun`: two machines side by side to the end (`sim_halts`: a relation kept by segments of
   the two runs, the first machine taking at least one step, under which the first halted means the
