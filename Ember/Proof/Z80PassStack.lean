@@ -21,8 +21,11 @@ same devices; and `Machine.step` is that run (`run_sim_of`).
 
 What is taken, not proved: `SafeA` (`Z80PassMaster`), a statement about
 `StackH`'s run alone — the stack above `hi + 4`, the bytes read and
-written through `HL`, `DE` in the RAM `[lo, hi)` — at every item it
-reaches.  The proofs of `StackH` do not give it yet.
+written through `HL`, `DE` in the RAM `[lo, hi)` — at every item of the
+certificate's meeting points it reaches (not inside the routines of the
+runtime and the copies of literals, which read the ROM).  The proofs of
+`StackH` do not give it yet; `ember-passcert --safe` tries it on the
+fixtures.
 -/
 
 namespace Ember.Proof.PassSim.Stack
@@ -115,7 +118,7 @@ theorem symVal_acc : symVal StackH.asm "rt_acc" = some 32768 ∧ symVal StackD.a
   constructor <;> decide +kernel
 
 /-- **What the theorem takes, for the stack's images**, from `SafeA` of `StackH`'s run. -/
-theorem glob (inputs : Array Input) (hs : SafeA hD codeH CertD.lo CertD.hi (x0 inputs)) :
+theorem glob (inputs : Array Input) (hs : SafeA hD codeH CertD.lo CertD.hi CertD.rows (x0 inputs)) :
     Glob hD codeH codeD CertD.lo CertD.hi CertD.rows CertD.tr (x0 inputs) where
   chk := CertD.certD_ok
   safe := hs
@@ -136,7 +139,7 @@ the passes on that input.  For any input with `SafeA`: after some number of `Mac
 leave in the Ember semantics, with no input left; its kept lines — transmissions and drops, each with
 the number of its input — are those of `Spec.step`. -/
 theorem stackD_halts (p : Lang.Prog) (S : StackH.StackSrc p) (inputs : Array Input)
-    (hs : SafeA hD codeH CertD.lo CertD.hi (x0 inputs)) :
+    (hs : SafeA hD codeH CertD.lo CertD.hi CertD.rows (x0 inputs)) :
     ∃ (i : Nat) (sti : Lang.Sem.St) (n : Nat) (w' : HW),
       mainIter 4716 p i (Lang.Sem.initial p inputs) = some sti ∧ sti.world.next.1 = 0xFFFF ∧
       (LoopH.mrun n (harnessMachine StackD.asm inputs)).cpu.halted = true ∧

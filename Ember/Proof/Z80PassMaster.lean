@@ -13,11 +13,12 @@ them be, the frames on the stacks as the rows of their return points
 say (`FOK`), the run of `A` some steps from its start.
 
 What `A`'s run does is taken as a hypothesis here, `SafeA`: at every
-item it reaches, the stack is above the RAM kept equal (`hi + 4` below
-its top), and the bytes it reads or writes through `HL` and `DE` (an
-instruction of a form that does, `ldir`, a call of a routine of the
-runtime through `HL` not just after `ld hl,lit`) are in that RAM
-`[lo, hi)`.  It is about the image without the passes alone.
+meeting point of the certificate it reaches, the stack is above the RAM
+kept equal (`hi + 4` below its top), and the bytes it reads or writes
+through `HL` and `DE` (an instruction of a form that does, `ldir`, a
+call of a routine of the runtime through `HL` not just after
+`ld hl,lit`) are in that RAM `[lo, hi)`.  It is about the run of the
+image without the passes alone, at the items the certificate lists.
 -/
 
 namespace Ember.Proof.PassSim
@@ -39,14 +40,17 @@ def Need (A : Code) (lo hi : Nat) (k : Nat) (s : Cpu) : Prop :=
       (∀ l, 0 < k → A.items[k - 1]? = some (.ins ⟨.ld, [.hl, .imm (.sym l 0)]⟩) → ∀ j : Nat, A.items[j]? ≠ some (Item.label l)) →
       lo ≤ s.hl.toNat ∧ s.hl.toNat + 4 ≤ hi)
 
-/-- **`A`'s run from `x0` needs no more**: at every item it is at, not halted. -/
-def SafeA (D : Dev) (A : Code) (lo hi : Nat) (x0 : Cpu × D.W) : Prop :=
-  ∀ n k, At A.addrs k (mrun D n x0).1 → (mrun D n x0).1.halted = false → Need A lo hi k (mrun D n x0).1
-
 /-! ## The relation kept -/
 
 /-- The row of the certificate at `k`. -/
 def rowAt (cert : List Row) (k : Nat) : Row := cert[k]?.getD default
+
+/-- **`A`'s run from `x0` needs no more**: at every meeting point of the certificate (`cert`) it is at,
+not halted.  Inside the segments that start there — the routines of the runtime, the copies of
+literals — nothing is asked: the lemmas of those segments have what they need from their start. -/
+def SafeA (D : Dev) (A : Code) (lo hi : Nat) (cert : List Row) (x0 : Cpu × D.W) : Prop :=
+  ∀ n k, (rowAt cert k).tag ≠ .none → At A.addrs k (mrun D n x0).1 → (mrun D n x0).1.halted = false →
+    Need A lo hi k (mrun D n x0).1
 
 /-- The function whose activation the run is in: the entry of the frame on top. -/
 def cur : List Frame → Nat
@@ -219,7 +223,7 @@ the RAM kept equal `[lo, hi)` in the memory; the accumulator of the runtime, the
 structure Glob (D : Dev) (A B : Code) (lo hi : Nat) (cert : List Row) (tr : List (Nat × Bool × Bool))
     (x0 : Cpu × D.W) : Prop where
   chk : RowsOK A.items B.items A.a B.a lo hi cert tr
-  safe : SafeA D A lo hi x0
+  safe : SafeA D A lo hi cert x0
   hlo : lo ≤ hi
   h1 : 1 ≤ hi
   hhi : hi ≤ 65536
@@ -236,9 +240,10 @@ theorem Glob.row {D : Dev} {A B : Code} {lo hi : Nat} {cert : List Row} {tr : Li
 /-- What `A`'s run needs at a meeting point. -/
 theorem Glob.need {D : Dev} {A B : Code} {lo hi : Nat} {cert : List Row} {tr : List (Nat × Bool × Bool)}
     {x0 : Cpu × D.W} (Gl : Glob D A B lo hi cert tr x0) {G : List Frame} {k kb : Nat} {th tl : Bool}
-    {x y : Cpu × D.W} (S : Sync D A B lo hi G k kb th tl x y) (hx : ∃ n, x = mrun D n x0) : Need A lo hi k x.1 := by
+    (ht : (rowAt cert k).tag ≠ .none) {x y : Cpu × D.W} (S : Sync D A B lo hi G k kb th tl x y)
+    (hx : ∃ n, x = mrun D n x0) : Need A lo hi k x.1 := by
   obtain ⟨n, rfl⟩ := hx
-  exact Gl.safe n k S.atA S.LA.2
+  exact Gl.safe n k ht S.atA S.LA.2
 
 theorem reach_step {D : Dev} {x0 x : Cpu × D.W} (hx : ∃ n, x = mrun D n x0) (a : Nat) :
     ∃ n, mrun D a x = mrun D n x0 := by
@@ -259,7 +264,7 @@ theorem step_ord {D : Dev} {A B : Code} {lo hi : Nat} {cert : List Row} {tr : Li
   obtain ⟨f, a', b', hA, hB, hnh, hv, hrh, hrl, hnn, hs⟩ := ordOK_spec hrow
   have hAk := drop_cons hA
   have hBk := drop_cons hB
-  have nd := Gl.need S hx
+  have nd := Gl.need (by rw [htag]; intro h; cases h) S hx
   have hN := nd.2 f.instr hAk
   have S' := seg_ord D Gl.hhi f hnh hAk hBk (hop_of f (valSameL_B hv)) hrh hrl S
     (hN.1 f rfl).1 (hN.1 f rfl).2 (fun pa hf => nnOK_spec Gl.hhi hf (hnn hf) pa)
@@ -453,7 +458,7 @@ theorem step_call {D : Dev} {A B : Code} {lo hi : Nat} {cert : List Row} {tr : L
   simp only [rowOK, htag] at hrow
   obtain ⟨l, li, a', b', hA, hB, hli, hs1, hs2⟩ := callOK_spec hrow
   obtain ⟨hlA, hlB, hrA, _, hkb⟩ := Gl.lab hli
-  have nd := Gl.need S hx
+  have nd := Gl.need (by rw [htag]; intro h; cases h) S hx
   have S' := seg_call D Gl.hhi (drop_cons hA) hlA (drop_cons hB) hlB S Gl.hlo Gl.h1 (by have := nd.1; omega)
   obtain ⟨s1, s2, s3, s4, s5⟩ := succOK_spec hs1
   rw [nextRow_drop] at hs2
@@ -523,7 +528,7 @@ theorem step_ldir {D : Dev} {A B : Code} {lo hi : Nat} {cert : List Row} {tr : L
   have hrow := Gl.row (k := k) (by rw [htag]; intro h; cases h)
   simp only [rowOK, htag] at hrow
   obtain ⟨a', b', hA, hB, hth, htl, hs⟩ := ldirOK_spec hrow
-  have nd := Gl.need S hx
+  have nd := Gl.need (by rw [htag]; intro h; cases h) S hx
   obtain ⟨d1, d2, d3, d4⟩ := (nd.2 _ (drop_cons hA)).2.1 rfl
   rw [hth, htl] at S
   have E := eqv_ff S.E
@@ -892,7 +897,7 @@ theorem step_tail {D : Dev} {A B : Code} {lo hi : Nat} {cert : List Row} {tr : L
     refine retSeqB_spec A a' (k + 1) ?_ hseq
     have := congrArg List.tail hA; simpa [List.tail_drop] using this
   obtain ⟨hlA, hlB, hrA, _, hkb⟩ := Gl.lab hli
-  have nd := Gl.need S hx
+  have nd := Gl.need (by rw [htag]; intro h; cases h) S hx
   have S' := seg_tail D Gl.hhi hop (drop_cons hA) hlA (drop_cons hB) hlB S Gl.hlo Gl.h1 (by have := nd.1; omega)
   obtain ⟨s1, s2, s3, s4, s5⟩ := succOK_spec hs
   have hne : cur G ≠ topE := fun e => htop (e ▸ hcur)
@@ -1047,7 +1052,7 @@ theorem step_blk {D : Dev} {A B : Code} {lo hi : Nat} {cert : List Row} {tr : Li
   obtain ⟨hd, its, hpr, i, j, hiA, hjB⟩ := routineOK_spec hr
   have hLA : Has A i its := has_of_take hiA
   have hLB : Has B j its := has_of_take hjB
-  have nd := Gl.need S hx
+  have nd := Gl.need (by rw [htag]; intro h; cases h) S hx
   have hfoot := (nd.2 _ (drop_cons hA)).2.2 f rfl (by rw [hpr]; rfl) (prevOK_spec hp)
   have room := nd.1
   obtain ⟨acc, haccA, haccB, hacc⟩ := Gl.accs
@@ -1111,7 +1116,7 @@ theorem step_tailBlk {D : Dev} {A B : Code} {lo hi : Nat} {cert : List Row} {tr 
   obtain ⟨hd, its, hpr, i, j, hiA, hjB⟩ := routineOK_spec hr
   have hLA : Has A i its := has_of_take hiA
   have hLB : Has B j its := has_of_take hjB
-  have nd := Gl.need S hx
+  have nd := Gl.need (by rw [htag]; intro h; cases h) S hx
   have hfoot := (nd.2 _ (drop_cons hA)).2.2 f rfl (by rw [hpr]; rfl) (prevOK_spec hp)
   have room := nd.1
   obtain ⟨acc, haccA, haccB, hacc⟩ := Gl.accs
@@ -1166,7 +1171,7 @@ theorem step_blkR {D : Dev} {A B : Code} {lo hi : Nat} {cert : List Row} {tr : L
   have hencA : ∀ ad, Item.encode (.db vs) (A.a.env ad) = .ok (vs.map dbByte) := fun ad => db_encode vs hnums _
   have hencB : ∀ ad, Item.encode (.db vs) (B.a.env ad) = .ok (vs.map dbByte) := fun ad => db_encode vs hnums _
   have hbs : (vs.map dbByte).length = 4 := by rw [List.length_map, hlen]
-  have nd := Gl.need S hx
+  have nd := Gl.need (by rw [htag]; intro h; cases h) S hx
   have room := nd.1
   obtain ⟨acc, haccA, haccB, hacc⟩ := Gl.accs
   rw [rowN_drop _ _ _ (by decide)] at hs

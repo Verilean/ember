@@ -1,23 +1,89 @@
 import Ember.Proof.Z80PassCertGen
 import Ember.Proof.Z80StackHAsm
 import Ember.Proof.Z80StackDAsm
+import Ember.Tools.Z80
 
 /-! `ember-passcert [DIR]`: the certificate for the stack's two images (without the passes, as built by
-default) and the files of its check, written into `DIR` (`Ember/Proof`). -/
+default) and the files of its check, written into `DIR` (`Ember/Proof`).
 
-open Ember.Z80.Asm Ember.Proof.PassSim Ember.Proof.Z80Gen
+`ember-passcert --safe PATH...`: `SafeA` of `Z80PassMaster` (what `stackD_halts` takes) tried on fixtures —
+`StackH` run on each, `Need` checked at every meeting point of the certificate it is at.  A test, not a
+proof. -/
+
+open Ember Ember.Z80 Ember.Z80.Asm Ember.Proof.PassSim Ember.Proof.Z80Gen
+
+/-- What of `Need` fails at a state at item `k` (empty: nothing); the forms by their operands
+(`(hl)`: `Form.viaHL`, `(de)`: `Form.viaDE`). -/
+def needFails (xs : Array Item) (labels : Std.HashSet String) (lo hi k : Nat) (s : Cpu) : Array String := Id.run do
+  let inRam (x : Nat) : Bool := lo ≤ x && x < hi
+  let mut v : Array String := #[]
+  let top := if s.sp.toNat == 0 then 65536 else s.sp.toNat
+  if hi + 4 > top then v := v.push "stack"
+  let .ins i := xs[k]! | return v
+  if i.args.contains .mhl && !inRam s.hl.toNat then v := v.push s!"(hl): {i.text}"
+  if i.args.contains .mde && !inRam s.de.toNat then v := v.push s!"(de): {i.text}"
+  if i.op == .ldir && !(inRam s.hl.toNat && inRam s.de.toNat) then v := v.push "ldir"
+  match i with
+  | ⟨.call, [.imm (.sym f 0)]⟩ =>
+    if (ptrRoutine f).isSome then
+      let lit := match xs[k - 1]? with
+        | some (.ins ⟨.ld, [.hl, .imm (.sym l 0)]⟩) => k > 0 && labels.contains l
+        | _ => false
+      if !lit && !(lo ≤ s.hl.toNat && s.hl.toNat + 4 ≤ hi) then v := v.push s!"call {f}"
+  | _ => pure ()
+  return v
+
+def safeCheck (rows : List Row) (paths : List String) (lo hi : Nat) : IO UInt32 := do
+  let xs := StackH.items.toArray
+  let a := StackH.asm
+  let rs := rows.toArray
+  -- the meeting points at each address
+  let mut pts : Std.HashMap Nat (Array Nat) := {}
+  for k in [0:xs.size] do
+    if rs[k]!.tag != .none then pts := pts.insert a.addrs[k]! ((pts.getD a.addrs[k]! #[]).push k)
+  let labels : Std.HashSet String := xs.foldl (fun s it => match it with | .label l => s.insert l | _ => s) {}
+  let mut steps := 0
+  let mut checked := 0
+  let mut ran := 0
+  let mut halted := 0
+  let mut fails : Std.HashMap String Nat := {}
+  let mut ex : Array String := #[]
+  for p in paths do
+    for f in ← Tools.Z80.traceFiles p do
+      let t ← Ember.Trace.Trace.readFile f
+      if !Tools.NetCheck.supported t.header then continue
+      ran := ran + 1
+      let mut m : Machine :=
+        { cpu := { (({} : Cpu).load 0 a.bytes) with ramStart := 0x8000 }, harness := true, inputs := t.inputs,
+          program := 0 }
+      let mut fuel := 200000000
+      while fuel > 0 && !m.cpu.halted do
+        steps := steps + 1
+        for k in pts.getD m.cpu.pc.toNat #[] do
+          checked := checked + 1
+          for w in needFails xs labels lo hi k m.cpu do
+            fails := fails.insert w (fails.getD w 0 + 1)
+            if ex.size < 20 then ex := ex.push s!"{f}: item {k}: {w} (hl {m.cpu.hl}, de {m.cpu.de}, sp {m.cpu.sp})"
+        m := m.step
+        fuel := fuel - 1
+      if m.cpu.halted then halted := halted + 1
+  IO.println s!"passcert --safe: {ran} fixtures, {halted} halted, {steps} steps, {checked} meeting points checked; RAM [{lo}, {hi}); Need fails: {fails.toList}"
+  for e in ex do IO.println s!"  {e}"
+  return if fails.isEmpty && halted == ran then 0 else 1
 
 def equOf (xs : List Item) (n : String) : Option Nat :=
   xs.findSome? fun it => match it with | .equ m v => if m == n then some v else none | _ => none
 
 def main (args : List String) : IO UInt32 := do
-  let dir : System.FilePath := args.headD "Ember/Proof"
   let some lo := equOf StackH.items "rt_ram" | IO.eprintln "no rt_ram"; return 1
   let some size := equOf StackH.items "rt_ram_size" | IO.eprintln "no rt_ram_size"; return 1
   let hi := lo + size
   match Gen.mk StackH.items StackD.items with
   | .error e => IO.eprintln s!"passcert: {e}"; return 1
   | .ok (rows, tr) =>
+    if args.head? == some "--safe" then
+      return ← safeCheck rows (args.drop 1) lo hi
+    let dir : System.FilePath := args.headD "Ember/Proof"
     if !check StackH.items StackD.items StackH.asm StackD.asm lo hi rows tr then
       IO.eprintln "passcert: the certificate does not pass the check"
       return 1
