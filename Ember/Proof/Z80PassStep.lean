@@ -345,22 +345,24 @@ theorem ord_eqv (lo hi : Nat) (hhi : hi ≤ 65536) (f : Form)
 
 /-- An ordinary instruction always does something; it leaves the start of RAM, the size of memory and,
 when what it writes is in RAM, the bytes below `ramStart` (the ROM) as they were; only `halt` halts. -/
-theorem ord_rom (f : Form) (n : UInt8) (nn : UInt16) (inp : UInt16 → UInt8) (s : Cpu)
-    (hhl : f.mem = true → s.ramStart.toNat ≤ s.hl.toNat) (hde : f.mem = true → s.ramStart.toNat ≤ s.de.toNat)
-    (hnn : f.mem = true → s.ramStart.toNat ≤ nn.toNat ∧ nn.toNat < 65535) :
+theorem ord_rom (f : Form) (lo hi : Nat) (hhi : hi ≤ 65536) (n : UInt8) (nn : UInt16) (inp : UInt16 → UInt8)
+    (s : Cpu) (hhl : f.mem = true → lo ≤ s.hl.toNat ∧ s.hl.toNat < hi)
+    (hde : f.mem = true → lo ≤ s.de.toNat ∧ s.de.toNat < hi)
+    (hnn : f.mem = true → lo ≤ nn.toNat ∧ nn.toNat + 1 < hi) :
     ∃ s', execI f.instr n nn s inp = some s' ∧ s'.ramStart = s.ramStart ∧ s'.mem.size = s.mem.size ∧
-      (∀ x, x < s.ramStart.toNat → s'.mem.get! x = s.mem.get! x) ∧ (f ≠ .halt → s'.halted = s.halted) := by
+      (∀ x, x < lo ∨ hi ≤ x → s'.mem.get! x = s.mem.get! x) ∧ (f ≠ .halt → s'.halted = s.halted) ∧
+      s'.sp = s.sp := by
   cases s with
   | mk a f0 b c0 d e h l a' f' b' c' d' e' h' l' ix iy sp pc i r0 iff1 iff2 im halted eiDelay cycles io ramStart mem =>
   cases f
   all_goals
     simp +decide only [Form.instr, execI, exec1, exec2, ldI, aluI, incI, decI, rotI, simpleI, rr?, r8?,
       Option.map_some, if_true, if_false]
-    refine ⟨_, rfl, ?_, ?_, ?_, ?_⟩
+    refine ⟨_, rfl, ?_, ?_, ?_, ?_, ?_⟩
   all_goals
     try simp only [op1, op2, skip, Cpu.bumpR, Cpu.tick, Cpu.setReg, Cpu.reg, Cpu.setHL, Cpu.hl, Cpu.setRp,
       Cpu.idxGet, Cpu.idxSet, Cpu.alu, Cpu.add16, Cpu.sbc16, Cpu.rd, Cpu.wr, Cpu.wr16, Cpu.rd16, Cpu.de, Cpu.flag,
-      Cpu.inc8, Cpu.dec8, Cpu.rot, Cpu.setBC, Cpu.setDE, Cpu.rp, Ember.Proof.IRSim.size_set]
+      Cpu.inc8, Cpu.dec8, Cpu.rot, Cpu.setBC, Cpu.setDE, Cpu.rp]
   all_goals
     first
     | trivial
@@ -372,9 +374,12 @@ theorem ord_rom (f : Form) (n : UInt8) (nn : UInt16) (inp : UInt16 → UInt8) (s
     | ((repeat' split) <;> first | (intro _; trivial) | (intro _; rfl))
     | (have hhl := hhl rfl; have hde := hde rfl; have hnn := hnn rfl
        simp only [Cpu.hl, Cpu.de] at hhl hde
+       have e3 : (nn + 1).toNat = nn.toNat + 1 := by rw [UInt16.toNat_add]; simp; omega
        intro x hx
        (repeat' split) <;> simp only [Ember.Proof.IRSim.get_set] <;> (repeat' split) <;>
-         first | rfl | (simp only [UInt16.lt_iff_toNat_lt, UInt16.toNat_add] at *; omega))
+         first
+         | rfl
+         | (simp only [UInt16.lt_iff_toNat_lt, e3] at *; omega))
     | ((repeat' split) <;> intro x hx <;> rfl)
 
 theorem ord_falls (f : Form) : f.instr.falls = true := by
@@ -409,20 +414,21 @@ theorem ord_mstep (D : Dev) {A B : Code} {kA kB : Nat} (f : Form) (hnh : f ≠ .
     (hnn : ∀ pa, f.mem = true → lo ≤ (f.instr.immW (A.a.env pa)).toNat ∧ (f.instr.immW (A.a.env pa)).toNat + 1 < hi)
     (w : D.W) :
     ∃ s' t' w', mstep D (s, w) = (s', w') ∧ mstep D (t, w) = (t', w') ∧ Eqv lo hi s' t' ∧
-      At A.addrs (kA + 1) s' ∧ At B.addrs (kB + 1) t' ∧ Loaded A s' ∧ Loaded B t' := by
+      At A.addrs (kA + 1) s' ∧ At B.addrs (kB + 1) t' ∧ Loaded A s' ∧ Loaded B t' ∧
+      (∀ x, hi ≤ x → s'.mem.get! x = s.mem.get! x) ∧ (∀ x, hi ≤ x → t'.mem.get! x = t.mem.get! x) ∧
+      s'.sp = s.sp ∧ t'.sp = t.sp := by
   obtain ⟨pa, hpa, hpcA⟩ := atA
   obtain ⟨pb, hpb, hpcB⟩ := atB
   have hrsT : t.ramStart = s.ramStart := (RegsS.ramStart E.regs).symm
   have hhlT : t.hl = s.hl := (RegsS.hl E.regs).symm
   have hdeT : t.de = s.de := (RegsS.de E.regs).symm
   have hnA := hnn pa
-  obtain ⟨s', hs', hrs', _, hrom', hh'⟩ := ord_rom f (f.instr.immB (A.a.env pa)) (f.instr.immW (A.a.env pa))
-    (D.bus w) s (fun h => by have := hhl h; omega) (fun h => by have := hde h; omega)
-    (fun h => by have := hnA h; omega)
+  obtain ⟨s', hs', hrs', _, hrom', hh', hsp'⟩ := ord_rom f lo hi hhi (f.instr.immB (A.a.env pa))
+    (f.instr.immW (A.a.env pa)) (D.bus w) s hhl hde hnA
   obtain ⟨t', ht', E'⟩ := ord_eqv lo hi hhi f _ _ (D.bus w) s t E hhl hde (hnn pa) s' hs'
-  obtain ⟨t'', ht'', hrsT', _, hromT', hhT'⟩ := ord_rom f (f.instr.immB (A.a.env pa)) (f.instr.immW (A.a.env pa))
-    (D.bus w) t (fun h => by have := hhl h; rw [hhlT, hrsT]; omega) (fun h => by have := hde h; rw [hdeT, hrsT]; omega)
-    (fun h => by have := hnA h; rw [hrsT]; omega)
+  obtain ⟨t'', ht'', hrsT', _, hromT', hhT', hspT'⟩ := ord_rom f lo hi hhi (f.instr.immB (A.a.env pa))
+    (f.instr.immW (A.a.env pa)) (D.bus w) t (fun h => by rw [hhlT]; exact hhl h) (fun h => by rw [hdeT]; exact hde h)
+    hnA
   rw [ht'] at ht''
   cases ht''
   have exA : exec (A.a.env pa) f.instr s (D.bus w) = some s' := hs'
@@ -433,7 +439,9 @@ theorem ord_mstep (D : Dev) {A B : Code} {kA kB : Nat} (f : Form) (hnh : f ≠ .
   have stB := step_item B.placed LB.1 hB hpb hpcB LB.2 exB
   have hio : t'.io = s'.io := (RegsS.io E'.regs).symm
   refine ⟨s', t', D.dev w s'.io, ?_, ?_, E', stA.2 (ord_falls f), stB.2 (ord_falls f),
-    LA.keep hrs' hrom' (by rw [hh' hnh]; exact LA.2), LB.keep hrsT' hromT' (by rw [hhT' hnh]; exact LB.2)⟩
+    LA.keep hrs' (fun x hx => hrom' x (Or.inl (by omega))) (by rw [hh' hnh]; exact LA.2),
+    LB.keep hrsT' (fun x hx => hromT' x (Or.inl (by rw [hrsT] at hx; omega))) (by rw [hhT' hnh]; exact LB.2),
+    fun x hx => hrom' x (Or.inr hx), fun x hx => hromT' x (Or.inr hx), hsp', hspT'⟩
   · show (s.step (D.bus w), D.dev w (s.step (D.bus w)).io) = _
     rw [stA.1]
   · show (t.step (D.bus w), D.dev w (t.step (D.bus w)).io) = _
@@ -443,7 +451,7 @@ theorem ord_mstep (D : Dev) {A B : Code} {kA kB : Nat} (f : Form) (hnh : f ≠ .
 #guard_msgs in #print axioms ord_eqv
 
 
-/-- info: 'Ember.Proof.PassSim.ord_rom' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Ember.Proof.PassSim.ord_rom' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in #print axioms ord_rom
 
 /-- info: 'Ember.Proof.PassSim.ord_mstep' depends on axioms: [propext, Classical.choice, Quot.sound] -/
