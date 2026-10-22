@@ -147,6 +147,8 @@ import Ember.Proof.Z80PassBlockRom
 import Ember.Proof.Z80PassCert
 import Ember.Proof.Z80PassRet
 import Ember.Proof.Z80PassTail
+import Ember.Proof.Z80PassChk
+import Ember.Proof.Z80PassChkOK
 import Ember.Proof.Z80PassCheck
 import Ember.Proof.Z80StackDAsm
 import Ember.Proof.Z80World
@@ -366,6 +368,10 @@ The Z80 back end (M7, begun) — `Ember.Z80.IR.Sem` is the semantics of its IR:
   a frame on `A`'s stack only (`seg_tail`);
 * `Z80PassTail`: a routine of the runtime called in `A` before a return, jumped to in `B`: its body
   with any frames (`body_st32`, `body_bytes`), the segments (`blkT_st32`, `blkT_bytes`);
+* `Z80PassChk`: the checker of a certificate for the two images (`check`: rows of meeting points — `B`'s
+  index, `H`, `L` free or not, the activations, the segment that starts there — closed under the
+  segments), one walk over both images' items with tables of labels, for the kernel to run;
+* `Z80PassChkOK`: what the walk and the tables say (`check_rows`, `mkTbl_lookup`, `labTbl_lookup`);
 * `Z80PassRun`: two machines side by side to the end (`sim_halts`: a relation kept by segments of
   the two runs, the first machine taking at least one step, under which the first halted means the
   second halted with the same devices — then when the first halts so does the second);
