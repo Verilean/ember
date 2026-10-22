@@ -141,6 +141,7 @@ import Ember.Proof.Z80PassStep
 import Ember.Proof.Z80PassCtl
 import Ember.Proof.Z80PassTaint
 import Ember.Proof.Z80PassRun
+import Ember.Proof.Z80PassSeg
 import Ember.Proof.Z80PassCheck
 import Ember.Proof.Z80StackDAsm
 import Ember.Proof.Z80World
@@ -323,6 +324,11 @@ The Z80 back end (M7, begun) — `Ember.Z80.IR.Sem` is the semantics of its IR:
   routine of the runtime read a literal through `HL`, each machine's `HL` points into its own ROM):
   `EqvT`, the relation with those free, kept by an instruction that reads none of them (`ord_eqvT`;
   `h_comm`, `l_comm`: what reads neither does the same with any);
+* `Z80PassSeg`: the relation of the two machines (`Sync`: CPUs equal but for `pc`, `R`, the T-states,
+  memory and the stack pointer, `H` and `L` free where the relation says; the RAM below the stack
+  equal; the stacks holding the same calls, `Stk`: the return addresses of both images, or of `A`
+  alone for a call that is a jump in `B`; the devices in the same state), and segments that keep it:
+  an ordinary instruction (`seg_ord`), a jump (`seg_jump`);
 * `Z80PassRun`: two machines side by side to the end (`sim_halts`: a relation kept by segments of
   the two runs, the first machine taking at least one step, under which the first halted means the
   second halted with the same devices — then when the first halts so does the second);
