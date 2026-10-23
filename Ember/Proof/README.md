@@ -63,6 +63,7 @@ specifies) is at the end of this file: "Refinement".
 | `CProgram.lean` | `compile_unit`, `init_rel`, `entry_sim`, `iter_sim`: the unit, the initial state, the entry function again and again; `hygU_of_prefix` | M5.8 (programs) |
 | `CCheck.lean` | the checker `progOkB` and `progOkB_sound` | M5.8 |
 | `CNet.lean` | `stack_c`: the emitted C of the SLIP build against the Spec; the `#guard`s that the builds of the stack are covered | M5.6 + M5.8 |
+| `CDrop.lean` | `drop_sim`, `stack_c_dropped`: the SLIP build's C without its bounds checks (`C.dropUnit`) against the Spec | M5.9 (first part) |
 | `Z80Frame.lean` | `validate_sound`: a frame layout the validator accepts keeps frames apart from globals and from the frames of reachable functions | M7.2 |
 | `IRFuel.lean`, `IRMem.lean` | the IR semantics again: more fuel changes nothing (`mono1`); a function's run without counting fuel (`Reach`, `Ends`); `rd` and `wr` | M7.1 |
 | `IRTypes.lean`, `IRRel.lean`, `IRPlace.lean` | well-typed expressions (`WT`); a value as bytes at an address (`Holds`); what a layout must give (`LayOK`); the relation statements keep (`LRel`, `GRel`, `SRel`); a place as an address (`PlaceAt`) | M7.1 |
@@ -607,6 +608,35 @@ emitted checks; `compileFn` and `compile` are built from named functions
   semantics would be the next step for the first part);
 * the `while` of the drivers (`C.Sem.run`, `Lang.Sem.run`): the theorems
   are about the calls those loops make, as for M5.6.
+
+### Bounds checks taken out (M5.9, first part)
+
+The emitter checks an index it cannot show in range by its form
+(`indexSafe`: a literal, or a `u8` into 256 elements or more) with
+`if (t >= n) { ember_trap("…"); }` before the access — 17 checks in the
+SLIP build.  `C.dropUnit` (`Ember/C/DropChecks.lean`) takes those
+statements out of a unit and changes nothing else.
+
+| Theorem (`CDrop.lean`) | Statement |
+|---|---|
+| **`drop_sim`** | under `Ember.C.Sem`, for any unit and fuel: a statement, a list, a block, a call or a `for` that ends normally (`Res.ok`) ends the same way — same state, variables and way out — in the unit without checks.  A check that does not trap does nothing (`check_ok`); expressions have no effect |
+| `cIter_drop`, `initial_drop` | the calls of the entry function as `C.Sem.run` makes them, from the same initial state |
+| **`stack_c_dropped`** | what `stack_c` says, of the SLIP build's C **without any bounds check**: called again and again from its initial state under the C semantics, every call ends normally — no trap, nothing undefined (so no index out of range) — and the kept lines are `specKept`.  The range facts are those of the refinement proofs (M5.6 `main_run_all`: no call of `main` traps, every index in range), carried by M5.8; nothing is taken but what `stack_c` takes |
+
+`#guard`: on every profile the SLIP build's unit has 17 checks and none
+is left after `dropUnit`.  `compile` is unchanged (golden C
+byte-identical); the C without checks is a separate output
+(`ember-emit net --dropped`, `Tests/Ember/golden/net.dropped.*.c`), for
+the SLIP build only — the tools refuse every other program, since
+`drop_sim` says nothing of a run that traps: there the check is what
+makes an index out of range a trap and not undefined behaviour (the
+`Guard` programs: with checks they trap, without them the C semantics
+has no meaning for the run).
+
+**Not covered:** dropping one check from a range lemma about its index
+in a program without a whole-program no-trap theorem (the Ethernet
+builds, the examples); the own Z80 back end's checks (`IR.dropChecks`,
+a static fact on the straight path, not a proof).
 
 ### The IR of the Z80 back end (M7.1, M7.2)
 

@@ -32,9 +32,9 @@ are missing; inside `nix-shell` everything runs.
 | `lake exe ember-host [--eth] [--dhcp] [--mtu N] [--tick-ms N] [--trace F]` | the Spec stack on stdin/stdout (SLIP, or length-prefixed Ethernet frames) |
 | `lake exe ember-fixtures [--check]` | run the hand-written scenarios, (re)write their fixtures |
 | `lake exe ember-gen [icmp\|udp\|tcp\|all] [N] [--seed S]` | generated sessions against the Spec's properties; failures shrunk into `regress/` |
-| `lake exe ember-emit NAME [--profile P] [--ember] \| --golden` | emitted C of a registered program; `--golden` rewrites `golden/` |
+| `lake exe ember-emit NAME [--profile P] [--ember] [--dropped] \| --golden` | emitted C of a registered program; `--dropped`: without its bounds checks, the SLIP build (`net`) only (M5.9); `--golden` rewrites `golden/` |
 | `lake exe ember-fuzz [N] [--seed S] [--opt O0\|O2\|both] [--plant]` | random programs: interpreter vs C; `--plant` checks the fuzzer finds a planted emitter bug |
-| `lake exe ember-lockstep FILES… \| --gen [P] [N] [--c]` | Spec = Ember interpreter (lockstep) [= host C]; `P`: `icmp udp tcp` (SLIP), `eth`, `dhcp` (the Ethernet builds), `slip`, `all`; a fixture runs on the build its header names |
+| `lake exe ember-lockstep FILES… \| --gen [P] [N] [--c]` | Spec = Ember interpreter (lockstep) [= host C]; `P`: `icmp udp tcp` (SLIP), `eth`, `dhcp` (the Ethernet builds), `slip`, `all`; a fixture runs on the build its header names; `--dropped`: the SLIP build's C without its bounds checks |
 | `tools/ember/record-corpus.sh` | re-record the Linux fixtures (user namespace + TUN/TAP, no root) |
 | `tools/ember/size-report.py [--update]` | code/RAM per function, ±3 % gate against `bench/ember-size.baseline` |
 | `lake exe ember-z80 asm-check\|rt-check\|ir-fuzz\|ir-replay\|own-fuzz\|own-build\|own-size …` | the own Z80 back end: its checks; `own-build net` writes the image (`.ihx`), a listing with the IR between the instructions (`.lst`) and symbols; `own-size` the bytes per function; `--plain`: without the passes on the assembly (the image the proofs of M7.3 speak of) |

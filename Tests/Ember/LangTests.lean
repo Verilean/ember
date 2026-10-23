@@ -11,6 +11,7 @@ import Ember.Tools.NetCheck
 import Ember.Tools.Lockstep
 import Ember.Lang.Sem
 import Ember.C.Sem
+import Ember.C.DropChecks
 import Tests.Ember.LangPrograms
 
 /-!
@@ -167,6 +168,16 @@ def golden : IO Nat := do
         else if (← IO.FS.readFile path) != c then
           bad := bad + 1
           IO.println s!"FAIL golden {path}: emitted C changed (review, then lake exe ember-emit --golden)"
+      if Tools.Emit.dropped.contains name then
+        n := n + 1
+        let path := Tools.Emit.droppedPath name prof
+        match Tools.Emit.emitDroppedFor name p prof with
+        | .error e => bad := bad + 1; IO.println s!"FAIL golden {name} (dropped): {e}"
+        | .ok c =>
+          if !(← path.pathExists) then bad := bad + 1; IO.println s!"FAIL golden {path}: missing (lake exe ember-emit --golden)"
+          else if (← IO.FS.readFile path) != c then
+            bad := bad + 1
+            IO.println s!"FAIL golden {path}: emitted C changed (review, then lake exe ember-emit --golden)"
   IO.println s!"golden C: {n} files, {bad} failures"
   return bad
 
@@ -300,6 +311,12 @@ def sdcc : IO Nat := do
       #["-Iruntime/common", "-c", f.toString, "-o", s!".lake/ember-sdcc-{name}.rel"] }
     n := n + 1
     if r.exitCode != 0 then bad := bad + 1; IO.println s!"FAIL sdcc {f}:\n{r.stderr}{r.stdout}"
+    if Tools.Emit.dropped.contains name then
+      let f := Tools.Emit.droppedPath name .sdccZ80
+      let r ← IO.Process.output { cmd := "sdcc", args := #["-mz80", "--std-c99", "--Werror"] ++ sdccOptimiserNotes ++
+        #["-Iruntime/common", "-c", f.toString, "-o", s!".lake/ember-sdcc-{name}-dropped.rel"] }
+      n := n + 1
+      if r.exitCode != 0 then bad := bad + 1; IO.println s!"FAIL sdcc {f}:\n{r.stderr}{r.stdout}"
   IO.println s!"sdcc -mz80 --Werror: {n} programs, {bad} failures"
   return bad
 
@@ -422,11 +439,91 @@ def csemantics (count : Nat) : IO Nat := do
   IO.println s!"C semantics: {runs} runs of random programs and examples, the stack on {fixtures} fixtures, {Profile.all.length} profiles: Sem = the emitted C under Ember.C.Sem, nothing undefined; {bad} failures"
   return bad
 
+/-- M5.9: the bounds checks taken out (`C.dropUnit`).  Of the SLIP build
+(`Ember.Proof.CDrop.stack_c_dropped`): its C without checks, under the C
+semantics, on every fixture of its configuration and every profile, has
+the trace of `Ember.Lang.Sem` and nothing undefined, and the checks
+taken out are all there were.  Where no proof says the run never traps
+the checks stay: the tools refuse every other program, and on the
+`Guard` programs (an index out of range for some input) the C with its
+checks traps where the interpreter does, while without them the C
+semantics has no meaning for the run (undefined) — which is why a check
+goes only where a proof covers it. -/
+def droppedTests : IO Nat := do
+  let mut bad := 0
+  let mut runs := 0
+  let undefIn (t : Trace) : Bool := t.lines.any fun l => match l.ev with
+    | .note m => m.startsWith "undefined"
+    | _ => false
+  -- the SLIP build: every check taken out, the same runs
+  match Net.prog.check with
+  | .error e => IO.println s!"FAIL dropped: {e}"; bad := bad + 1
+  | .ok q =>
+    for prof in Profile.all do
+      let o : C.Opts := { profile := prof }
+      match C.compile q o with
+      | .error e => IO.println s!"FAIL dropped ({prof.name}): {e}"; bad := bad + 1
+      | .ok u =>
+        let d := C.dropUnit u
+        unless C.checksUnit u > 0 && C.checksUnit d == 0 do
+          IO.println s!"FAIL dropped ({prof.name}): {C.checksUnit u} checks, {C.checksUnit d} left"
+          bad := bad + 1
+        let cp := C.Sem.CProg.ofUnit d prof o.entryName q.dropReasons q.notes
+        for dir in ["Tests/Ember/corpus", "Tests/Ember/regress"] do
+          for f in ← Tools.Lockstep.traceFiles dir do
+            let t ← Trace.readFile f
+            if Tools.NetCheck.buildIndex t.header == some 0 then
+              let ct := C.Sem.run cp t.inputs q.framed (fuel := 1000000)
+              runs := runs + 1
+              unless Tools.Fuzz.agree (Sem.run q t.inputs) ct && !undefIn ct do
+                IO.println s!"FAIL dropped {f} ({prof.name}): Sem vs the C without checks"
+                bad := bad + 1
+  -- every other program keeps its checks
+  for (name, p) in (← Tools.Emit.registry) ++ Tools.Emit.extra ++ Guard.progs do
+    if !Tools.Emit.dropped.contains name then
+      if let .ok _ := Tools.Emit.emitDroppedFor name p .host64 then
+        IO.println s!"FAIL dropped: {name} emitted without checks"
+        bad := bad + 1
+  -- the Guard programs: the checks are what make the out-of-range runs traps
+  let mut trapsKept := 0
+  let mut undefWithout := 0
+  for (name, p) in Guard.progs do
+    match p.check with
+    | .error e => IO.println s!"FAIL dropped {name}: {e}"; bad := bad + 1
+    | .ok q =>
+      let o : C.Opts := { profile := .host64 }
+      match C.compile q o with
+      | .error e => IO.println s!"FAIL dropped {name}: {e}"; bad := bad + 1
+      | .ok u =>
+        if C.checksUnit u == 0 then
+          IO.println s!"FAIL dropped {name}: no check emitted"
+          bad := bad + 1
+        for ins in Guard.inputs do
+          let st := Sem.run q ins
+          let ct := C.Sem.run (C.Sem.CProg.ofUnit u .host64 o.entryName q.dropReasons q.notes) ins q.framed
+            (fuel := 1000000)
+          let dt := C.Sem.run (C.Sem.CProg.ofUnit (C.dropUnit u) .host64 o.entryName q.dropReasons q.notes) ins
+            q.framed (fuel := 1000000)
+          runs := runs + 1
+          unless Tools.Fuzz.agree st ct && !undefIn ct do
+            IO.println s!"FAIL dropped {name}: Sem vs the C with checks"
+            bad := bad + 1
+          if Tools.Cc.trapped st then
+            trapsKept := trapsKept + 1
+            if undefIn dt then undefWithout := undefWithout + 1
+  -- out-of-range inputs exist, and each is undefined once its check is gone
+  unless trapsKept > 0 && undefWithout == trapsKept do
+    IO.println s!"FAIL dropped Guard: {trapsKept} trapping runs, {undefWithout} undefined without the checks"
+    bad := bad + 1
+  IO.println s!"bounds checks dropped (M5.9): the SLIP build without its checks on {runs} runs (fixtures × profiles, Guard) = Sem, nothing undefined; other programs refused; Guard: {trapsKept} trapping runs keep their trap, undefined without the check; {bad} failures"
+  return bad
+
 def main (fuzzCount : Nat := 1000) : IO UInt32 := do
   let mut bad := 0
   bad := bad + (← semantics fuzzCount)
   bad := bad + (← csemantics fuzzCount)
   bad := bad + (← golden)
+  bad := bad + (← droppedTests)
   bad := bad + (← referenceTests)
   bad := bad + (← differential)
   bad := bad + (← sdcc)

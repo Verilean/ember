@@ -17,6 +17,10 @@ kept current by `lake test`):
   and the instructions per ICMP echo in Espressif's QEMU with `-icount`
   (when the cross compiler, esptool and that QEMU are installed).
 
+The same for the SLIP build's C without its bounds checks
+(`net.dropped.*.c`, M5.9: Ember.Proof.CDrop.stack_c_dropped), as the rows
+`*.dropped.*`: the gain is their difference from the rows of the C with
+its checks.
 Each metric must stay within ±3 % of the committed baseline, in either
 direction (as bench/gate in Sparkle): a change in cost is a reviewed
 diff of the baseline file.  Exit status 1 outside the tolerance.
@@ -29,9 +33,9 @@ TOL = 0.03
 
 
 
-def host64(tmp):
-    src = os.path.join(ROOT, "Tests/Ember/golden/net.host64.c")
-    obj = os.path.join(tmp, "net.o")
+def host64(tmp, prog="net"):
+    src = os.path.join(ROOT, f"Tests/Ember/golden/{prog}.host64.c")
+    obj = os.path.join(tmp, f"{prog}.o")
     subprocess.run(["gcc", "-std=c99", "-Os", "-ffunction-sections", "-fdata-sections",
                     "-I" + os.path.join(ROOT, "runtime/common"), "-c", src, "-o", obj], check=True)
     out = subprocess.run(["nm", "-S", "--size-sort", obj], check=True, capture_output=True, text=True).stdout
@@ -51,7 +55,7 @@ def host64(tmp):
     return code, ram, rodata
 
 
-def z80(tmp):
+def z80(tmp, prog="net", key="z80"):
     """The image of runtime/z80 as a board would run it: no trace, traps
     without their place (EMBER_TRACE=0, EMBER_TRAP_TERSE).  Code is
     everything in ROM (start-up, interrupt routine, runtime, the stack,
@@ -59,7 +63,9 @@ def z80(tmp):
     stack."""
     if shutil.which("sdcc") is None or shutil.which("make") is None:
         return None
-    src = os.path.join(ROOT, "Tests/Ember/golden/net.sdcc-z80.c")
+    src = os.path.join(ROOT, f"Tests/Ember/golden/{prog}.sdcc-z80.c")
+    tmp = os.path.join(tmp, key)
+    os.makedirs(tmp, exist_ok=True)
     subprocess.run(["make", "-s", "-f", os.path.join(ROOT, "runtime/z80/Makefile"), "OUT=" + tmp,
                     "NAME=stack-quiet", "PROG=" + src, "DEFS=-DEMBER_TRACE=0 -DEMBER_TRAP_TERSE -DEMBER_NO_NAMES"], check=True)
     # area sizes are the linker's l__AREA symbols (the map repeats its
@@ -85,18 +91,18 @@ def z80(tmp):
     for (a, n), (b, _) in zip(syms, syms[1:] + [(end, "")]):
         if 0x100 <= a < end:
             funcs[n] = min(b, end) - a
-    m = {"z80.code": code, "z80.ram": ram}
+    m = {f"{key}.code": code, f"{key}.ram": ram}
     exe = os.path.join(ROOT, ".lake/build/bin/ember-z80")
     if os.path.exists(exe):
         subprocess.run(["make", "-s", "-f", os.path.join(ROOT, "runtime/z80/Makefile"), "OUT=" + tmp,
                         "NAME=stack-tx", "PROG=" + src, "DEFS=-DEMBER_TRACE=1 -DEMBER_TRAP_TERSE -DEMBER_NO_NAMES"], check=True)
         out = subprocess.run([exe, "ping", os.path.join(tmp, "stack-tx.ihx")], check=True,
                              capture_output=True, text=True).stdout
-        m["z80.ping_tstates"] = int(re.search(r"(\d+) T-states", out).group(1))
+        m[f"{key}.ping_tstates"] = int(re.search(r"(\d+) T-states", out).group(1))
         # the stack is RAM too: its deepest point over the corpus
         out = subprocess.run([exe, "stack", os.path.join(tmp, "stack-quiet.ihx"), os.path.join(ROOT, "Tests/Ember/corpus")],
                              check=True, capture_output=True, text=True).stdout
-        m["z80.stack"] = int(re.search(r"stack: (\d+) bytes", out).group(1))
+        m[f"{key}.stack"] = int(re.search(r"stack: (\d+) bytes", out).group(1))
     return m, funcs, sizes
 
 
@@ -125,12 +131,14 @@ def z80own(tmp):
     return m, funcs
 
 
-def esp32c3(tmp):
+def esp32c3(tmp, prog="net", key="esp32c3"):
     """Sizes of the image a board runs (EMBER_TRACE=0) and instructions per ping."""
     need = ["riscv32-none-elf-gcc", "esptool", "make"]
     if any(shutil.which(t) is None for t in need):
         return None
-    src = os.path.join(ROOT, "Tests/Ember/golden/net.rv32.c")
+    src = os.path.join(ROOT, f"Tests/Ember/golden/{prog}.rv32.c")
+    tmp = os.path.join(tmp, key)
+    os.makedirs(tmp, exist_ok=True)
     mk = ["make", "-s", "-f", os.path.join(ROOT, "runtime/esp32c3/Makefile"), "OUT=" + tmp, "PROG=" + src]
     subprocess.run(mk + ["NAME=stack-quiet", "DEFS=-DEMBER_TRACE=0"], check=True)
     out = subprocess.run(["riscv32-none-elf-size", "-A", os.path.join(tmp, "stack-quiet.elf")],
@@ -143,15 +151,15 @@ def esp32c3(tmp):
         parts = line.split()
         if len(parts) == 4 and parts[2] in "Tt":
             funcs[parts[3]] = int(parts[1], 16)
-    m = {"esp32c3.code": sec.get(".text", 0),
-         "esp32c3.rodata": sec.get(".rodata", 0),
-         "esp32c3.ram": sec.get(".data", 0) + sec.get(".bss", 0) + sec.get(".stack", 0)}
+    m = {f"{key}.code": sec.get(".text", 0),
+         f"{key}.rodata": sec.get(".rodata", 0),
+         f"{key}.ram": sec.get(".data", 0) + sec.get(".bss", 0) + sec.get(".stack", 0)}
     if shutil.which("qemu-system-riscv32-esp") is not None:
         subprocess.run(mk + ["NAME=stack-icount", "DEFS=-DEMBER_TICK_HOST=1 -DEMBER_ICOUNT=1 -DEMBER_TRACE=1"], check=True)
         spec = importlib.util.spec_from_file_location("esp32", os.path.join(ROOT, "tools/ember/esp32.py"))
         esp32 = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(esp32)
-        m["esp32c3.ping_instructions"] = esp32.measure_ping(images=tmp)[0]
+        m[f"{key}.ping_instructions"] = esp32.measure_ping(images=tmp)[0]
     return m, funcs
 
 
@@ -203,6 +211,17 @@ def main():
                 print("esp32c3: qemu-system-riscv32-esp not installed, instructions per ping skipped")
         else:
             print("esp32c3: riscv32-none-elf-gcc/esptool/make not installed, skipped")
+        # M5.9: the SLIP build's C without its bounds checks (Tests/Ember/golden/net.dropped.*.c,
+        # `C.dropUnit`; Ember.Proof.CDrop.stack_c_dropped) — the gain is the difference
+        # from the rows above
+        dcode, dram, drodata = host64(tmp, "net.dropped")
+        metrics.update({"host64.dropped.code": sum(dcode.values()), "host64.dropped.rodata": sum(drodata.values())})
+        dz = z80(tmp, "net.dropped", "z80.dropped")
+        if dz is not None:
+            metrics.update(dz[0])
+        de = esp32c3(tmp, "net.dropped", "esp32c3.dropped")
+        if de is not None:
+            metrics.update(de[0])
         print("totals:")
         for k, v in metrics.items():
             print(f"  {k:26s} {v}")

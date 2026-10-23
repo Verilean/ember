@@ -67,7 +67,11 @@ def stack (count : Nat) : IO Nat := do
     (if ← Cc.available then ["--c"] else [])
   if !(← Cc.available) then IO.println "Ember stack C: no C compiler, interpreter only"
   let rc ← Lockstep.main args
-  return if rc == 0 then 0 else 1
+  -- M5.9: the SLIP build's C without its bounds checks, under UBSan and ASan
+  let rd ← if ← Cc.available then
+      Lockstep.main ["Tests/Ember/corpus", "Tests/Ember/regress", "--gen", "slip", toString (count / 4), "--c", "--dropped"]
+    else pure 0
+  return if rc == 0 && rd == 0 then 0 else 1
 
 def main (count : Nat := 1000) : IO UInt32 := do
   let mut bad := 0

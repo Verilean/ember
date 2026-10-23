@@ -42,6 +42,7 @@ import Ember.Proof.CFn
 import Ember.Proof.CProgram
 import Ember.Proof.CCheck
 import Ember.Proof.CNet
+import Ember.Proof.CDrop
 import Ember.Proof.Z80Frame
 import Ember.Proof.IRFuel
 import Ember.Proof.IRMem
@@ -228,6 +229,7 @@ P3, the emitted C (M5.8) — `Ember.C.Sem` is the semantics of the C subset:
   again (`compile_unit`, `init_rel`, `iter_sim`);
 * `CCheck`: a checker for what these theorems assume of a program, proved right (`progOkB_sound`);
 * `CNet`: **the emitted C of the stack transmits and drops what the Spec does** (`stack_c`) — M5.6 and M5.8
+* `CDrop`: **the C of the SLIP build without its bounds checks** (`C.dropUnit`) does the same (`stack_c_dropped`): a run that ends normally ends the same way without the checks (`drop_sim`), and M5.6 shows every index in range — M5.9, first part
   together; the checker accepts every build of the stack, for every profile.
 
 By-reference parameters are outside M5.8 (the stack has none).

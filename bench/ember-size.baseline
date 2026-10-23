@@ -15,3 +15,13 @@ z80own.ram 1061
 z80own.stack 16
 z80own.stack_bound 24
 z80own.ping_tstates 187426
+host64.dropped.code 5147
+host64.dropped.rodata 87
+z80.dropped.code 7173
+z80.dropped.ram 888
+z80.dropped.ping_tstates 190818
+z80.dropped.stack 175
+esp32c3.dropped.code 6688
+esp32c3.dropped.rodata 96
+esp32c3.dropped.ram 5024
+esp32c3.dropped.ping_instructions 16964

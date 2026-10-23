@@ -1,4 +1,5 @@
 import Ember.Tools.NetCheck
+import Ember.C.DropChecks
 import Ember.Tools.Cc
 import Ember.Tools.Fuzz
 import Ember.Tools.GenRun
@@ -37,6 +38,9 @@ structure Opts where
   /-- Write the Spec's trace of every stream that passes into this
   directory: fixtures for replay on a target (`tools/ember/esp32.py`). -/
   dump  : Option String := none
+  /-- The SLIP build's C without its bounds checks (`C.dropUnit`, M5.9);
+  the other builds keep theirs. -/
+  dropped : Bool := false
 
 partial def parse : List String → Opts → Opts
   | [], o => o
@@ -49,19 +53,21 @@ partial def parse : List String → Opts → Opts
   | "--opt" :: v :: r, o => parse r { o with opt := v }
   | "--quiet" :: r, o => parse r { o with quiet := true }
   | "--dump" :: d :: r, o => parse r { o with dump := some d }
+  | "--dropped" :: r, o => parse r { o with dropped := true }
   | a :: r, o => match a.toNat? with
     | some n => parse r { o with count := n }
     | none => parse r { o with files := o.files ++ [a] }
 
 /-- A compiled host harness running the builds of the Ember stack
 (`NetCheck.builds`: SLIP, Ethernet, Ethernet with DHCP). -/
-def buildC (opt : String) : IO (Except String System.FilePath) := do
+def buildC (opt : String) (dropped : Bool := false) : IO (Except String System.FilePath) := do
   let mut units := []
   for (name, p) in NetCheck.builds do
-    match Cc.emit name p with
+    let c := if dropped && name == "net" then C.emitDroppedC p { namePrefix := name ++ "_" } else Cc.emit name p
+    match c with
     | .error e => return .error e
     | .ok c => units := units ++ [(name, c)]
-  Cc.build { dir := s!".lake/ember-net{opt}", flags := #[opt, "-fsanitize=undefined,address",
+  Cc.build { dir := s!".lake/ember-net{opt}{if dropped then "-dropped" else ""}", flags := #[opt, "-fsanitize=undefined,address",
       "-fno-sanitize-recover=all"] } units
 
 structure Stats where
@@ -201,7 +207,7 @@ def main (args : List String) : IO UInt32 := do
   let o := parse args {}
   let exe ← if o.withC then
       if !(← Cc.available) then IO.println "no C compiler; --c ignored"; pure none
-      else match ← buildC o.opt with
+      else match ← buildC o.opt o.dropped with
         | .ok e => pure (some e)
         | .error e => IO.println s!"building the Ember stack's C failed:\n{e}"; return 1
     else pure none
@@ -220,14 +226,14 @@ def main (args : List String) : IO UInt32 := do
           if t.header.link == "eth" then eth := eth + 1
         else skipped := skipped + 1
     let st ← checkBatch o exe named {} headers
-    IO.println s!"files: {st.streams} streams ({eth} of them Ethernet; {skipped} skipped: no Ember build for their link and MTU), {st.failures} failures{if exe.isSome then " (Spec = interpreter = C)" else ""}"
+    IO.println s!"files: {st.streams} streams ({eth} of them Ethernet; {skipped} skipped: no Ember build for their link and MTU), {st.failures} failures{if exe.isSome then " (Spec = interpreter = C" ++ (if o.dropped then ", the SLIP build's C without bounds checks)" else ")") else ""}"
     bad := bad + st.failures
   if let some g := o.gen then
     -- `slip`: what the SLIP build (the targets') takes
     for p in (if g == "all" then ["icmp", "udp", "tcp", "eth", "dhcp"]
               else if g == "slip" then ["icmp", "udp", "tcp"] else [g]) do
       let st ← if p == "eth" || p == "dhcp" then generatedEth o exe p else generated o exe p
-      IO.println s!"generated {p}: {st.streams} streams, {st.inputs} inputs, {st.failures} failures{if exe.isSome then " (Spec = interpreter = C, lockstep)" else " (lockstep)"}"
+      IO.println s!"generated {p}: {st.streams} streams, {st.inputs} inputs, {st.failures} failures{if exe.isSome then " (Spec = interpreter = C, lockstep" ++ (if o.dropped then ", the SLIP build's C without bounds checks)" else ")") else " (lockstep)"}"
       bad := bad + st.failures
   return if bad == 0 then 0 else 1
 
