@@ -378,6 +378,7 @@ theorem absG_sound (f : Form) {n : UInt8} {nn : UInt16} {inp : UInt16 → UInt8}
 
 /-! ## `sbc hl,rr` with either carry -/
 
+set_option linter.unusedSimpArgs false in
 theorem sbc16_hl (s : Cpu) (b : UInt16) :
     (s.sbc16 b).hl.toNat = (s.hl.toNat + 2 * 65536 - b.toNat - (if s.flag FC then 1 else 0)) % 65536 := by
   have ha := s.hl.toNat_lt
@@ -389,6 +390,7 @@ theorem sbc16_hl (s : Cpu) (b : UInt16) :
     simp only [hc, Bool.false_eq_true, if_false, if_true, UInt32.toNat_toUInt16, UInt32.toNat_sub,
       UInt16.toNat_toUInt32, UInt32.toNat_zero, UInt32.toNat_one] <;> omega
 
+set_option linter.unusedSimpArgs false in
 theorem sbc16_c (s : Cpu) (b : UInt16) :
     (s.sbc16 b).flag FC = decide (s.hl.toNat < b.toNat + (if s.flag FC then 1 else 0)) := by
   have ha := s.hl.toNat_lt

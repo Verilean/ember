@@ -1,4 +1,5 @@
 import Ember.Proof.Z80PassCertDOK
+import Ember.Proof.Z80PassAbsDOK
 import Ember.Proof.Z80PassMaster
 import Ember.Proof.Z80StackHMachine
 
@@ -8,24 +9,21 @@ import Ember.Proof.Z80StackHMachine
 `stackD_halts`: the image the assembler makes of `StackD.items` (the
 stack as `build` makes it by default, with the passes on the assembly),
 loaded into `Ember.Z80.Machine` as the tests load it for the harness and
-stepped by `Machine.step`, for any input, **given `SafeA` of the image
-without the passes** (`StackH`) on that input: after some number of
-steps the CPU is halted and the machine stands for a world with no input
-left whose transmissions and drops are those of `Spec.step` — what
+stepped by `Machine.step`, for any input: after some number of steps the
+CPU is halted and the machine stands for a world with no input left
+whose transmissions and drops are those of `Spec.step` — what
 `stackH_halts` says of `StackH`.
 
 How: `StackH`'s run halts (`stackH_spec_halt`); the two images run side
 by side in the harness's devices (`hD`) keep the relation of the
-certificate (`certD_ok`, `passes_halt`), so `StackD`'s run halts with the
-same devices; and `Machine.step` is that run (`run_sim_of`).
+certificate (`certD_ok`, `passes_halt`), with what is known of `StackH`'s
+registers at the meeting points and the levels of its functions
+(`absD_ok`), so `StackD`'s run halts with the same devices; and
+`Machine.step` is that run (`run_sim_of`).
 
-What is taken, not proved: `SafeA` (`Z80PassMaster`), a statement about
-`StackH`'s run alone — the stack above `hi + 4`, the bytes read and
-written through `HL`, `DE` in the RAM `[lo, hi)` — at every item of the
-certificate's meeting points it reaches (not inside the routines of the
-runtime and the copies of literals, which read the ROM).  The proofs of
-`StackH` do not give it yet; `ember-passcert --safe` tries it on the
-fixtures.
+Nothing is taken of the run: what the segments need of `StackH`'s run at
+the meeting points (`Need`) follows from `absD_ok`.  What the theorem
+takes is `stackH_halts`'s: `StackSrc`.
 -/
 
 namespace Ember.Proof.PassSim.Stack
@@ -117,11 +115,11 @@ theorem sync0 (inputs : Array Input) :
 theorem symVal_acc : symVal StackH.asm "rt_acc" = some 32768 ∧ symVal StackD.asm "rt_acc" = some 32768 := by
   constructor <;> decide +kernel
 
-/-- **What the theorem takes, for the stack's images**, from `SafeA` of `StackH`'s run. -/
-theorem glob (inputs : Array Input) (hs : SafeA hD codeH CertD.lo CertD.hi CertD.rows (x0 inputs)) :
-    Glob hD codeH codeD CertD.lo CertD.hi CertD.rows CertD.tr (x0 inputs) where
+/-- **What the theorem takes, for the stack's images.** -/
+theorem glob (inputs : Array Input) :
+    Glob hD codeH codeD CertD.lo CertD.hi CertD.rows CertD.tr CertD.acl CertD.lv (x0 inputs) where
   chk := CertD.certD_ok
-  safe := hs
+  ab := CertD.absD_ok
   hlo := by decide
   h1 := by decide
   hhi := by decide
@@ -133,13 +131,12 @@ theorem glob (inputs : Array Input) (hs : SafeA hD codeH CertD.lo CertD.hi CertD
 /-! ## The theorem -/
 
 /-- **The stack's image as built by default, loaded and run as the tests do, processes all its input
-and stops, having transmitted and dropped what the Spec does** — given `SafeA` of the image without
-the passes on that input.  For any input with `SafeA`: after some number of `Machine.step`s the CPU of
+and stops, having transmitted and dropped what the Spec does.**  For any input: after some number of
+`Machine.step`s the CPU of
 `StackD`'s image is halted, and the machine stands for the world that some number of calls of `main`
 leave in the Ember semantics, with no input left; its kept lines — transmissions and drops, each with
 the number of its input — are those of `Spec.step`. -/
-theorem stackD_halts (p : Lang.Prog) (S : StackH.StackSrc p) (inputs : Array Input)
-    (hs : SafeA hD codeH CertD.lo CertD.hi CertD.rows (x0 inputs)) :
+theorem stackD_halts (p : Lang.Prog) (S : StackH.StackSrc p) (inputs : Array Input) :
     ∃ (i : Nat) (sti : Lang.Sem.St) (n : Nat) (w' : HW),
       mainIter 4716 p i (Lang.Sem.initial p inputs) = some sti ∧ sti.world.next.1 = 0xFFFF ∧
       (LoopH.mrun n (harnessMachine StackD.asm inputs)).cpu.halted = true ∧
@@ -158,7 +155,7 @@ theorem stackD_halts (p : Lang.Prog) (S : StackH.StackSrc p) (inputs : Array Inp
   -- `StackH`'s run halts after `n` steps, in `hD`
   have hnH : PassSim.mrun hD n (x0 inputs) = (s', w') := by
     rw [← wrun_hD StackH.asm addrs (0, 0)]; exact hn
-  obtain ⟨M, hM, hMw⟩ := passes_halt (glob inputs hs) (sync0 inputs) n (by rw [hnH]; exact hh)
+  obtain ⟨M, hM, hMw⟩ := passes_halt (glob inputs) (sync0 inputs) n (by rw [hnH]; exact hh)
   rw [hnH] at hMw
   -- `StackD`'s machine is that run
   have S0 : Sim StackH.img.ctx (harnessMachine StackD.asm inputs) (w0 inputs) :=

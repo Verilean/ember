@@ -112,4 +112,73 @@ def levels (es : List (Nat × Nat)) : Option (List (Nat × Nat)) := Id.run do
     if !ch then return some (nodes.map fun n => (n, lv.getD n 0))
   return none
 
+/-! ## The files -/
+
+def itvText (i : Itv) : String := s!"({i.1}, {i.2})"
+
+def optText : Option Nat → String
+  | none => "none"
+  | some v => s!"(some {v})"
+
+def asText : AS → String
+  | none => "none"
+  | some a => s!"some ⟨{itvText a.h0}, {itvText a.h1}, {itvText a.de}, {itvText a.bc}, {optText a.hb}, {optText a.db}⟩"
+
+/-- Where each part of the check starts: every `n` items. -/
+def starts (len n : Nat) : List Nat := (List.range ((len + n - 1) / n)).map (· * n)
+
+/-- The file of the list and the levels. -/
+def absFile (acl : List AS) (lv : List (Nat × Nat)) (n : Nat) (len : Nat) : String := Id.run do
+  let chunks := (List.range ((acl.length + 299) / 300)).map fun i => (acl.drop (i * 300)).take 300
+  let mut out := "import Ember.Proof.Z80PassAbsWalk\nimport Ember.Proof.Z80PassCertD\n\n" ++
+    "/-!\n# Ember.Proof.Z80PassAbsD — what is known of `StackH`'s registers, and the levels (plan M7.3)\n\n" ++
+    "One `AS` per item of `StackH` (`Z80PassAbs`), the levels of the functions by their entries, and where\n" ++
+    "the parts of the walk start.  Written by `ember-passcert` (`Ember.Proof.Z80PassAbsGen`); the kernel\n" ++
+    "checks it (`Z80PassAbsD0` …).\n-/\n\n" ++
+    "namespace Ember.Proof.PassSim.CertD\nopen Ember.Proof.PassSim Ember.Proof.Z80Gen\n\n"
+  let mut i := 0
+  for ch in chunks do
+    out := out ++ s!"def acl{i} : List AS := [\n  " ++ ", ".intercalate (ch.map asText) ++ "]\n\n"
+    i := i + 1
+  out := out ++ "def acl : List AS := " ++ " ++ ".intercalate ((List.range i).map fun j => s!"acl{j}") ++ "\n\n"
+  out := out ++ s!"/-- The levels of the functions, by their entries. -/\ndef lv : List (Nat × Nat) := {lv}\n\n"
+  out := out ++ s!"/-- Items a part of the walk goes over. -/\ndef apart : Nat := {n}\n\n"
+  out := out ++ s!"/-- Where the parts start. -/\ndef astarts : List Nat := {starts len n}\n\n"
+  out := out ++ "/-- The context of the walk. -/\ndef actx : ACtx := mkACtx StackH.items StackH.asm rows acl\n\n"
+  out := out ++ "end Ember.Proof.PassSim.CertD\n"
+  return out
+
+/-- A file of parts of the walk (by the kernel), importing the one before. -/
+def absChunkFile (idx : Nat) (prev : String) (ps : List Nat) : String := Id.run do
+  let mut out := s!"import {prev}\n\n" ++
+    s!"/-!\n# Ember.Proof.Z80PassAbsD{idx} — parts of the walk over what is known (plan M7.3)\n\n" ++
+    "The walk of `Z80PassAbsWalk` over parts of `StackH`'s items, by the kernel (`decide +kernel`), each\n" ++
+    "from its start (`astarts`).  Written by `ember-passcert`.\n-/\n\n" ++
+    "namespace Ember.Proof.PassSim.CertD\nopen Ember.Proof.PassSim Ember.Proof.Z80Gen\n\n"
+  for k in ps do
+    out := out ++ s!"set_option maxRecDepth 100000 in\ntheorem awalk{k} : absWalk actx.la actx.tA lo hi actx.lt actx.t lv apart\n    (prevA StackH.items rows acl {k}) (StackH.items.drop {k}) (rows.drop {k}) (acl.drop {k}) = true := by\n  decide +kernel\n\n"
+  out := out ++ "end Ember.Proof.PassSim.CertD\n"
+  return out
+
+/-- The file that puts the parts together (`AbsGlob`). -/
+def absOkFile (prev : String) (ps : List Nat) : String := Id.run do
+  let mut out := s!"import {prev}\nimport Ember.Proof.Z80PassCertDOK\n\n" ++
+    "/-!\n# Ember.Proof.Z80PassAbsDOK — what is known of `StackH`'s registers, checked (plan M7.3)\n\n" ++
+    "`absD_ok`: the list and levels of `Z80PassAbsD` checked (`AbsGlob`), from the parts of the walk by the\n" ++
+    "kernel (`Z80PassAbsD0` …), which cover every item (`absRows_of_walks`).  Written by `ember-passcert`.\n-/\n\n" ++
+    "namespace Ember.Proof.PassSim.CertD\nopen Ember.Proof.PassSim Ember.Proof.Z80Gen\n\n"
+  out := out ++ "set_option maxRecDepth 100000 in\ntheorem acl_len : acl.length = StackH.items.length := by decide +kernel\n\n"
+  out := out ++ "theorem astarts_walk : ∀ p, p ∈ astarts →\n    absWalk actx.la actx.tA lo hi actx.lt actx.t lv apart (prevA StackH.items rows acl p) (StackH.items.drop p)\n      (rows.drop p) (acl.drop p) = true := by\n  intro p hp\n  simp only [astarts, List.mem_cons, List.not_mem_nil, or_false] at hp\n"
+  out := out ++ "  rcases hp with " ++ " | ".intercalate (ps.map fun _ => "rfl") ++ "\n"
+  for k in ps do
+    out := out ++ s!"  · exact awalk{k}\n"
+  out := out ++ "\ntheorem astarts_at : ∀ i (h : i < astarts.length), astarts[i]'h = apart * i := by\n  decide\n\n"
+  out := out ++ "set_option maxRecDepth 100000 in\ntheorem astarts_reach : StackH.items.length ≤ apart * astarts.length := by decide +kernel\n\n"
+  out := out ++ "theorem acl_first : acAt acl 0 = none := rfl\n\n"
+  out := out ++ "theorem lv_top : hi + 4 + 2 * lvOf lv topE ≤ 65536 := by decide\n\n"
+  out := out ++ "/-- **What is known of `StackH`'s registers, and the levels, checked.** -/\ntheorem absD_ok : AbsGlob StackH.items StackH.asm lo hi rows acl lv :=\n  ⟨absRows_of_walks actx lo hi lv _ rows acl rows_len acl_len apart astarts astarts_walk astarts_at (by decide)\n    astarts_reach, acl_len, rows_len, acl_first, lv_top⟩\n\n"
+  out := out ++ "/-- info: 'Ember.Proof.PassSim.CertD.absD_ok' depends on axioms: [propext, Quot.sound] -/\n#guard_msgs in #print axioms absD_ok\n\n"
+  out := out ++ "end Ember.Proof.PassSim.CertD\n"
+  return out
+
 end Ember.Proof.PassSim.AbsGen

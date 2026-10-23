@@ -5,11 +5,15 @@ import Ember.Proof.Z80StackDAsm
 import Ember.Tools.Z80
 
 /-! `ember-passcert [DIR]`: the certificate for the stack's two images (without the passes, as built by
-default) and the files of its check, written into `DIR` (`Ember/Proof`).
+default) and the files of its check, written into `DIR` (`Ember/Proof`), and the list of what is known of `StackH`'s registers with the levels of its functions
+(`Z80PassAbsD`, its check `Z80PassAbsD0` …, `Z80PassAbsDOK`).
 
-`ember-passcert --safe PATH...`: `SafeA` of `Z80PassMaster` (what `stackD_halts` takes) tried on fixtures —
-`StackH` run on each, `Need` checked at every meeting point of the certificate it is at.  A test, not a
-proof. -/
+`ember-passcert --safe PATH...`: `Need` of `Z80PassMaster` (what the segments take of `StackH`'s run at the
+meeting points, which `absD_ok` gives) run on fixtures — `StackH` on each, `Need` checked at every
+meeting point of the certificate it is at.  A test.
+
+`ember-passcert --abs`: the list of what is known, computed, and the meeting points where it is not
+enough. -/
 
 open Ember Ember.Z80 Ember.Z80.Asm Ember.Proof.PassSim Ember.Proof.Z80Gen
 
@@ -109,5 +113,23 @@ def main (args : List String) : IO UInt32 := do
       prev := s!"Ember.Proof.Z80PassCertD{i}"
       i := i + 1
     IO.FS.writeFile (dir / "Z80PassCertDOK.lean") (Gen.okFile prev ps)
-    IO.println s!"passcert: {rows.length} rows, {(rows.filter (·.tag != .none)).length} meeting points, {ps.length} parts in {groups.length} files, [{lo}, {hi})"
+    -- what is known of `StackH`'s registers, and the levels
+    let actx := mkCtx StackH.items StackD.items StackH.asm StackD.asm lo hi rows tr
+    let (acl, bad) := AbsGen.mk actx.la actx.tA lo hi StackH.items rows
+    if !bad.isEmpty then
+      IO.eprintln s!"passcert: what is known is not enough at {bad.size} meeting points"
+      return 1
+    let some lv := AbsGen.levels (AbsGen.edges actx.t StackH.items rows) | IO.eprintln "passcert: the calls go round"; return 1
+    let apart := 300
+    let aps := AbsGen.starts StackH.items.length apart
+    IO.FS.writeFile (dir / "Z80PassAbsD.lean") (AbsGen.absFile acl.toList lv apart StackH.items.length)
+    let agroups := (List.range ((aps.length + 2) / 3)).map fun i => (aps.drop (i * 3)).take 3
+    let mut aprev := "Ember.Proof.Z80PassAbsD"
+    let mut ai := 0
+    for g in agroups do
+      IO.FS.writeFile (dir / s!"Z80PassAbsD{ai}.lean") (AbsGen.absChunkFile ai aprev g)
+      aprev := s!"Ember.Proof.Z80PassAbsD{ai}"
+      ai := ai + 1
+    IO.FS.writeFile (dir / "Z80PassAbsDOK.lean") (AbsGen.absOkFile aprev aps)
+    IO.println s!"passcert: {rows.length} rows, {(rows.filter (·.tag != .none)).length} meeting points, {ps.length} parts in {groups.length} files, [{lo}, {hi}); {(acl.filter (·.isSome)).size} items with something known, {aps.length} parts of its walk in {agroups.length} files"
     return 0

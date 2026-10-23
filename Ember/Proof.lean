@@ -152,9 +152,11 @@ import Ember.Proof.Z80PassChkOK
 import Ember.Proof.Z80PassAbs
 import Ember.Proof.Z80PassAbsOK
 import Ember.Proof.Z80PassAbsGen
+import Ember.Proof.Z80PassAbsWalk
 import Ember.Proof.Z80PassMaster
 import Ember.Proof.Z80PassCertGen
 import Ember.Proof.Z80PassCertDOK
+import Ember.Proof.Z80PassAbsDOK
 import Ember.Proof.Z80PassStack
 import Ember.Proof.Z80PassCheck
 import Ember.Proof.Z80StackDAsm
@@ -385,14 +387,20 @@ The Z80 back end (M7, begun) — `Ember.Z80.IR.Sem` is the semantics of its IR:
   each item (`absOK`, `needOK`, `tgtOK`);
 * `Z80PassAbsOK`: those facts of the CPU (`absF_sound`, `absJ_sound`, `ldirIter_sound`, `needOK_spec`);
 * `Z80PassAbsGen`: the list of what is known and the levels of the functions, computed (nothing in it
-  trusted);
+  trusted), and the files of it;
+* `Z80PassAbsWalk`: the walk over `A`'s items, rows and that list (`absWalk`, `AbsGlob`), and where each
+  segment ends, what is known there (`land_none`, `land_after`, `land_skip`, `land_label`);
+* `Z80PassAbsD`, `Z80PassAbsD0` … `Z80PassAbsD3`, `Z80PassAbsDOK`: the list for `StackH`, the levels, and
+  their check by the kernel in parts (`decide +kernel`, 300 items a part), put together in `absD_ok`;
 * `Z80PassMaster`: the relation the two runs keep (`Inv`: both halted, or at a row of the certificate
-  with the frames as it says, `FOK`), what `A`'s run is taken to do (`SafeA`, `Need`: a hypothesis
-  about the image without the passes), the segments from each kind of row (`step_ord`, `step_jump`,
+  with the frames as it says, `FOK`; what is known of `A`'s registers there, `ASat`; the levels of the
+  frames, `FX`), what `A`'s run needs at a meeting point (`Need`, from those: `Glob.need`), the segments
+  from each kind of row (`step_ord`, `step_jump`,
   `step_djnz`, `step_call`, `step_ret`, `step_halt`, `step_ldsp`, `step_ldir`, `step_pack`, `step_blk`,
   `step_blkR`, `step_copyR`, `step_retThr`, `step_condRet`, `step_tail`, `step_tailBlk`; past labels,
-  `past_zero`), and **`passes_halt`**: from a certificate the checker accepts, `SafeA`, and the two
-  machines related at their first items, when `A`'s run halts so does `B`'s, with the same devices
+  `past_zero`), and **`passes_halt`**: from a certificate the checker accepts, a list of what is known
+  of `A`'s registers and levels of its functions the walk accepts (`AbsGlob`), and the two machines
+  related at their first items, when `A`'s run halts so does `B`'s, with the same devices
   (for any two images: the stack's images and the certificate are not plugged in here);
 * `Z80PassCertGen`: making a certificate (the fixed point over the match of the two images) and the files
   of it, written by `ember-passcert` (nothing in it is trusted);
@@ -401,9 +409,8 @@ The Z80 back end (M7, begun) — `Ember.Z80.IR.Sem` is the semantics of its IR:
   together in `certD_ok` (`RowsOK`, by `rows_of_walks'`);
 * `Z80PassStack`: **`stackD_halts`** — the stack's image as built by default (`StackD`, with the passes
   on the assembly), loaded into `Ember.Z80.Machine` as the tests load it and stepped by `Machine.step`,
-  for any input **given `SafeA` of `StackH`'s run on it** (a hypothesis: the stack above the RAM kept
-  equal, the bytes through `HL`, `DE` in it): halted after some steps, standing for a world whose
-  kept lines are those of `Spec.step` (`stackH_spec_halt`, `passes_halt` with `certD_ok`, `run_sim_of`);
+  for any input: halted after some steps, standing for a world whose kept lines are those of
+  `Spec.step` (`stackH_spec_halt`, `passes_halt` with `certD_ok` and `absD_ok`, `run_sim_of`);
 * `Z80PassRun`: two machines side by side to the end (`sim_halts`: a relation kept by segments of
   the two runs, the first machine taking at least one step, under which the first halted means the
   second halted with the same devices — then when the first halts so does the second);
