@@ -1,4 +1,5 @@
 import Ember.Proof.Z80PassCertGen
+import Ember.Proof.Z80PassAbsGen
 import Ember.Proof.Z80StackHAsm
 import Ember.Proof.Z80StackDAsm
 import Ember.Tools.Z80
@@ -83,6 +84,16 @@ def main (args : List String) : IO UInt32 := do
   | .ok (rows, tr) =>
     if args.head? == some "--safe" then
       return ← safeCheck rows (args.drop 1) lo hi
+    if args.head? == some "--abs" then
+      let ctx := mkCtx StackH.items StackD.items StackH.asm StackD.asm lo hi rows tr
+      let (acl, bad) := AbsGen.mk ctx.la ctx.tA lo hi StackH.items rows
+      IO.println s!"passcert --abs: {(acl.filter (·.isSome)).size} items with something known; {bad.size} meeting points where it is not enough"
+      for (k, it) in bad do IO.println s!"  {k}: {repr it}"
+      let es := AbsGen.edges ctx.t StackH.items rows
+      match AbsGen.levels es with
+      | some lv => IO.println s!"levels: {es.length} calls, level of no function {(lv.lookup topE).getD 0}, max {lv.foldl (fun m p => max m p.2) 0}"
+      | none => IO.println "levels: the calls go round"
+      return if bad.isEmpty then 0 else 1
     let dir : System.FilePath := args.headD "Ember/Proof"
     if !check StackH.items StackD.items StackH.asm StackD.asm lo hi rows tr then
       IO.eprintln "passcert: the certificate does not pass the check"

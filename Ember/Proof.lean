@@ -149,6 +149,9 @@ import Ember.Proof.Z80PassRet
 import Ember.Proof.Z80PassTail
 import Ember.Proof.Z80PassChk
 import Ember.Proof.Z80PassChkOK
+import Ember.Proof.Z80PassAbs
+import Ember.Proof.Z80PassAbsOK
+import Ember.Proof.Z80PassAbsGen
 import Ember.Proof.Z80PassMaster
 import Ember.Proof.Z80PassCertGen
 import Ember.Proof.Z80PassCertDOK
@@ -376,6 +379,13 @@ The Z80 back end (M7, begun) — `Ember.Z80.IR.Sem` is the semantics of its IR:
   index, `H`, `L` free or not, the activations, the segment that starts there — closed under the
   segments), one walk over both images' items with tables of labels, for the kernel to run;
 * `Z80PassChkOK`: what the walk and the tables say (`check_rows`, `mkTbl_lookup`, `labTbl_lookup`);
+* `Z80PassAbs`: what is known of `A`'s registers at its items (`AS`: intervals of `HL` under each value
+  of the carry, of `DE`, `BC`, the sums `HL + BC`, `DE + BC`), what an ordinary instruction leaves of it
+  (`absF`), a jump or return not taken (`absJ`), a round of `ldir` (`ldirIter`), and what is checked at
+  each item (`absOK`, `needOK`, `tgtOK`);
+* `Z80PassAbsOK`: those facts of the CPU (`absF_sound`, `absJ_sound`, `ldirIter_sound`, `needOK_spec`);
+* `Z80PassAbsGen`: the list of what is known and the levels of the functions, computed (nothing in it
+  trusted);
 * `Z80PassMaster`: the relation the two runs keep (`Inv`: both halted, or at a row of the certificate
   with the frames as it says, `FOK`), what `A`'s run is taken to do (`SafeA`, `Need`: a hypothesis
   about the image without the passes), the segments from each kind of row (`step_ord`, `step_jump`,
