@@ -237,9 +237,11 @@ def sdccAvailable : IO Bool := do
     if !ok then return false
   return true
 
-/-- SDCC flags, as `runtime/z80/Makefile`: warnings are errors. -/
+/-- SDCC flags, as `runtime/z80/Makefile`: warnings are errors, and the
+register allocator's search as there (`--max-allocs-per-node 10000`,
+validated for SDCC 4.6.0 #16555 only: see the Makefile). -/
 def sdccFlags : Array String :=
-  #["-mz80", "--std-c99", "--opt-code-size", "--Werror", "-Iruntime/common"]
+  #["-mz80", "--std-c99", "--opt-code-size", "--max-allocs-per-node", "10000", "--Werror", "-Iruntime/common"]
 
 /-- For generated programs: warnings are read from the output instead. -/
 def sdccProgFlags : Array String := sdccFlags.filter (· != "--Werror")

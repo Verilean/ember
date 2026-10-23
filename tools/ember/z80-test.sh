@@ -17,10 +17,14 @@ mkdir -p $out
 lake exe ember-emit net --profile sdcc-z80 > $out/net.c
 lake exe ember-emit sliploop --profile sdcc-z80 > $out/sliploop.c
 cmp -s $out/net.c Tests/Ember/golden/net.sdcc-z80.c || { echo "Tests/Ember/golden/net.sdcc-z80.c is stale (lake exe ember-emit --golden)"; exit 1; }
+# the SLIP build's C without its bounds checks (M5.9)
+lake exe ember-emit net --profile sdcc-z80 --dropped > $out/net-dropped.c
+cmp -s $out/net-dropped.c Tests/Ember/golden/net.dropped.sdcc-z80.c || { echo "Tests/Ember/golden/net.dropped.sdcc-z80.c is stale (lake exe ember-emit --golden)"; exit 1; }
 
 mk NAME=echo PROG=runtime/z80/echo.c
 mk NAME=sliploop PROG=$out/sliploop.c
 mk NAME=stack PROG=$out/net.c
+mk NAME=stack-dropped PROG=$out/net-dropped.c
 # notes named `trap` and `trap counter`, and a trap: with the place of the trap and without
 lake exe ember-emit trapnote --profile sdcc-z80 > $out/trapnote.c
 mk NAME=trapnote PROG=$out/trapnote.c
@@ -45,6 +49,10 @@ gen=$out/sessions
 rm -rf $gen
 lake exe ember-lockstep --gen slip ${SESSIONS:-10} --dump $gen > /dev/null
 $z80 replay $out/stack.ihx $gen
+# without the checks: SDCC's register allocation differs (with --max-allocs-per-node
+# 30000 SDCC 4.6.0 miscompiled this build only; runtime/z80/Makefile)
+$z80 replay $out/stack-dropped.ihx Tests/Ember/corpus Tests/Ember/regress
+$z80 replay $out/stack-dropped.ihx $gen
 $z80 fuzz ${FUZZ:-200}
 
 # the own back end (plan M6): no C compiler from here on

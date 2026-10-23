@@ -297,6 +297,10 @@ anything about the C: as with GCC's range warnings, no emitter can rule
 them out in general, so they are the only ones disabled. -/
 def sdccOptimiserNotes : Array String := #["--disable-warning", "110", "--disable-warning", "126"]
 
+/-- The register allocator's search, as `runtime/z80/Makefile` (validated
+for SDCC 4.6.0 #16555 only: see there). -/
+def sdccAllocs : Array String := #["--max-allocs-per-node", "10000"]
+
 /-- The Z80 profile's C compiles with SDCC, warnings as errors. -/
 def sdcc : IO Nat := do
   let ok ← try pure ((← IO.Process.output { cmd := "sdcc", args := #["--version"] }).exitCode == 0) catch _ => pure false
@@ -307,13 +311,13 @@ def sdcc : IO Nat := do
   let mut n := 0
   for (name, _) in ← Tools.Emit.registry do
     let f := Tools.Emit.goldenPath name .sdccZ80
-    let r ← IO.Process.output { cmd := "sdcc", args := #["-mz80", "--std-c99", "--Werror"] ++ sdccOptimiserNotes ++
+    let r ← IO.Process.output { cmd := "sdcc", args := #["-mz80", "--std-c99", "--Werror"] ++ sdccAllocs ++ sdccOptimiserNotes ++
       #["-Iruntime/common", "-c", f.toString, "-o", s!".lake/ember-sdcc-{name}.rel"] }
     n := n + 1
     if r.exitCode != 0 then bad := bad + 1; IO.println s!"FAIL sdcc {f}:\n{r.stderr}{r.stdout}"
     if Tools.Emit.dropped.contains name then
       let f := Tools.Emit.droppedPath name .sdccZ80
-      let r ← IO.Process.output { cmd := "sdcc", args := #["-mz80", "--std-c99", "--Werror"] ++ sdccOptimiserNotes ++
+      let r ← IO.Process.output { cmd := "sdcc", args := #["-mz80", "--std-c99", "--Werror"] ++ sdccAllocs ++ sdccOptimiserNotes ++
         #["-Iruntime/common", "-c", f.toString, "-o", s!".lake/ember-sdcc-{name}-dropped.rel"] }
       n := n + 1
       if r.exitCode != 0 then bad := bad + 1; IO.println s!"FAIL sdcc {f}:\n{r.stderr}{r.stdout}"

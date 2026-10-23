@@ -40,6 +40,17 @@ SDCC's warnings are errors, including 110 and 126 ("unreachable code"):
 SDCC 4.6.0 gives them when it has deleted live code (see the decision log
 of `docs/Ember-plan.md`), and the stack draws none.
 
+Every compile passes `--max-allocs-per-node 10000` (SDCC's default is
+3000): the Makefile, `ember-z80`'s harness images (`sdccFlags`) and the
+compile check of `lake test`.  This is validated for **SDCC 4.6.0
+#16555** only (`shell.nix` does not pin nixpkgs: check `sdcc
+--version`), by the tests below on the C with its bounds checks and on
+the C without them (M5.9).  With 30000 and 100000 that version
+miscompiles the C without checks (the payload of a TCP segment is
+zeroed): the setting is not a free knob.  On any other SDCC, run
+`tools/ember/z80-test.sh` with larger counts (`SESSIONS`, `FUZZ`) before
+keeping it.
+
 ## Tests
 
 `tools/ember/z80-test.sh` (part of `lake test` inside `nix-shell`):

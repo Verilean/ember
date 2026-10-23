@@ -12,8 +12,14 @@ DEFS ?=
 MMIO ?=
 
 # warnings 110/126 ("unreachable code") stay errors: SDCC 4.6 gives them when
-# it deletes live code (docs/Ember-plan.md, decision log), and the stack has none
-CFLAGS := -mz80 --std-c99 --opt-code-size --Werror \
+# it deletes live code (docs/Ember-plan.md, decision log), and the stack has none.
+# --max-allocs-per-node 10000 (SDCC's default 3000): the register allocator
+# searches further.  Validated for SDCC 4.6.0 #16555 only; with 30000 and
+# 100000 that version miscompiles the stack.  Revalidate on any other SDCC
+# (decision log, 2026-10-23).  Ember/Tools/Z80.lean (sdccFlags) and
+# Tests/Ember/LangTests.lean (sdcc) pass the same.
+ALLOCS := --max-allocs-per-node 10000
+CFLAGS := -mz80 --std-c99 --opt-code-size $(ALLOCS) --Werror \
           -I$(HERE)../common $(DEFS)
 RELS := $(OUT)/$(NAME).crt0.rel $(OUT)/$(NAME).rt.rel $(OUT)/$(NAME).prog.rel $(if $(MMIO),$(OUT)/$(NAME).mmio.rel)
 
