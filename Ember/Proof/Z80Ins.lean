@@ -1,5 +1,6 @@
 import Ember.Proof.Z80After
 import Ember.Proof.Z80Mem
+import Ember.Proof.Z80MemW
 import Ember.Proof.Z80Eff
 import Ember.Proof.Z80Shift
 import Ember.Proof.Z80Acc
@@ -47,7 +48,8 @@ def Covered : IR.Instr → Bool
       (n == 2 && m == 4)
   | .shift _ n _ _ _ amt => (size12 n && isConst amt) || (n == 4 && isConst16 amt)
   | .lea _ p => addrCov p
-  | .load n _ p | .store n p _ => size12 n && addrCov p
+  | .load n _ p => (size12 n || n == 4) && addrCov p
+  | .store n p _ => size12 n && addrCov p
   | .jmp _ | .label _ | .trap => true
   | .ret v => (v.map fun p => size12 p.1 || p.1 == 4).getD true
   | .call _ ret reg =>
@@ -247,13 +249,16 @@ theorem ins0_ok (ok : Z.OK) (hT : FnLay Z E) (F : GFinal Z base sF) (hrt : RtOK 
       intro _ s1 ⟨hx, h⟩
       exact ⟨hx, fun hxF hN => h hxF hN⟩
   | load n d p =>
-    have hc' : (size12 n && addrCov p) = true := hc
+    have hc' : ((size12 n || n == 4) && addrCov p) = true := hc
     rw [Bool.and_eq_true] at hc'
-    rcases size12_spec hc'.1 with rfl | rfl
+    rcases size124 hc'.1 with rfl | rfl | rfl
     · refine wpg_mono (load1_ok (dt := dt) ok hT F hrt hdep d p hc'.2 s0) ?_
       intro _ s1 ⟨hx, h⟩
       exact ⟨hx, fun hxF hN => h hxF hN⟩
     · refine wpg_mono (load2_ok (dt := dt) ok hT F hrt hdep d p hc'.2 s0) ?_
+      intro _ s1 ⟨hx, h⟩
+      exact ⟨hx, fun hxF hN => h hxF hN⟩
+    · refine wpg_mono (load4_ok (dt := dt) ok hT F hrt hdep d p hc'.2 s0) ?_
       intro _ s1 ⟨hx, h⟩
       exact ⟨hx, fun hxF hN => h hxF hN⟩
   | store n p src =>
