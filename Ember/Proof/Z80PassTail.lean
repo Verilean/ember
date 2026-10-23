@@ -29,8 +29,8 @@ theorem body_st32 (D : Dev) {A B : Code} {lo hi : Nat} (hhi : hi ≤ 65536) {G :
     (haccB : ∀ pb, (B.a.env pb).val (.sym "rt_acc" 0) = Int.ofNat acc)
     (hacc : lo ≤ acc ∧ acc + 4 ≤ hi)
     {x y : Cpu × D.W} (S : Sync D A B lo hi G (r + 3) (q + 3) false false x y)
-    (foot : lo ≤ x.1.hl.toNat ∧ x.1.hl.toNat + 4 ≤ hi) :
-    Sync D A B lo hi G (r + 9) (q + 9) false false (mrun D 7 x) (mrun D 7 y) := by
+    (foot : lo ≤ x.1.hl.toNat ∧ x.1.hl.toNat + 4 ≤ hi) (hG : G ≠ []) :
+    Sync D A B lo hi G (r + 9) (q + 9) false false (mrun D 7 x) (mrun D 7 y) ∧ NZ D x 7 := by
   have l3A : A.items[r + 3]? = some (.label "rt_st32") := hLA.get 3 rfl
   have l3B : B.items[q + 3]? = some (.label "rt_st32") := hLB.get 3 rfl
   have i4A : A.items[r + 4]? = some (.ins (Form.ldBCI (.num 4)).instr) := hLA.get 4 rfl
@@ -61,7 +61,7 @@ theorem body_st32 (D : Dev) {A B : Code} {lo hi : Nat} (hhi : hi ≤ 65536) {G :
     immW_toNat _ _ (.num 4) 4 rfl rfl (by decide)
   rw [e2] at S2 ⊢
   obtain ⟨bc2, hl2, _⟩ := ldRP_bc s1 (Instr.immW (A.a.env 0) ⟨.ld, [.bc, .imm (.num 4)]⟩)
-  generalize ldRP s1 0 (Instr.immW (A.a.env 0) ⟨.ld, [.bc, .imm (.num 4)]⟩) = s2 at S2 bc2 hl2 ⊢
+  generalize ldRP s1 0 (Instr.immW (A.a.env 0) ⟨.ld, [.bc, .imm (.num 4)]⟩) = s2 at S2 bc2 hl2 e2 ⊢
   simp only [Form.writesH, Form.writesL, Bool.false_and] at S2
   -- `ex de,hl`
   have S3 := seg_ord D hhi Form.exDEHL (by intro h; cases h) i6A i6B (fun _ _ => ⟨rfl, rfl⟩) (by simp) (by simp) S2
@@ -69,7 +69,7 @@ theorem body_st32 (D : Dev) {A B : Code} {lo hi : Nat} (hhi : hi ≤ 65536) {G :
   have e3 : mstep D (s2, w) = (exDH' s2, w) := mstep_exec D i6A S2.LA S2.atA w (fun _ _ => rfl) rfl
   rw [e3] at S3 ⊢
   obtain ⟨de3, hl3', bc3⟩ := exDH'_regs s2
-  generalize exDH' s2 = s3 at S3 de3 hl3' bc3 ⊢
+  generalize exDH' s2 = s3 at S3 de3 hl3' bc3 e3 ⊢
   simp only [Form.writesH, Form.writesL, Bool.false_and] at S3
   -- `ld hl,rt_acc`
   have S4 := seg_ord D hhi (Form.ldHLI (.sym "rt_acc" 0)) (by intro h; cases h) i7A i7B
@@ -91,12 +91,13 @@ theorem body_st32 (D : Dev) {A B : Code} {lo hi : Nat} (hhi : hi ≤ 65536) {G :
       Ember.Proof.Z80Gen.mk16_hi_lo]
   have de4 : (ldRP s3 2 (Instr.immW (A.a.env 0) ⟨.ld, [.hl, .imm (.sym "rt_acc" 0)]⟩)).de = s3.de := rfl
   have bc4 : (ldRP s3 2 (Instr.immW (A.a.env 0) ⟨.ld, [.hl, .imm (.sym "rt_acc" 0)]⟩)).bc = s3.bc := rfl
-  generalize ldRP s3 2 (Instr.immW (A.a.env 0) ⟨.ld, [.hl, .imm (.sym "rt_acc" 0)]⟩) = s4 at S4 hl4 de4 bc4 ⊢
+  generalize ldRP s3 2 (Instr.immW (A.a.env 0) ⟨.ld, [.hl, .imm (.sym "rt_acc" 0)]⟩) = s4 at S4 hl4 de4 bc4 e4 ⊢
   simp only [Form.writesH, Form.writesL, Bool.not_true, Bool.and_false] at S4
   -- `ldir`, four rounds: from the accumulator to the bytes at the old `HL`
-  exact ldir_eq_rounds D hhi i8A i8B 3 _ _ S4 (by simp only; rw [bc4, bc3, bc2, hn4])
+  have R := ldir_eq_rounds D hhi i8A i8B hG 3 _ _ S4 (by simp only; rw [bc4, bc3, bc2, hn4])
     (by simp only; rw [hl4, hacc4]; exact hacc.1) (by simp only; rw [hl4, hacc4]; omega)
     (by simp only; rw [de4, de3, hl2]; exact foot.1) (by simp only; rw [de4, de3, hl2]; omega)
+  exact ⟨R.1, NZ.cons e2 (fun _ => S2.sp_ne hG) (NZ.cons e3 (fun _ => S3.sp_ne hG) (NZ.cons e4 (fun _ => S4.sp_ne hG) R.2))⟩
 
 /-- info: 'Ember.Proof.PassSim.body_st32' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in #print axioms body_st32
@@ -114,7 +115,7 @@ theorem blkT_st32 (D : Dev) {A B : Code} {lo hi : Nat} (hhi : hi ≤ 65536) (hlo
     (hacc : lo ≤ acc ∧ acc + 4 ≤ hi) (hts : ∀ p, p ∈ ts → RetSeq A p.1)
     {x y : Cpu × D.W} (S : Sync D A B lo hi (tails ts ++ .ret rA rB e :: G) kA kB false false x y)
     (room : hi + 2 ≤ top x.1.sp) (foot : lo ≤ x.1.hl.toNat ∧ x.1.hl.toNat + 4 ≤ hi) :
-    ∃ n, 0 < n ∧ Sync D A B lo hi G rA rB false false (mrun D n x) (mrun D 9 y) := by
+    ∃ n, 0 < n ∧ Sync D A B lo hi G rA rB false false (mrun D n x) (mrun D 9 y) ∧ NZ D x n := by
   have l3A : A.items[r + 3]? = some (.label "rt_st32") := hLA.get 3 rfl
   have l3B : B.items[q + 3]? = some (.label "rt_st32") := hLB.get 3 rfl
   have i9A : A.items[r + 9]? = some (.ins ⟨.ret, []⟩) := hLA.get 9 rfl
@@ -124,14 +125,16 @@ theorem blkT_st32 (D : Dev) {A B : Code} {lo hi : Nat} (hhi : hi ≤ 65536) (hlo
     obtain ⟨sA, w⟩ := x
     obtain ⟨T, _, _, _, _, _, eA, _⟩ := call_mstep D hA l3A S.LA S.atA w
     rw [eA]; exact (called_regs sA _).1
-  have S7 := body_st32 D hhi (G := tails ((kA + 1, r + 3) :: ts) ++ .ret rA rB e :: G) hLA hLB haccA haccB hacc
-    S0 (by rw [hl0]; exact foot)
-  obtain ⟨n, _, S9⟩ := seg_retseq D (ts := (kA + 1, r + 3) :: ts) ⟨r + 9, ⟨Nat.le_refl _, fun _ h1 h2 => by omega⟩,
+  have S7' := body_st32 D hhi (G := tails ((kA + 1, r + 3) :: ts) ++ .ret rA rB e :: G) hLA hLB haccA haccB hacc
+    S0 (by rw [hl0]; exact foot) (by simp [tails])
+  have S7 := S7'.1
+  obtain ⟨n, _, S9, nz9⟩ := seg_retseq D (ts := (kA + 1, r + 3) :: ts) ⟨r + 9, ⟨Nat.le_refl _, fun _ h1 h2 => by omega⟩,
     Or.inl i9A⟩ i9B (fun p hp => by
       rcases List.mem_cons.mp hp with rfl | hp
       · exact hR
       · exact hts p hp) S7
-  refine ⟨1 + (7 + n), by omega, ?_⟩
+  refine ⟨1 + (7 + n), by omega, ?_, NZ.cons rfl (fun _ => S0.sp_ne (List.cons_ne_nil _ _))
+    (NZ.pre S7'.2 rfl (fun _ _ => S7.sp_ne (by simp [tails])) nz9)⟩
   rw [mrun_add, mrun_add, show 9 = 1 + (7 + 1) from rfl, mrun_add D 1, mrun_add D 7]
   exact S9
 
@@ -151,9 +154,9 @@ theorem body_bytes (D : Dev) {A B : Code} {lo hi : Nat} (hhi : hi ≤ 65536) {G 
     (haccB : ∀ pb, (B.a.env pb).val (.sym "rt_acc" 0) = Int.ofNat acc)
     (hacc : lo ≤ acc ∧ acc + 4 ≤ hi)
     {x y : Cpu × D.W} (S : Sync D A B lo hi G (r + 3) (q + 3) false false x y)
-    (foot : lo ≤ x.1.hl.toNat ∧ x.1.hl.toNat + 4 ≤ hi) :
+    (foot : lo ≤ x.1.hl.toNat ∧ x.1.hl.toNat + 4 ≤ hi) (hG : G ≠ []) :
     Sync D A B lo hi G (r + 14 + pre.length) (q + 14 + pre.length) false false
-      (mrun D (26 + pre.length) x) (mrun D (26 + pre.length) y) := by
+      (mrun D (26 + pre.length) x) (mrun D (26 + pre.length) y) ∧ NZ D x (26 + pre.length) := by
   rw [bytewise_split] at hLA hLB
   have l3A : A.items[r + 3]? = some (.label s!"rt_{name}32") := hLA.get 3 rfl
   have l3B : B.items[q + 3]? = some (.label s!"rt_{name}32") := hLB.get 3 rfl
@@ -173,18 +176,19 @@ theorem body_bytes (D : Dev) {A B : Code} {lo hi : Nat} (hhi : hi ≤ 65536) {G 
   simp only at foot
   rw [show 26 + pre.length = 2 + (pre.length + 24) by omega, mrun_add D 2 _ (s1, w), mrun_add D 2 _ y]
   show Sync D A B lo hi G _ _ false false (mrun D (pre.length + 24) (mstep D (mstep D (s1, w))))
-    (mrun D (pre.length + 24) (mstep D (mstep D y)))
+    (mrun D (pre.length + 24) (mstep D (mstep D y))) ∧ NZ D (s1, w) (2 + (pre.length + 24))
   -- `ld b,4`
   have S2 := (seg_ord D hhi (Form.ldBI (.num 4)) (by intro h; cases h) i4A i4B
     (imm_same _ _ rfl ⟨by decide, by decide⟩ (val_num 4)) (by simp) (by simp) S1
     (by simp [Form.viaHL]) (by simp [Form.viaDE]) (fun _ h => by simp [Form.viaNN] at h)).skip l5A l5B
-  rw [mstep_exec D i4A S1.LA S1.atA w (s' := ldRN s1 0 (Instr.immB (A.a.env 0) ⟨.ld, [.b, .imm (.num 4)]⟩))
+  have en_S2 := mstep_exec D i4A S1.LA S1.atA w (s' := ldRN s1 0 (Instr.immB (A.a.env 0) ⟨.ld, [.b, .imm (.num 4)]⟩))
       (fun pa inp => by
         show exec (A.a.env pa) ⟨.ld, [.b, .imm (.num 4)]⟩ s1 inp = _
-        rw [exec_ld_b_n]; rfl) rfl] at S2 ⊢
+        rw [exec_ld_b_n]; rfl) rfl
+  rw [en_S2] at S2 ⊢
   have hb2 : (ldRN s1 0 (Instr.immB (A.a.env 0) ⟨.ld, [.b, .imm (.num 4)]⟩)).b.toNat = 4 := rfl
   obtain ⟨_, hl2, _⟩ := ldRN_b s1 (Instr.immB (A.a.env 0) ⟨.ld, [.b, .imm (.num 4)]⟩)
-  generalize ldRN s1 0 (Instr.immB (A.a.env 0) ⟨.ld, [.b, .imm (.num 4)]⟩) = s2 at S2 hb2 hl2 ⊢
+  generalize ldRN s1 0 (Instr.immB (A.a.env 0) ⟨.ld, [.b, .imm (.num 4)]⟩) = s2 at S2 hb2 hl2 en_S2 ⊢
   simp only [Form.writesH, Form.writesL, Bool.false_and] at S2
   -- `ld de,rt_acc`
   have S3 := seg_ord D hhi (Form.ldDEI (.sym "rt_acc" 0)) (by intro h; cases h) i6A i6B
@@ -203,8 +207,8 @@ theorem body_bytes (D : Dev) {A B : Code} {lo hi : Nat} (hhi : hi ≤ 65536) {G 
   obtain ⟨de3, hl3, _⟩ := ldRP_de s2 (Instr.immW (A.a.env 0) ⟨.ld, [.de, .imm (.sym "rt_acc" 0)]⟩)
   have hb3 := ldRP_b1 s2 (Instr.immW (A.a.env 0) ⟨.ld, [.de, .imm (.sym "rt_acc" 0)]⟩)
   simp only [Form.writesH, Form.writesL, Bool.false_and] at S3
-  generalize Instr.immW (A.a.env 0) ⟨.ld, [.de, .imm (.sym "rt_acc" 0)]⟩ = nacc at S3 de3 hl3 hb3 hacc3 ⊢
-  generalize ldRP s2 1 nacc = s3 at S3 de3 hl3 hb3 ⊢
+  generalize Instr.immW (A.a.env 0) ⟨.ld, [.de, .imm (.sym "rt_acc" 0)]⟩ = nacc at S3 de3 hl3 hb3 hacc3 e3 ⊢
+  generalize ldRP s2 1 nacc = s3 at S3 de3 hl3 hb3 e3 ⊢
   generalize mstep D (mstep D y) = y3 at S3 ⊢
   rcases hpre with rfl | rfl
   · have lA : A.items[r + 7]? = some (.label s!"rt_{name}w_l") := tA.get 0 rfl
@@ -213,11 +217,13 @@ theorem body_bytes (D : Dev) {A B : Code} {lo hi : Nat} (hhi : hi ≤ 65536) {G 
     have tB0 : Has B (q + 7) (loopItems s!"rt_{name}w_l" i ++ [.ins ⟨.ret, []⟩]) := by simpa using tB
     have hlA := tA0.left
     have hlB := tB0.left
-    have R := loop_eq_rounds D hhi k hexec hfi hlA hlB 3 _ _ (S3.skip lA lB)
+    have R := loop_eq_rounds D hhi k hexec hfi hlA hlB hG 3 _ _ (S3.skip lA lB)
       (by simp only; rw [hb3, hb2]) (by simp only; rw [hl3, hl2]; exact foot.1)
       (by simp only; rw [hl3, hl2]; omega) (by simp only; rw [de3, hacc3]; exact hacc.1)
       (by simp only; rw [de3, hacc3]; omega)
-    simpa using R
+    refine ⟨by simpa using R.1, ?_⟩
+    have h := NZ.cons en_S2 (fun _ => S2.sp_ne hG) (NZ.cons e3 (fun _ => S3.sp_ne hG) R.2)
+    exact h
   · have iA : A.items[r + 7]? = some (.ins Form.orA.instr) := tA.get 0 rfl
     have iB : B.items[q + 7]? = some (.ins Form.orA.instr) := tB.get 0 rfl
     have S4 := seg_ord D hhi Form.orA (by intro h; cases h) iA iB (fun _ _ => ⟨rfl, rfl⟩) (by simp) (by simp) S3
@@ -232,14 +238,18 @@ theorem body_bytes (D : Dev) {A B : Code} {lo hi : Nat} (hhi : hi ≤ 65536) {G 
     have hlB : Has B (q + 7 + 1) (loopItems s!"rt_{name}w_l" i) := by
       have := tB.right; simpa using this.left
     rw [e4] at S4
-    have R := loop_eq_rounds D hhi k hexec hfi hlA hlB 3 _ _ (S4.skip lA lB)
+    have R := loop_eq_rounds D hhi k hexec hfi hlA hlB hG 3 _ _ (S4.skip lA lB)
       (by simp only; rw [b4, hb3, hb2]) (by simp only; rw [hl4, hl3, hl2]; exact foot.1)
       (by simp only; rw [hl4, hl3, hl2]; omega) (by simp only; rw [de4, de3, hacc3]; exact hacc.1)
       (by simp only; rw [de4, de3, hacc3]; omega)
     rw [show [Item.ins Form.orA.instr].length + 24 = 1 + 24 from rfl, mrun_add, mrun_add]
-    show Sync D A B lo hi G _ _ false false (mrun D 24 (mstep D (s3, w))) (mrun D 24 (mstep D y3))
+    show Sync D A B lo hi G _ _ false false (mrun D 24 (mstep D (s3, w))) (mrun D 24 (mstep D y3)) ∧
+      NZ D (s1, w) (2 + (1 + 24))
     rw [e4]
-    simpa using R
+    refine ⟨by simpa using R.1, ?_⟩
+    have h := NZ.cons en_S2 (fun _ => S2.sp_ne hG) (NZ.cons e3 (fun _ => S3.sp_ne hG)
+      (NZ.cons e4 (fun _ => S4.sp_ne hG) R.2))
+    exact h
 
 /-- info: 'Ember.Proof.PassSim.body_bytes' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in #print axioms body_bytes
@@ -258,7 +268,7 @@ theorem blkT_bytes (D : Dev) {A B : Code} {lo hi : Nat} (hhi : hi ≤ 65536) (hl
     (hacc : lo ≤ acc ∧ acc + 4 ≤ hi) (hts : ∀ p, p ∈ ts → RetSeq A p.1)
     {x y : Cpu × D.W} (S : Sync D A B lo hi (tails ts ++ .ret rA rB e :: G) kA kB false false x y)
     (room : hi + 2 ≤ top x.1.sp) (foot : lo ≤ x.1.hl.toNat ∧ x.1.hl.toNat + 4 ≤ hi) :
-    ∃ n, 0 < n ∧ Sync D A B lo hi G rA rB false false (mrun D n x) (mrun D (28 + pre.length) y) := by
+    ∃ n, 0 < n ∧ Sync D A B lo hi G rA rB false false (mrun D n x) (mrun D (28 + pre.length) y) ∧ NZ D x n := by
   have hLA' := hLA
   have hLB' := hLB
   rw [bytewise_split] at hLA' hLB'
@@ -281,14 +291,16 @@ theorem blkT_bytes (D : Dev) {A B : Code} {lo hi : Nat} (hhi : hi ≤ 65536) (hl
     obtain ⟨sA, w⟩ := x
     obtain ⟨T, _, _, _, _, _, eA, _⟩ := call_mstep D hA l3A S.LA S.atA w
     rw [eA]; exact (called_regs sA _).1
-  have SB := body_bytes D hhi (G := tails ((kA + 1, r + 3) :: ts) ++ .ret rA rB e :: G) k hpre hexec hfi
-    hLA hLB haccA haccB hacc S0 (by rw [hl0]; exact foot)
-  obtain ⟨n, _, S9⟩ := seg_retseq D (ts := (kA + 1, r + 3) :: ts)
+  have SB' := body_bytes D hhi (G := tails ((kA + 1, r + 3) :: ts) ++ .ret rA rB e :: G) k hpre hexec hfi
+    hLA hLB haccA haccB hacc S0 (by rw [hl0]; exact foot) (by simp [tails])
+  have SB := SB'.1
+  obtain ⟨n, _, S9, nz9⟩ := seg_retseq D (ts := (kA + 1, r + 3) :: ts)
     ⟨r + 14 + pre.length, ⟨Nat.le_refl _, fun _ h1 h2 => by omega⟩, Or.inl iRA⟩ iRB (fun p hp => by
       rcases List.mem_cons.mp hp with rfl | hp
       · exact hR
       · exact hts p hp) SB
-  refine ⟨1 + (26 + pre.length + n), by omega, ?_⟩
+  refine ⟨1 + (26 + pre.length + n), by omega, ?_, NZ.cons rfl (fun _ => S0.sp_ne (List.cons_ne_nil _ _))
+    (NZ.pre SB'.2 rfl (fun _ _ => SB.sp_ne (by simp [tails])) nz9)⟩
   rw [mrun_add, mrun_add, show 28 + pre.length = 1 + (26 + pre.length + 1) by omega, mrun_add D 1,
     mrun_add D (26 + pre.length)]
   exact S9

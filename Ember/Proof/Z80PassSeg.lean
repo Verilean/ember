@@ -115,6 +115,45 @@ theorem Stk.top_ge {A B : Code} {lo : Nat} {G : List Frame} {a b : Nat} {mA mB :
   | nil => obtain ⟨e1, e2⟩ := h; omega
   | cons _ _ => have := h4 (by simp); omega
 
+/-! ## Inside a segment: the stack not empty -/
+
+/-- **`A`'s stack is not empty at every step strictly inside `n` steps from `x`.** -/
+def NZ (D : Dev) (x : Cpu × D.W) (n : Nat) : Prop := ∀ t, 0 < t → t < n → (mrun D t x).1.sp ≠ 0
+
+theorem NZ.le1 (D : Dev) (x : Cpu × D.W) {n : Nat} (h : n ≤ 1) : NZ D x n := fun _ h1 h2 => absurd h2 (by omega)
+
+/-- `a` steps, then `b`: the state between with its stack not empty. -/
+theorem NZ.pre {D : Dev} {x z : Cpu × D.W} {a b : Nat} (hA : NZ D x a) (e : mrun D a x = z)
+    (hz : 0 < a → 0 < b → z.1.sp ≠ 0) (hB : NZ D z b) : NZ D x (a + b) := by
+  intro t h1 h2
+  rcases Nat.lt_or_ge t a with h | h
+  · exact hA t h1 h
+  · rcases Nat.eq_or_lt_of_le h with h' | h'
+    · subst h'; rw [e]; exact hz h1 (by omega)
+    · have := hB (t - a) (by omega) (by omega)
+      rwa [← e, ← mrun_add, show a + (t - a) = t by omega] at this
+
+/-- One step, then `b`. -/
+theorem NZ.cons {D : Dev} {x z : Cpu × D.W} {b : Nat} (e : mstep D x = z) (hz : 0 < b → z.1.sp ≠ 0)
+    (hB : NZ D z b) : NZ D x (1 + b) :=
+  NZ.pre (NZ.le1 D x (Nat.le_refl _)) e (fun _ h => hz h) hB
+
+/-- `A`'s stack top with frames on it is below the top of memory: `SP` not 0. -/
+theorem Stk.sp_ne {A B : Code} {lo : Nat} {G : List Frame} {sp : UInt16} {b : Nat} {mA mB : ByteArray}
+    (h : Stk A B lo G (top sp) b mA mB) (hG : G ≠ []) : sp ≠ 0 := by
+  intro e
+  have hb := Stk.bounds G _ _ _ _ h
+  cases G with
+  | nil => exact hG rfl
+  | cons f G =>
+    simp only [top, e, if_true] at hb
+    simp only [List.length_cons] at hb
+    omega
+
+theorem Sync.sp_ne {D : Dev} {A B : Code} {lo hi : Nat} {G : List Frame} {kA kB : Nat} {th tl : Bool}
+    {x y : Cpu × D.W} (S : Sync D A B lo hi G kA kB th tl x y) (hG : G ≠ []) : x.1.sp ≠ 0 :=
+  Stk.sp_ne S.stk hG
+
 /-- **An ordinary instruction, in both machines**: the same instruction of a form of `Form` at
 `kA` in `A` and at `kB` in `B`, with the same operand in both, reading none of `H`, `L` that are
 free; the bytes it reads or writes in the RAM below the stack.  One step of each machine keeps the
@@ -608,7 +647,7 @@ written (no longer free). -/
 theorem seg_pack (D : Dev) {A B : Code} {lo hi : Nat} {G : List Frame} {kA kB : Nat} {th tl : Bool}
     (hA : Has A kA (packHighFrom.map .ins)) (hB : Has B kB (packHighTo.map .ins))
     {x y : Cpu × D.W} (S : Sync D A B lo hi G kA kB th tl x y) :
-    Sync D A B lo hi G (kA + 4) (kB + 2) false false (mrun D 4 x) (mrun D 2 y) := by
+    Sync D A B lo hi G (kA + 4) (kB + 2) false false (mrun D 4 x) (mrun D 2 y) ∧ (x.1.sp ≠ 0 → NZ D x 4) := by
   obtain ⟨sA, w⟩ := x
   obtain ⟨sB, w'⟩ := y
   have hw : w' = w := S.w
@@ -629,6 +668,10 @@ theorem seg_pack (D : Dev) {A B : Code} {lo hi : Nat} {G : List Frame} {kA kB : 
     show mrun D 1 (mstep D (sB, w')) = _
     rw [f1]; show mrun D 0 (mstep D _) = _
     rw [f2]; rfl
+  have nz : sA.sp ≠ 0 → NZ D (sA, w') 4 := fun h0 =>
+    NZ.cons e1 (fun _ => by rw [S1.2.2.2]; exact h0) (NZ.cons e2 (fun _ => by rw [S2.2.2.2, S1.2.2.2]; exact h0)
+      (NZ.cons e3 (fun _ => by rw [S3.2.2.2, S2.2.2.2, S1.2.2.2]; exact h0) (NZ.le1 _ _ (Nat.le_refl _))))
+  refine ⟨?_, nz⟩
   rw [rA, rB]
   obtain ⟨mA, spA, rsA⟩ := fromF_mem sA
   obtain ⟨mB, spB, rsB⟩ := toF_mem sB

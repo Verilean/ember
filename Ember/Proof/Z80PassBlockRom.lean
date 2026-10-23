@@ -16,12 +16,12 @@ open Ember.Z80 Ember.Z80.Asm Ember.Z80.Cpu Ember.Proof.Z80Enc Ember.Proof.Z80Gen
 /-- **All the rounds of an `ldir` from the ROM to the RAM kept equal**, in both machines, `H` and `L`
 free: the bytes each reads from its own `HL` on the same, below the RAM; the bytes written in it. -/
 theorem ldir_rom_rounds (D : Dev) {A B : Code} {lo hi : Nat} (hhi : hi ≤ 65536) {G : List Frame} {kA kB : Nat}
-    (hA : A.items[kA]? = some (.ins ⟨.ldir, []⟩)) (hB : B.items[kB]? = some (.ins ⟨.ldir, []⟩)) :
+    (hA : A.items[kA]? = some (.ins ⟨.ldir, []⟩)) (hB : B.items[kB]? = some (.ins ⟨.ldir, []⟩)) (hG : G ≠ []) :
     ∀ (n : Nat) (x y : Cpu × D.W), Sync D A B lo hi G kA kB true true x y → x.1.bc.toNat = n + 1 →
       x.1.hl.toNat + n + 1 ≤ lo → y.1.hl.toNat + n + 1 ≤ lo →
       (∀ i, i ≤ n → x.1.mem.get! (x.1.hl.toNat + i) = y.1.mem.get! (y.1.hl.toNat + i)) →
       lo ≤ x.1.de.toNat → x.1.de.toNat + n + 1 ≤ hi →
-      Sync D A B lo hi G (kA + 1) (kB + 1) true true (mrun D (n + 1) x) (mrun D (n + 1) y)
+      Sync D A B lo hi G (kA + 1) (kB + 1) true true (mrun D (n + 1) x) (mrun D (n + 1) y) ∧ NZ D x (n + 1)
   | n, x, y, S, hbc, h1, g1, hby, d1, d2 => by
     have hv : x.1.mem.get! x.1.hl.toNat = y.1.mem.get! y.1.hl.toNat := by
       have := hby 0 (by omega); simpa using this
@@ -37,7 +37,7 @@ theorem ldir_rom_rounds (D : Dev) {A B : Code} {lo hi : Nat} (hhi : hi ≤ 65536
       have h0 : x.1.bc - 1 = 0 := by apply UInt16.toNat_inj.mp; rw [toNat_sub1 _ (by omega)]; simp [hbc]
       have hne : ¬ ((x.1.bc - 1 != 0) = true) := by rw [h0]; decide
       rw [if_neg hne] at st
-      exact st
+      exact ⟨st, NZ.le1 D x (Nat.le_refl _)⟩
     | succ m =>
       have hne : (x.1.bc - 1 != 0) = true := by
         have h' : (x.1.bc - 1).toNat = m + 1 := by rw [toNat_sub1 _ (by omega)]; omega
@@ -56,7 +56,7 @@ theorem ldir_rom_rounds (D : Dev) {A B : Code} {lo hi : Nat} (hhi : hi ≤ 65536
       have rA : x.1.ramStart.toNat ≤ x.1.de.toNat := by omega
       have rB : y.1.ramStart.toNat ≤ y.1.de.toNat := by rw [hdeB]; omega
       have hyde : lo ≤ y.1.de.toNat := by rw [hdeB]; omega
-      have r := ldir_rom_rounds D hhi hA hB m (mstep D x) (mstep D y) st
+      have r := ldir_rom_rounds D hhi hA hB hG m (mstep D x) (mstep D y) st
         (by rw [hx]; simp only; rw [rb, toNat_sub1 _ (by omega)]; omega)
         (by rw [hx]; simp only; rw [rh, toNat_add1 _ (by omega)]; omega)
         (by rw [hy]; simp only; rw [rh', toNat_add1 _ (by omega)]; omega)
@@ -70,7 +70,9 @@ theorem ldir_rom_rounds (D : Dev) {A B : Code} {lo hi : Nat} (hhi : hi ≤ 65536
           exact this)
         (by rw [hx]; simp only; rw [rd, toNat_add1 _ (by omega)]; omega)
         (by rw [hx]; simp only; rw [rd, toNat_add1 _ (by omega)]; omega)
-      exact r
+      refine ⟨r.1, ?_⟩
+      have := NZ.cons (z := mstep D x) rfl (fun _ => st.sp_ne hG) r.2
+      rwa [show 1 + (m + 1) = m + 1 + 1 by omega] at this
 
 /-- info: 'Ember.Proof.PassSim.ldir_rom_rounds' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in #print axioms ldir_rom_rounds
@@ -123,8 +125,8 @@ theorem blkR_ld32 (D : Dev) {A B : Code} {lo hi : Nat} (hhi : hi ≤ 65536) (hlo
     (hlB : B.items[dB]? = some (.label lit)) (hdB : B.items[dB + 1]? = some (.db vs))
     (hencA : ∀ ad, Item.encode (.db vs) (A.a.env ad) = .ok bs)
     (hencB : ∀ ad, Item.encode (.db vs) (B.a.env ad) = .ok bs) (hbs : bs.length = 4)
-    {x y : Cpu × D.W} (S : Sync D A B lo hi G kA kB th tl x y) (room : hi + 2 ≤ top x.1.sp) :
-    Sync D A B lo hi G (kA + 2) (kB + 2) true true (mrun D 9 x) (mrun D 9 y) := by
+    {x y : Cpu × D.W} (S : Sync D A B lo hi G kA kB th tl x y) (room : hi + 2 ≤ top x.1.sp) (hG : G ≠ []) :
+    Sync D A B lo hi G (kA + 2) (kB + 2) true true (mrun D 9 x) (mrun D 9 y) ∧ NZ D x 9 := by
   have l3A : A.items[r + 3]? = some (.label "rt_ld32") := hLA.get 3 rfl
   have l3B : B.items[q + 3]? = some (.label "rt_ld32") := hLB.get 3 rfl
   have i4A : A.items[r + 4]? = some (.ins (Form.ldBCI (.num 4)).instr) := hLA.get 4 rfl
@@ -174,9 +176,9 @@ theorem blkR_ld32 (D : Dev) {A B : Code} {lo hi : Nat} (hhi : hi ≤ 65536) (hlo
   have spA0 : (ldHL sA (Instr.immW (A.a.env 0) ⟨.ld, [.hl, .imm (.sym lit 0)]⟩)).sp = sA.sp := by rw [ldHL_eq]; rfl
   have hnA0 := hnA 0
   have hnB0 := hnB 0
-  generalize Instr.immW (A.a.env 0) ⟨.ld, [.hl, .imm (.sym lit 0)]⟩ = nA at S0 hlA0 spA0 hnA0 ⊢
+  generalize Instr.immW (A.a.env 0) ⟨.ld, [.hl, .imm (.sym lit 0)]⟩ = nA at S0 hlA0 spA0 hnA0 eA0 ⊢
   generalize Instr.immW (B.a.env 0) ⟨.ld, [.hl, .imm (.sym lit 0)]⟩ = nB at S0 hlB0 hnB0 ⊢
-  generalize ldHL sA nA = a0 at S0 hlA0 spA0 ⊢
+  generalize ldHL sA nA = a0 at S0 hlA0 spA0 eA0 ⊢
   generalize ldHL sB nB = b0 at S0 hlB0 ⊢
   -- the call
   obtain ⟨TcA, _, _, _, _, _, eA1, _⟩ := call_mstep D hA l3A S0.LA S0.atA w'
@@ -185,7 +187,7 @@ theorem blkR_ld32 (D : Dev) {A B : Code} {lo hi : Nat} (hhi : hi ≤ 65536) (hlo
   rw [eA1, eB1] at S1 ⊢
   obtain ⟨hlA1, _, _⟩ := called_regs a0 (UInt16.ofNat TcA)
   obtain ⟨hlB1, _, _⟩ := called_regs b0 (UInt16.ofNat TcB)
-  generalize called a0 (UInt16.ofNat TcA) = a1 at S1 hlA1 ⊢
+  generalize called a0 (UInt16.ofNat TcA) = a1 at S1 hlA1 eA1 ⊢
   generalize called b0 (UInt16.ofNat TcB) = b1 at S1 hlB1 ⊢
   -- `ld bc,4`
   have S2 := (seg_ord D hhi (Form.ldBCI (.num 4)) (by intro h; cases h) i4A i4B
@@ -204,7 +206,7 @@ theorem blkR_ld32 (D : Dev) {A B : Code} {lo hi : Nat} (hhi : hi ≤ 65536) (hlo
   rw [eA2, eB2] at S2 ⊢
   obtain ⟨bc2, hlA2, _⟩ := ldRP_bc a1 (Instr.immW (A.a.env 0) ⟨.ld, [.bc, .imm (.num 4)]⟩)
   obtain ⟨_, hlB2, _⟩ := ldRP_bc b1 (Instr.immW (B.a.env 0) ⟨.ld, [.bc, .imm (.num 4)]⟩)
-  generalize ldRP a1 0 (Instr.immW (A.a.env 0) ⟨.ld, [.bc, .imm (.num 4)]⟩) = a2 at S2 bc2 hlA2 ⊢
+  generalize ldRP a1 0 (Instr.immW (A.a.env 0) ⟨.ld, [.bc, .imm (.num 4)]⟩) = a2 at S2 bc2 hlA2 eA2 ⊢
   generalize ldRP b1 0 (Instr.immW (B.a.env 0) ⟨.ld, [.bc, .imm (.num 4)]⟩) = b2 at S2 hlB2 ⊢
   simp only [Form.writesH, Form.writesL] at S2
   -- `ld de,rt_acc`
@@ -230,7 +232,7 @@ theorem blkR_ld32 (D : Dev) {A B : Code} {lo hi : Nat} (hhi : hi ≤ 65536) (hlo
   rw [eA3, eB3] at S3 ⊢
   obtain ⟨de3, hlA3, bc3⟩ := ldRP_de a2 (Instr.immW (A.a.env 0) ⟨.ld, [.de, .imm (.sym "rt_acc" 0)]⟩)
   obtain ⟨_, hlB3, _⟩ := ldRP_de b2 (Instr.immW (B.a.env 0) ⟨.ld, [.de, .imm (.sym "rt_acc" 0)]⟩)
-  generalize ldRP a2 1 (Instr.immW (A.a.env 0) ⟨.ld, [.de, .imm (.sym "rt_acc" 0)]⟩) = a3 at S3 de3 hlA3 bc3 ⊢
+  generalize ldRP a2 1 (Instr.immW (A.a.env 0) ⟨.ld, [.de, .imm (.sym "rt_acc" 0)]⟩) = a3 at S3 de3 hlA3 bc3 eA3 ⊢
   generalize ldRP b2 1 (Instr.immW (B.a.env 0) ⟨.ld, [.de, .imm (.sym "rt_acc" 0)]⟩) = b3 at S3 hlB3 ⊢
   simp only [Form.writesH, Form.writesL] at S3
   -- the literals' bytes, in each machine's memory now
@@ -245,17 +247,21 @@ theorem blkR_ld32 (D : Dev) {A B : Code} {lo hi : Nat} (hhi : hi ≤ 65536) (hlo
   have hxA : a3.hl.toNat = TA := by rw [hlA3, hlA2, hlA1, hlA0, hnA0]
   have hxB : b3.hl.toNat = TB := by rw [hlB3, hlB2, hlB1, hlB0, hnB0]
   -- `ldir`, four rounds
-  have S7 := ldir_rom_rounds D hhi i7A i7B 3 _ _ S3 (by simp only; rw [bc3, bc2, hn4])
+  have S7' := ldir_rom_rounds D hhi i7A i7B (List.cons_ne_nil _ _) 3 _ _ S3 (by simp only; rw [bc3, bc2, hn4])
     (by simp only; rw [hxA]; omega) (by simp only; rw [hxB]; omega)
     (fun i hi' => by
       simp only; rw [hxA, hxB]
       obtain ⟨b, hb⟩ : ∃ b, bs[i]? = some b := ⟨bs[i]'(by omega), by simp⟩
       rw [hbA i b hb, hbB i b hb])
     (by simp only; rw [de3, hacc3]; exact hacc.1) (by simp only; rw [de3, hacc3]; omega)
+  have S7 := S7'.1
   -- `ret`
   have S8 := seg_ret D (cc := none) (fun _ h => by cases h) i8A i8B S7
   simp only [taken, if_true] at S8
-  exact S8
+  refine ⟨S8, ?_⟩
+  exact NZ.cons eA0 (fun _ => S0.sp_ne hG) (NZ.cons eA1 (fun _ => S1.sp_ne (List.cons_ne_nil _ _))
+    (NZ.cons eA2 (fun _ => S2.sp_ne (List.cons_ne_nil _ _)) (NZ.cons eA3 (fun _ => S3.sp_ne (List.cons_ne_nil _ _))
+      (NZ.pre (b := 1) S7'.2 rfl (fun _ _ => S7.sp_ne (List.cons_ne_nil _ _)) (NZ.le1 _ _ (Nat.le_refl _))))))
 
 /-- info: 'Ember.Proof.PassSim.blkR_ld32' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in #print axioms blkR_ld32
@@ -271,11 +277,12 @@ def RomEq (A B : Code) (a b n : Nat) : Prop :=
 `H` and `L` free: the bytes at each machine's `HL` the same (`RomEq`), the RAM at `DE` kept equal. -/
 theorem loop_rom_rounds (D : Dev) {A B : Code} {lo hi : Nat} (hhi : hi ≤ 65536) {G : List Frame}
     {j m : Nat} {l : String} {i : Instr} (k : UInt8) (hexec : ∀ env s inp, exec env i s inp = some (aluMS k s))
-    (hfi : i.falls = true) (hLA : Has A j (loopItems l i)) (hLB : Has B m (loopItems l i)) :
+    (hfi : i.falls = true) (hLA : Has A j (loopItems l i)) (hLB : Has B m (loopItems l i)) (hG : G ≠ []) :
     ∀ (n : Nat) (x y : Cpu × D.W), Sync D A B lo hi G (j + 1) (m + 1) true true x y → x.1.b.toNat = n + 1 →
       RomEq A B x.1.hl.toNat y.1.hl.toNat (n + 1) → x.1.hl.toNat + n + 1 ≤ lo → y.1.hl.toNat + n + 1 ≤ lo →
       lo ≤ x.1.de.toNat → x.1.de.toNat + n + 1 ≤ hi →
-      Sync D A B lo hi G (j + 7) (m + 7) true true (mrun D (6 * (n + 1)) x) (mrun D (6 * (n + 1)) y)
+      Sync D A B lo hi G (j + 7) (m + 7) true true (mrun D (6 * (n + 1)) x) (mrun D (6 * (n + 1)) y) ∧
+        NZ D x (6 * (n + 1))
   | n, (s, w), (t, w'), S, hb, hr, h1, g1, d1, d2 => by
     have l0A : A.items[j]? = some (.label l) := hLA.get 0 rfl
     have l0B : B.items[m]? = some (.label l) := hLB.get 0 rfl
@@ -299,51 +306,56 @@ theorem loop_rom_rounds (D : Dev) {A B : Code} {lo hi : Nat} (hhi : hi ≤ 65536
     have S1 := seg_ord D hhi Form.ldADE (by intro h; cases h) i1A i1B (fun _ _ => ⟨rfl, rfl⟩)
       (by simp [Form.readsH]) (by simp [Form.readsL]) S
       (by simp [Form.viaHL]) (fun _ => by simp only; exact ⟨d1, by omega⟩) (fun _ h => by simp [Form.viaNN] at h)
-    rw [mstep_exec D i1A S.LA S.atA w' (fun _ _ => exec_ld_a_de _ _ _) rfl,
+    have en_S1 := mstep_exec D i1A S.LA S.atA w' (fun _ _ => exec_ld_a_de _ _ _) rfl
+    rw [en_S1,
       mstep_exec D i1B S.LB S.atB w' (fun _ _ => exec_ld_a_de _ _ _) rfl] at S1 ⊢
     obtain ⟨a1, b1, c1⟩ := ldADES_regs s
     obtain ⟨a1', _, _⟩ := ldADES_regs t
-    generalize ldADES s = s1 at S1 a1 b1 c1 ⊢
+    generalize ldADES s = s1 at S1 a1 b1 c1 en_S1 ⊢
     generalize ldADES t = t1 at S1 a1' ⊢
     simp only [Form.writesH, Form.writesL] at S1
     -- the operation on `A` with the byte at `(HL)`: the ROM's, the same in both
     have S2 := seg_aluM D hhi k hexec hfi i2A i2B S1 (by
       simp only; rw [a1, a1']; have := hr s1 t1 S1.LA S1.LB 0 (by omega); simpa using this)
-    rw [mstep_exec D i2A S1.LA S1.atA w' (fun _ _ => hexec _ _ _) (by rw [aluMS_eq]; rfl),
+    have en_S2 := mstep_exec D i2A S1.LA S1.atA w' (fun _ _ => hexec _ _ _) (by rw [aluMS_eq]; rfl)
+    rw [en_S2,
       mstep_exec D i2B S1.LB S1.atB w' (fun _ _ => hexec _ _ _) (by rw [aluMS_eq]; rfl)] at S2 ⊢
     obtain ⟨a2, b2, c2⟩ := aluMS_regs k s1
     obtain ⟨a2', _, _⟩ := aluMS_regs k t1
-    generalize aluMS k s1 = s2 at S2 a2 b2 c2 ⊢
+    generalize aluMS k s1 = s2 at S2 a2 b2 c2 en_S2 ⊢
     generalize aluMS k t1 = t2 at S2 a2' ⊢
     -- `ld (de),a`
     have S3 := seg_ord D hhi Form.stDEA (by intro h; cases h) i3A i3B (fun _ _ => ⟨rfl, rfl⟩)
       (by simp [Form.readsH]) (by simp [Form.readsL]) S2
       (by simp [Form.viaHL]) (fun _ => ⟨by rw [b2, b1]; exact d1, by rw [b2, b1]; omega⟩)
       (fun _ h => by simp [Form.viaNN] at h)
-    rw [mstep_exec D i3A S2.LA S2.atA w' (fun _ _ => exec_ld_de_a _ _ _) (by simp only [stDEAS, Cpu.wr, Cpu.tick]; split <;> rfl),
+    have en_S3 := mstep_exec D i3A S2.LA S2.atA w' (fun _ _ => exec_ld_de_a _ _ _) (by simp only [stDEAS, Cpu.wr, Cpu.tick]; split <;> rfl)
+    rw [en_S3,
       mstep_exec D i3B S2.LB S2.atB w' (fun _ _ => exec_ld_de_a _ _ _) (by simp only [stDEAS, Cpu.wr, Cpu.tick]; split <;> rfl)] at S3 ⊢
     obtain ⟨a3, b3, c3⟩ := stDEAS_regs s2
     obtain ⟨a3', _, _⟩ := stDEAS_regs t2
-    generalize stDEAS s2 = s3 at S3 a3 b3 c3 ⊢
+    generalize stDEAS s2 = s3 at S3 a3 b3 c3 en_S3 ⊢
     generalize stDEAS t2 = t3 at S3 a3' ⊢
     simp only [Form.writesH, Form.writesL] at S3
     -- `inc hl`
     have S4 := seg_inchl_free D hhi i4A i4B S3
-    rw [mstep_exec D i4A S3.LA S3.atA w' (fun _ _ => exec_inc_hl _ _ _) (by rw [incHLS_eq]; rfl),
+    have en_S4 := mstep_exec D i4A S3.LA S3.atA w' (fun _ _ => exec_inc_hl _ _ _) (by rw [incHLS_eq]; rfl)
+    rw [en_S4,
       mstep_exec D i4B S3.LB S3.atB w' (fun _ _ => exec_inc_hl _ _ _) (by rw [incHLS_eq]; rfl)] at S4 ⊢
     obtain ⟨a4, b4, c4⟩ := incHLS_regs s3
     obtain ⟨a4', _, _⟩ := incHLS_regs t3
-    generalize incHLS s3 = s4 at S4 a4 b4 c4 ⊢
+    generalize incHLS s3 = s4 at S4 a4 b4 c4 en_S4 ⊢
     generalize incHLS t3 = t4 at S4 a4' ⊢
     -- `inc de`
     have S5 := seg_ord D hhi Form.incDE (by intro h; cases h) i5A i5B (fun _ _ => ⟨rfl, rfl⟩)
       (by simp [Form.readsH]) (by simp [Form.readsL]) S4
       (by simp [Form.viaHL]) (by simp [Form.viaDE]) (fun _ h => by simp [Form.viaNN] at h)
-    rw [mstep_exec D i5A S4.LA S4.atA w' (fun _ _ => exec_inc_de _ _ _) rfl,
+    have en_S5 := mstep_exec D i5A S4.LA S4.atA w' (fun _ _ => exec_inc_de _ _ _) rfl
+    rw [en_S5,
       mstep_exec D i5B S4.LB S4.atB w' (fun _ _ => exec_inc_de _ _ _) rfl] at S5 ⊢
     obtain ⟨a5, b5, c5⟩ := incDES_regs s4
     obtain ⟨a5', _, _⟩ := incDES_regs t4
-    generalize incDES s4 = s5 at S5 a5 b5 c5 ⊢
+    generalize incDES s4 = s5 at S5 a5 b5 c5 en_S5 ⊢
     generalize incDES t4 = t5 at S5 a5' ⊢
     simp only [Form.writesH, Form.writesL] at S5
     -- `djnz`
@@ -358,7 +370,9 @@ theorem loop_rom_rounds (D : Dev) {A B : Code} {lo hi : Nat} (hhi : hi ≤ 65536
       have h0 : s5.b - 1 = 0 := by apply UInt8.toNat_inj.mp; rw [toNat_sub1_8 _ (by omega)]; simp [hb5]
       have hne : ¬ ((s5.b - 1 != 0) = true) := by rw [h0]; decide
       rw [if_neg hne] at S6
-      simpa only [Nat.mul_zero, mrun, Bool.not_false, Bool.and_self] using S6
+      refine ⟨by simpa only [Nat.mul_zero, mrun, Bool.not_false, Bool.and_self] using S6, ?_⟩
+      exact NZ.cons en_S1 (fun _ => S1.sp_ne hG) (NZ.cons en_S2 (fun _ => S2.sp_ne hG) (NZ.cons en_S3 (fun _ => S3.sp_ne hG)
+        (NZ.cons en_S4 (fun _ => S4.sp_ne hG) (NZ.cons en_S5 (fun _ => S5.sp_ne hG) (NZ.le1 _ _ (Nat.le_refl _))))))
     | succ n' =>
       have hne : (s5.b - 1 != 0) = true := by
         have h' : (s5.b - 1).toNat = n' + 1 := by rw [toNat_sub1_8 _ (by omega)]; omega
@@ -372,7 +386,7 @@ theorem loop_rom_rounds (D : Dev) {A B : Code} {lo hi : Nat} (hhi : hi ≤ 65536
         rw [d6h, a5, a4, toNat_add1 _ (by rw [a3, a2, a1]; omega), a3, a2, a1]
       have hB6 : (djnzed t5 p6' q6').hl.toNat = t.hl.toNat + 1 := by
         rw [d6h', a5', a4', toNat_add1 _ (by rw [a3', a2', a1']; omega), a3', a2', a1']
-      exact loop_rom_rounds D hhi k hexec hfi hLA hLB n' _ _ S6'
+      have R := loop_rom_rounds D hhi k hexec hfi hLA hLB hG n' _ _ S6'
         (by simp only; rw [d6b, toNat_sub1_8 _ (by omega)]; omega)
         (fun u v Lu Lv i' hi' => by
           simp only; rw [hA6, hB6]
@@ -383,6 +397,10 @@ theorem loop_rom_rounds (D : Dev) {A B : Code} {lo hi : Nat} (hhi : hi ≤ 65536
         (by simp only; rw [hA6]; omega) (by simp only; rw [hB6]; omega)
         (by simp only; rw [d6d, b5, toNat_add1 _ (by rw [b4, b3, b2, b1]; omega), b4, b3, b2, b1]; omega)
         (by simp only; rw [d6d, b5, toNat_add1 _ (by rw [b4, b3, b2, b1]; omega), b4, b3, b2, b1]; omega)
+      refine ⟨R.1, ?_⟩
+      have := NZ.cons en_S1 (fun _ => S1.sp_ne hG) (NZ.cons en_S2 (fun _ => S2.sp_ne hG) (NZ.cons en_S3 (fun _ => S3.sp_ne hG)
+        (NZ.cons en_S4 (fun _ => S4.sp_ne hG) (NZ.cons en_S5 (fun _ => S5.sp_ne hG) (NZ.cons e6 (fun _ => S6'.sp_ne hG) R.2)))))
+      rwa [show 1 + (1 + (1 + (1 + (1 + (1 + 6 * (n' + 1)))))) = 6 + 6 * (n' + 1) by omega] at this
 
 /-- info: 'Ember.Proof.PassSim.loop_rom_rounds' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in #print axioms loop_rom_rounds
@@ -482,7 +500,7 @@ theorem bytesR_head (D : Dev) {A B : Code} {lo hi : Nat} (hhi : hi ≤ 65536) (h
     {x y : Cpu × D.W} (S : Sync D A B lo hi G kA kB true true x y) (room : hi + 2 ≤ top x.1.sp) :
     Sync D A B lo hi (.ret (kA + 1) (kB + 1) (r + 3) :: G) (r + 7) (q + 7) true true (mrun D 3 x) (mrun D 3 y) ∧
       (mrun D 3 x).1.b.toNat = 4 ∧ (mrun D 3 x).1.hl = x.1.hl ∧ (mrun D 3 y).1.hl = y.1.hl ∧
-      (mrun D 3 x).1.de.toNat = acc ∧ (mrun D 3 x).1.sp = x.1.sp - 2 := by
+      (mrun D 3 x).1.de.toNat = acc ∧ (mrun D 3 x).1.sp = x.1.sp - 2 ∧ NZ D x 3 := by
   have l3A : A.items[r + 3]? = some (.label n32) := hLA.get 3 rfl
   have l3B : B.items[q + 3]? = some (.label n32) := hLB.get 3 rfl
   have i4A : A.items[r + 4]? = some (.ins (Form.ldBI (.num 4)).instr) := hLA.get 4 rfl
@@ -501,7 +519,7 @@ theorem bytesR_head (D : Dev) {A B : Code} {lo hi : Nat} (hhi : hi ≤ 65536) (h
   show Sync D A B lo hi _ (r + 7) (q + 7) true true (mstep D (mstep D (mstep D (sA, w')))) (mstep D (mstep D (mstep D (sB, w')))) ∧
     (mstep D (mstep D (mstep D (sA, w')))).1.b.toNat = 4 ∧ (mstep D (mstep D (mstep D (sA, w')))).1.hl = sA.hl ∧
     (mstep D (mstep D (mstep D (sB, w')))).1.hl = sB.hl ∧ (mstep D (mstep D (mstep D (sA, w')))).1.de.toNat = acc ∧
-    (mstep D (mstep D (mstep D (sA, w')))).1.sp = sA.sp - 2
+    (mstep D (mstep D (mstep D (sA, w')))).1.sp = sA.sp - 2 ∧ NZ D (sA, w') 3
   obtain ⟨T, _, _, _, _, _, eA1, _⟩ := call_mstep D hA l3A S.LA S.atA w'
   obtain ⟨T', _, _, _, _, _, eB1, _⟩ := call_mstep D hB l3B S.LB S.atB w'
   have S1 := (seg_call D hhi hA l3A hB l3B S hlo h1 room).skip l3A l3B
@@ -509,15 +527,16 @@ theorem bytesR_head (D : Dev) {A B : Code} {lo hi : Nat} (hhi : hi ≤ 65536) (h
   obtain ⟨hl1, _, _⟩ := called_regs sA (UInt16.ofNat T)
   obtain ⟨hl1', _, _⟩ := called_regs sB (UInt16.ofNat T')
   have sp1 := called_sp sA (UInt16.ofNat T)
-  generalize called sA (UInt16.ofNat T) = s1 at S1 hl1 sp1 ⊢
+  generalize called sA (UInt16.ofNat T) = s1 at S1 hl1 sp1 eA1 ⊢
   generalize called sB (UInt16.ofNat T') = t1 at S1 hl1' ⊢
   have S2 := (seg_ord D hhi (Form.ldBI (.num 4)) (by intro h; cases h) i4A i4B
     (imm_same _ _ rfl ⟨by decide, by decide⟩ (val_num 4)) (by simp [Form.readsH]) (by simp [Form.readsL]) S1
     (by simp [Form.viaHL]) (by simp [Form.viaDE]) (fun _ h => by simp [Form.viaNN] at h)).skip l5A l5B
-  rw [mstep_exec D i4A S1.LA S1.atA w' (s' := ldRN s1 0 (Instr.immB (A.a.env 0) ⟨.ld, [.b, .imm (.num 4)]⟩))
+  have en_S2 := mstep_exec D i4A S1.LA S1.atA w' (s' := ldRN s1 0 (Instr.immB (A.a.env 0) ⟨.ld, [.b, .imm (.num 4)]⟩))
       (fun pa inp => by
         show exec (A.a.env pa) ⟨.ld, [.b, .imm (.num 4)]⟩ s1 inp = _
-        rw [exec_ld_b_n]; rfl) rfl,
+        rw [exec_ld_b_n]; rfl) rfl
+  rw [en_S2,
     mstep_exec D i4B S1.LB S1.atB w' (s' := ldRN t1 0 (Instr.immB (B.a.env 0) ⟨.ld, [.b, .imm (.num 4)]⟩))
       (fun pb inp => by
         show exec (B.a.env pb) ⟨.ld, [.b, .imm (.num 4)]⟩ t1 inp = _
@@ -526,7 +545,7 @@ theorem bytesR_head (D : Dev) {A B : Code} {lo hi : Nat} (hhi : hi ≤ 65536) (h
   obtain ⟨_, hl2, _⟩ := ldRN_b s1 (Instr.immB (A.a.env 0) ⟨.ld, [.b, .imm (.num 4)]⟩)
   obtain ⟨_, hl2', _⟩ := ldRN_b t1 (Instr.immB (B.a.env 0) ⟨.ld, [.b, .imm (.num 4)]⟩)
   have sp2 : (ldRN s1 0 (Instr.immB (A.a.env 0) ⟨.ld, [.b, .imm (.num 4)]⟩)).sp = s1.sp := rfl
-  generalize ldRN s1 0 (Instr.immB (A.a.env 0) ⟨.ld, [.b, .imm (.num 4)]⟩) = s2 at S2 hb2 hl2 sp2 ⊢
+  generalize ldRN s1 0 (Instr.immB (A.a.env 0) ⟨.ld, [.b, .imm (.num 4)]⟩) = s2 at S2 hb2 hl2 sp2 en_S2 ⊢
   generalize ldRN t1 0 (Instr.immB (B.a.env 0) ⟨.ld, [.b, .imm (.num 4)]⟩) = t2 at S2 hl2' ⊢
   simp only [Form.writesH, Form.writesL] at S2
   have S3 := seg_ord D hhi (Form.ldDEI (.sym "rt_acc" 0)) (by intro h; cases h) i6A i6B
@@ -557,7 +576,9 @@ theorem bytesR_head (D : Dev) {A B : Code} {lo hi : Nat} (hhi : hi ≤ 65536) (h
   generalize Instr.immW (A.a.env 0) ⟨.ld, [.de, .imm (.sym "rt_acc" 0)]⟩ = nacc at S3 de3 hl3 hb3 hacc3 sp3 ⊢
   generalize Instr.immW (B.a.env 0) ⟨.ld, [.de, .imm (.sym "rt_acc" 0)]⟩ = nacc' at S3 hl3' ⊢
   refine ⟨S3, by simp only; rw [hb3]; exact hb2, by simp only; rw [hl3, hl2, hl1],
-    by simp only; rw [hl3', hl2', hl1'], by simp only; rw [de3, hacc3], by simp only; rw [sp3, sp2, sp1]⟩
+    by simp only; rw [hl3', hl2', hl1'], by simp only; rw [de3, hacc3], by simp only; rw [sp3, sp2, sp1], ?_⟩
+  exact NZ.cons eA1 (fun _ => S1.sp_ne (List.cons_ne_nil _ _)) (NZ.cons en_S2 (fun _ => S2.sp_ne (List.cons_ne_nil _ _))
+    (NZ.le1 _ _ (Nat.le_refl _)))
 
 /-- info: 'Ember.Proof.PassSim.bytesR_head' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in #print axioms bytesR_head
@@ -572,15 +593,18 @@ theorem loopR_ret (D : Dev) {A B : Code} {lo hi : Nat} (hhi : hi ≤ 65536) {G :
     (hb : x.1.b.toNat = 4) (hr : RomEq A B x.1.hl.toNat y.1.hl.toNat 4)
     (g1 : x.1.hl.toNat + 4 ≤ lo) (g2 : y.1.hl.toNat + 4 ≤ lo)
     (d1 : lo ≤ x.1.de.toNat ∧ x.1.de.toNat + 4 ≤ hi) :
-    Sync D A B lo hi G rA rB true true (mrun D 25 x) (mrun D 25 y) := by
-  have S7 := loop_rom_rounds D hhi k hexec hfi hLA.left hLB.left 3 x y S hb hr (by omega) (by omega) d1.1 (by omega)
+    Sync D A B lo hi G rA rB true true (mrun D 25 x) (mrun D 25 y) ∧ NZ D x 25 := by
+  have S7' := loop_rom_rounds D hhi k hexec hfi hLA.left hLB.left (List.cons_ne_nil _ _) 3 x y S hb hr (by omega)
+    (by omega) d1.1 (by omega)
+  have S7 := S7'.1
   have iA : A.items[L + 7]? = some (.ins ⟨.ret, (none : Option Arg).toList⟩) := by
     have := hLA.right; exact this.get 0 rfl
   have iB : B.items[M + 7]? = some (.ins ⟨.ret, (none : Option Arg).toList⟩) := by
     have := hLB.right; exact this.get 0 rfl
   have S8 := seg_ret D (cc := none) (fun _ h => by cases h) iA iB S7
   simp only [taken, if_true] at S8
-  rw [mrun_25, mrun_25]; exact S8
+  rw [mrun_25, mrun_25]
+  exact ⟨S8, NZ.pre (b := 1) S7'.2 rfl (fun _ _ => S7.sp_ne (List.cons_ne_nil _ _)) (NZ.le1 _ _ (Nat.le_refl _))⟩
 
 /-- **`ld hl,lit` then `call rt_add32`, `rt_sub32`, `rt_or32` in both machines**: the four bytes of each
 image's literal (`.db`, the same bytes in both) with the accumulator in the RAM; the relation at the
@@ -602,17 +626,21 @@ theorem blkR_bytes (D : Dev) {A B : Code} {lo hi : Nat} (hhi : hi ≤ 65536) (hl
     (hlB : B.items[dB]? = some (.label lit)) (hdB : B.items[dB + 1]? = some (.db vs))
     (hencA : ∀ ad, Item.encode (.db vs) (A.a.env ad) = .ok bs)
     (hencB : ∀ ad, Item.encode (.db vs) (B.a.env ad) = .ok bs) (hbs : bs.length = 4)
-    {x y : Cpu × D.W} (S : Sync D A B lo hi G kA kB th tl x y) (room : hi + 2 ≤ top x.1.sp) :
-    Sync D A B lo hi G (kA + 2) (kB + 2) true true (mrun D (29 + pre.length) x) (mrun D (29 + pre.length) y) := by
+    {x y : Cpu × D.W} (S : Sync D A B lo hi G kA kB th tl x y) (room : hi + 2 ≤ top x.1.sp) (hG : G ≠ []) :
+    Sync D A B lo hi G (kA + 2) (kB + 2) true true (mrun D (29 + pre.length) x) (mrun D (29 + pre.length) y) ∧
+      NZ D x (29 + pre.length) := by
   obtain ⟨S0, sp0, g0A, g0B, hR⟩ := ldhl_lit D hhi hA0 hB0 hlA hdA hlB hdB hencA hencB S
+  suffices h : Sync D A B lo hi G (kA + 2) (kB + 2) true true (mrun D (29 + pre.length) x)
+      (mrun D (29 + pre.length) y) ∧ NZ D (mstep D x) (28 + pre.length) from
+    ⟨h.1, by have := NZ.cons rfl (fun _ => S0.sp_ne hG) h.2; rwa [show 1 + (28 + pre.length) = 29 + pre.length by omega] at this⟩
   rw [hbs] at g0A g0B hR
   rw [show 29 + pre.length = 1 + (28 + pre.length) by omega, mrun_add D 1 _ x, mrun_add D 1 _ y]
   show Sync D A B lo hi G (kA + 1 + 1) (kB + 1 + 1) true true (mrun D (28 + pre.length) (mstep D x))
-    (mrun D (28 + pre.length) (mstep D y))
+    (mrun D (28 + pre.length) (mstep D y)) ∧ NZ D (mstep D x) (28 + pre.length)
   generalize mstep D x = x' at S0 sp0 g0A g0B hR
   generalize mstep D y = y' at S0 g0B hR
   rw [bytewise_split] at hLA hLB
-  obtain ⟨S3, hb3, hl3, hl3', de3, _⟩ := bytesR_head D hhi hlo h1 hA hB hLA hLB haccA haccB hacc.2 S0
+  obtain ⟨S3, hb3, hl3, hl3', de3, _, nz3⟩ := bytesR_head D hhi hlo h1 hA hB hLA hLB haccA haccB hacc.2 S0
     (by rw [sp0]; exact room)
   have tA := hLA.right
   have tB := hLB.right
@@ -624,7 +652,7 @@ theorem blkR_bytes (D : Dev) {A B : Code} {lo hi : Nat} (hhi : hi ≤ 65536) (hl
       (S3.skip lA lB) hb3 (by rw [hl3, hl3']; exact hR) (by rw [hl3]; exact g0A) (by rw [hl3']; exact g0B)
       (by rw [de3]; exact ⟨hacc.1, hacc.2⟩)
     rw [show 28 + ([] : List Item).length = 3 + 25 from rfl, mrun_add, mrun_add]
-    exact R
+    exact ⟨R.1, NZ.pre nz3 rfl (fun _ _ => S3.sp_ne (List.cons_ne_nil _ _)) R.2⟩
   · have iA : A.items[r + 7]? = some (.ins Form.orA.instr) := tA.get 0 rfl
     have iB : B.items[q + 7]? = some (.ins Form.orA.instr) := tB.get 0 rfl
     have S4 := seg_ord D hhi Form.orA (by intro h; cases h) iA iB (fun _ _ => ⟨rfl, rfl⟩)
@@ -650,7 +678,8 @@ theorem blkR_bytes (D : Dev) {A B : Code} {lo hi : Nat} (hhi : hi ≤ 65536) (hl
       (by rw [e4']; simp only; rw [hl4', hl3']; exact g0B)
       (by rw [e4]; simp only; rw [de4, de3]; exact ⟨hacc.1, hacc.2⟩)
     rw [show 28 + [Item.ins Form.orA.instr].length = 3 + (1 + 25) from rfl, mrun_add, mrun_add, mrun_add, mrun_add]
-    exact R
+    exact ⟨R.1, NZ.pre nz3 rfl (fun _ _ => S3.sp_ne (List.cons_ne_nil _ _))
+      (NZ.cons rfl (fun _ => S4.sp_ne (List.cons_ne_nil _ _)) R.2)⟩
 
 /-- info: 'Ember.Proof.PassSim.blkR_bytes' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in #print axioms blkR_bytes
@@ -661,11 +690,12 @@ set_option maxHeartbeats 8000000 in
 /-- **The loop of `rt_cmp32` reading the ROM, all its rounds**, in both machines, `H` and `L` free: the
 bytes at each machine's `HL` the same (`RomEq`), room on the stack for `AF`. -/
 theorem loopR_cmp_rounds (D : Dev) {A B : Code} {lo hi : Nat} (hhi : hi ≤ 65536) (hlo : lo ≤ hi) (h1 : 1 ≤ hi)
-    {G : List Frame} {j m : Nat} (hLA : Has A j cmpLoop) (hLB : Has B m cmpLoop) :
+    {G : List Frame} {j m : Nat} (hLA : Has A j cmpLoop) (hLB : Has B m cmpLoop) (hG : G ≠ []) :
     ∀ (n : Nat) (x y : Cpu × D.W), Sync D A B lo hi G (j + 1) (m + 1) true true x y → x.1.b.toNat = n + 1 →
       RomEq A B x.1.hl.toNat y.1.hl.toNat (n + 1) → x.1.hl.toNat + n + 1 ≤ lo → y.1.hl.toNat + n + 1 ≤ lo →
       lo ≤ x.1.de.toNat → x.1.de.toNat + n + 1 ≤ hi → hi + 2 ≤ top x.1.sp →
-      Sync D A B lo hi G (j + 10) (m + 10) true true (mrun D (9 * (n + 1)) x) (mrun D (9 * (n + 1)) y)
+      Sync D A B lo hi G (j + 10) (m + 10) true true (mrun D (9 * (n + 1)) x) (mrun D (9 * (n + 1)) y) ∧
+        NZ D x (9 * (n + 1))
   | n, (s, w), (t, w'), S, hb, hr, h1', g1, d1, d2, room => by
     have l0A : A.items[j]? = some (.label "rt_cmpw_l") := hLA.get 0 rfl
     have l0B : B.items[m]? = some (.label "rt_cmpw_l") := hLB.get 0 rfl
@@ -695,23 +725,25 @@ theorem loopR_cmp_rounds (D : Dev) {A B : Code} {lo hi : Nat} (hhi : hi ≤ 6553
     have S1 := seg_ord D hhi Form.ldADE (by intro h; cases h) i1A i1B (fun _ _ => ⟨rfl, rfl⟩)
       (by simp [Form.readsH]) (by simp [Form.readsL]) S
       (by simp [Form.viaHL]) (fun _ => by simp only; exact ⟨d1, by omega⟩) (fun _ h => by simp [Form.viaNN] at h)
-    rw [mstep_exec D i1A S.LA S.atA w' (fun _ _ => exec_ld_a_de _ _ _) rfl,
+    have en_S1 := mstep_exec D i1A S.LA S.atA w' (fun _ _ => exec_ld_a_de _ _ _) rfl
+    rw [en_S1,
       mstep_exec D i1B S.LB S.atB w' (fun _ _ => exec_ld_a_de _ _ _) rfl] at S1 ⊢
     obtain ⟨a1, b1, c1⟩ := ldADES_regs s
     obtain ⟨a1', _, _⟩ := ldADES_regs t
     have sp1 : (ldADES s).sp = s.sp := rfl
-    generalize ldADES s = s1 at S1 a1 b1 c1 sp1 ⊢
+    generalize ldADES s = s1 at S1 a1 b1 c1 sp1 en_S1 ⊢
     generalize ldADES t = t1 at S1 a1' ⊢
     simp only [Form.writesH, Form.writesL] at S1
     -- `sbc a,(hl)`: the ROM's byte, the same in both
     have S2 := seg_aluM D hhi 3 exec_sbc_a_m rfl i2A i2B S1 (by
       simp only; rw [a1, a1']; have := hr s1 t1 S1.LA S1.LB 0 (by omega); simpa using this)
-    rw [mstep_exec D i2A S1.LA S1.atA w' (fun _ _ => exec_sbc_a_m _ _ _) (by rw [aluMS_eq]; rfl),
+    have en_S2 := mstep_exec D i2A S1.LA S1.atA w' (fun _ _ => exec_sbc_a_m _ _ _) (by rw [aluMS_eq]; rfl)
+    rw [en_S2,
       mstep_exec D i2B S1.LB S1.atB w' (fun _ _ => exec_sbc_a_m _ _ _) (by rw [aluMS_eq]; rfl)] at S2 ⊢
     obtain ⟨a2, b2, c2⟩ := aluMS_regs 3 s1
     obtain ⟨a2', _, _⟩ := aluMS_regs 3 t1
     have sp2 : (aluMS 3 s1).sp = s1.sp := by rw [aluMS_eq]; rfl
-    generalize aluMS 3 s1 = s2 at S2 a2 b2 c2 sp2 ⊢
+    generalize aluMS 3 s1 = s2 at S2 a2 b2 c2 sp2 en_S2 ⊢
     generalize aluMS 3 t1 = t2 at S2 a2' ⊢
     -- `push af`
     have S3 := seg_push_af D i3A i3B S2 hlo h1 (by simp only; rw [sp2, sp1]; exact room)
@@ -721,28 +753,30 @@ theorem loopR_cmp_rounds (D : Dev) {A B : Code} {lo hi : Nat} (hhi : hi ≤ 6553
     obtain ⟨a3, b3, c3⟩ := pushedAF_regs s2
     obtain ⟨a3', _, _⟩ := pushedAF_regs t2
     have sp3 : (pushedAF s2).sp = s2.sp - 2 := pushedAF_sp s2
-    generalize pushedAF s2 = s3 at S3 a3 b3 c3 sp3 ⊢
+    generalize pushedAF s2 = s3 at S3 a3 b3 c3 sp3 e3 ⊢
     generalize pushedAF t2 = t3 at S3 a3' ⊢
     -- `or c`
     have S4 := seg_ord D hhi Form.orC (by intro h; cases h) i4A i4B (fun _ _ => ⟨rfl, rfl⟩)
       (by simp [Form.readsH]) (by simp [Form.readsL]) S3
       (by simp [Form.viaHL]) (by simp [Form.viaDE]) (fun _ h => by simp [Form.viaNN] at h)
-    rw [mstep_exec D i4A S3.LA S3.atA w' (s' := orCS s3) (fun _ _ => rfl) (by simp only [orCS, alu_struct]; rfl),
+    have en_S4 := mstep_exec D i4A S3.LA S3.atA w' (s' := orCS s3) (fun _ _ => rfl) (by simp only [orCS, alu_struct]; rfl)
+    rw [en_S4,
       mstep_exec D i4B S3.LB S3.atB w' (s' := orCS t3) (fun _ _ => rfl) (by simp only [orCS, alu_struct]; rfl)] at S4 ⊢
     obtain ⟨a4, b4, c4, sp4⟩ := orCS_regs s3
     obtain ⟨a4', _, _, _⟩ := orCS_regs t3
-    generalize orCS s3 = s4 at S4 a4 b4 c4 sp4 ⊢
+    generalize orCS s3 = s4 at S4 a4 b4 c4 sp4 en_S4 ⊢
     generalize orCS t3 = t4 at S4 a4' ⊢
     simp only [Form.writesH, Form.writesL] at S4
     -- `ld c,a`
     have S5 := seg_ord D hhi Form.ldCA (by intro h; cases h) i5A i5B (fun _ _ => ⟨rfl, rfl⟩)
       (by simp [Form.readsH]) (by simp [Form.readsL]) S4
       (by simp [Form.viaHL]) (by simp [Form.viaDE]) (fun _ h => by simp [Form.viaNN] at h)
-    rw [mstep_exec D i5A S4.LA S4.atA w' (s' := ldCAS s4) (fun _ _ => rfl) rfl,
+    have en_S5 := mstep_exec D i5A S4.LA S4.atA w' (s' := ldCAS s4) (fun _ _ => rfl) rfl
+    rw [en_S5,
       mstep_exec D i5B S4.LB S4.atB w' (s' := ldCAS t4) (fun _ _ => rfl) rfl] at S5 ⊢
     obtain ⟨a5, b5, c5, sp5⟩ := ldCAS_regs s4
     obtain ⟨a5', _, _, _⟩ := ldCAS_regs t4
-    generalize ldCAS s4 = s5 at S5 a5 b5 c5 sp5 ⊢
+    generalize ldCAS s4 = s5 at S5 a5 b5 c5 sp5 en_S5 ⊢
     generalize ldCAS t4 = t5 at S5 a5' ⊢
     simp only [Form.writesH, Form.writesL] at S5
     -- `pop af`
@@ -752,28 +786,30 @@ theorem loopR_cmp_rounds (D : Dev) {A B : Code} {lo hi : Nat} (hhi : hi ≤ 6553
     rw [e6, e6'] at S6 ⊢
     obtain ⟨a6, b6, c6, sp6⟩ := poppedAF_regs s5
     obtain ⟨a6', _, _, _⟩ := poppedAF_regs t5
-    generalize poppedAF s5 = s6 at S6 a6 b6 c6 sp6 ⊢
+    generalize poppedAF s5 = s6 at S6 a6 b6 c6 sp6 e6 ⊢
     generalize poppedAF t5 = t6 at S6 a6' ⊢
     have hsp6 : s6.sp = s.sp := by rw [sp6, sp5, sp4, sp3, sp2, sp1]; simp
     -- `inc hl`
     have S7 := seg_inchl_free D hhi i7A i7B S6
-    rw [mstep_exec D i7A S6.LA S6.atA w' (fun _ _ => exec_inc_hl _ _ _) (by rw [incHLS_eq]; rfl),
+    have en_S7 := mstep_exec D i7A S6.LA S6.atA w' (fun _ _ => exec_inc_hl _ _ _) (by rw [incHLS_eq]; rfl)
+    rw [en_S7,
       mstep_exec D i7B S6.LB S6.atB w' (fun _ _ => exec_inc_hl _ _ _) (by rw [incHLS_eq]; rfl)] at S7 ⊢
     obtain ⟨a7, b7, c7⟩ := incHLS_regs s6
     obtain ⟨a7', _, _⟩ := incHLS_regs t6
     have sp7 : (incHLS s6).sp = s6.sp := by rw [incHLS_eq]; rfl
-    generalize incHLS s6 = s7 at S7 a7 b7 c7 sp7 ⊢
+    generalize incHLS s6 = s7 at S7 a7 b7 c7 sp7 en_S7 ⊢
     generalize incHLS t6 = t7 at S7 a7' ⊢
     -- `inc de`
     have S8 := seg_ord D hhi Form.incDE (by intro h; cases h) i8A i8B (fun _ _ => ⟨rfl, rfl⟩)
       (by simp [Form.readsH]) (by simp [Form.readsL]) S7
       (by simp [Form.viaHL]) (by simp [Form.viaDE]) (fun _ h => by simp [Form.viaNN] at h)
-    rw [mstep_exec D i8A S7.LA S7.atA w' (fun _ _ => exec_inc_de _ _ _) rfl,
+    have en_S8 := mstep_exec D i8A S7.LA S7.atA w' (fun _ _ => exec_inc_de _ _ _) rfl
+    rw [en_S8,
       mstep_exec D i8B S7.LB S7.atB w' (fun _ _ => exec_inc_de _ _ _) rfl] at S8 ⊢
     obtain ⟨a8, b8, c8⟩ := incDES_regs s7
     obtain ⟨a8', _, _⟩ := incDES_regs t7
     have sp8 : (incDES s7).sp = s7.sp := rfl
-    generalize incDES s7 = s8 at S8 a8 b8 c8 sp8 ⊢
+    generalize incDES s7 = s8 at S8 a8 b8 c8 sp8 en_S8 ⊢
     generalize incDES t7 = t8 at S8 a8' ⊢
     simp only [Form.writesH, Form.writesL] at S8
     -- `djnz`
@@ -788,7 +824,11 @@ theorem loopR_cmp_rounds (D : Dev) {A B : Code} {lo hi : Nat} (hhi : hi ≤ 6553
       have h0 : s8.b - 1 = 0 := by apply UInt8.toNat_inj.mp; rw [toNat_sub1_8 _ (by omega)]; simp [hb8]
       have hne : ¬ ((s8.b - 1 != 0) = true) := by rw [h0]; decide
       rw [if_neg hne] at S9
-      simpa only [Nat.mul_zero, mrun, Bool.not_false, Bool.and_self] using S9
+      refine ⟨by simpa only [Nat.mul_zero, mrun, Bool.not_false, Bool.and_self] using S9, ?_⟩
+      exact NZ.cons en_S1 (fun _ => S1.sp_ne hG) (NZ.cons en_S2 (fun _ => S2.sp_ne hG)
+        (NZ.cons e3 (fun _ => S3.sp_ne (List.cons_ne_nil _ _)) (NZ.cons en_S4 (fun _ => S4.sp_ne (List.cons_ne_nil _ _))
+          (NZ.cons en_S5 (fun _ => S5.sp_ne (List.cons_ne_nil _ _)) (NZ.cons e6 (fun _ => S6.sp_ne hG)
+            (NZ.cons en_S7 (fun _ => S7.sp_ne hG) (NZ.cons en_S8 (fun _ => S8.sp_ne hG) (NZ.le1 _ _ (Nat.le_refl _)))))))))
     | succ n' =>
       have hne : (s8.b - 1 != 0) = true := by
         have h' : (s8.b - 1).toNat = n' + 1 := by rw [toNat_sub1_8 _ (by omega)]; omega
@@ -804,7 +844,7 @@ theorem loopR_cmp_rounds (D : Dev) {A B : Code} {lo hi : Nat} (hhi : hi ≤ 6553
         rw [d9h', a8', a7', toNat_add1 _ (by rw [a6', a5', a4', a3', a2', a1']; omega), a6', a5', a4', a3', a2', a1']
       have de8 : s8.de.toNat = s.de.toNat + 1 := by
         rw [b8, toNat_add1 _ (by rw [b7, b6, b5, b4, b3, b2, b1]; omega), b7, b6, b5, b4, b3, b2, b1]
-      exact loopR_cmp_rounds D hhi hlo h1 hLA hLB n' _ _ S9'
+      have R := loopR_cmp_rounds D hhi hlo h1 hLA hLB hG n' _ _ S9'
         (by simp only; rw [d9b, toNat_sub1_8 _ (by omega)]; omega)
         (fun u v Lu Lv i' hi' => by
           simp only; rw [hl8, hl8']
@@ -815,6 +855,12 @@ theorem loopR_cmp_rounds (D : Dev) {A B : Code} {lo hi : Nat} (hhi : hi ≤ 6553
         (by simp only; rw [hl8]; omega) (by simp only; rw [hl8']; omega)
         (by simp only; rw [d9d, de8]; omega) (by simp only; rw [d9d, de8]; omega)
         (by simp only; rw [show (djnzed s8 p9 q9).sp = s8.sp from rfl, sp8, sp7, hsp6]; exact room)
+      refine ⟨R.1, ?_⟩
+      have := NZ.cons en_S1 (fun _ => S1.sp_ne hG) (NZ.cons en_S2 (fun _ => S2.sp_ne hG)
+        (NZ.cons e3 (fun _ => S3.sp_ne (List.cons_ne_nil _ _)) (NZ.cons en_S4 (fun _ => S4.sp_ne (List.cons_ne_nil _ _))
+          (NZ.cons en_S5 (fun _ => S5.sp_ne (List.cons_ne_nil _ _)) (NZ.cons e6 (fun _ => S6.sp_ne hG)
+            (NZ.cons en_S7 (fun _ => S7.sp_ne hG) (NZ.cons en_S8 (fun _ => S8.sp_ne hG) (NZ.cons e9 (fun _ => S9'.sp_ne hG) R.2))))))))
+      rwa [show 1 + (1 + (1 + (1 + (1 + (1 + (1 + (1 + (1 + 9 * (n' + 1))))))))) = 9 + 9 * (n' + 1) by omega] at this
 
 /-- info: 'Ember.Proof.PassSim.loopR_cmp_rounds' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in #print axioms loopR_cmp_rounds
@@ -837,17 +883,20 @@ theorem blkR_cmp32 (D : Dev) {A B : Code} {lo hi : Nat} (hhi : hi ≤ 65536) (hl
     (hlB : B.items[dB]? = some (.label lit)) (hdB : B.items[dB + 1]? = some (.db vs))
     (hencA : ∀ ad, Item.encode (.db vs) (A.a.env ad) = .ok bs)
     (hencB : ∀ ad, Item.encode (.db vs) (B.a.env ad) = .ok bs) (hbs : bs.length = 4)
-    {x y : Cpu × D.W} (S : Sync D A B lo hi G kA kB th tl x y) (room : hi + 4 ≤ top x.1.sp) :
-    Sync D A B lo hi G (kA + 2) (kB + 2) true true (mrun D 45 x) (mrun D 45 y) := by
+    {x y : Cpu × D.W} (S : Sync D A B lo hi G kA kB th tl x y) (room : hi + 4 ≤ top x.1.sp) (hG : G ≠ []) :
+    Sync D A B lo hi G (kA + 2) (kB + 2) true true (mrun D 45 x) (mrun D 45 y) ∧ NZ D x 45 := by
   obtain ⟨S0, sp0, g0A, g0B, hR⟩ := ldhl_lit D hhi hA0 hB0 hlA hdA hlB hdB hencA hencB S
+  suffices h : Sync D A B lo hi G (kA + 2) (kB + 2) true true (mrun D 45 x) (mrun D 45 y) ∧ NZ D (mstep D x) 44 from
+    ⟨h.1, NZ.cons rfl (fun _ => S0.sp_ne hG) h.2⟩
   rw [hbs] at g0A g0B hR
   rw [show 45 = 1 + 44 from rfl, mrun_add D 1 _ x, mrun_add D 1 _ y]
-  show Sync D A B lo hi G (kA + 1 + 1) (kB + 1 + 1) true true (mrun D 44 (mstep D x)) (mrun D 44 (mstep D y))
+  show Sync D A B lo hi G (kA + 1 + 1) (kB + 1 + 1) true true (mrun D 44 (mstep D x)) (mrun D 44 (mstep D y)) ∧
+    NZ D (mstep D x) 44
   have room0 : hi + 4 ≤ top (mstep D x).1.sp := by rw [sp0]; exact room
   generalize mstep D x = x' at S0 sp0 g0A g0B hR room0
   generalize mstep D y = y' at S0 g0B hR
   rw [cmp_split] at hLA hLB
-  obtain ⟨S3, hb3, hl3, hl3', de3, sp3⟩ := bytesR_head D hhi hlo h1 hA hB hLA hLB haccA haccB hacc.2 S0 (by omega)
+  obtain ⟨S3, hb3, hl3, hl3', de3, sp3, nz3⟩ := bytesR_head D hhi hlo h1 hA hB hLA hLB haccA haccB hacc.2 S0 (by omega)
   have tA := hLA.right
   have tB := hLB.right
   simp only [List.length_cons, List.length_nil] at tA tB
@@ -861,6 +910,9 @@ theorem blkR_cmp32 (D : Dev) {A B : Code} {lo hi : Nat} (hhi : hi ≤ 65536) (hl
     have := tB.right; simpa using this
   have l9A : A.items[r + 7 + 2]? = some (.label "rt_cmpw_l") := lpA.get 0 rfl
   have l9B : B.items[q + 7 + 2]? = some (.label "rt_cmpw_l") := lpB.get 0 rfl
+  suffices h : Sync D A B lo hi G (kA + 1 + 1) (kB + 1 + 1) true true (mrun D 44 x') (mrun D 44 y') ∧
+      NZ D (mrun D 3 x') 41 from
+    ⟨h.1, NZ.pre (b := 41) nz3 rfl (fun _ _ => S3.sp_ne (List.cons_ne_nil _ _)) h.2⟩
   rw [mrun_44, mrun_44]
   have rt : hi + 2 ≤ top (mrun D 3 x').1.sp := by
     rw [sp3]; have := top_sub2 x'.1.sp (by omega); omega
@@ -876,8 +928,9 @@ theorem blkR_cmp32 (D : Dev) {A B : Code} {lo hi : Nat} (hhi : hi ≤ 65536) (hl
     (imm_same _ _ rfl ⟨by decide, by decide⟩ (val_num 0)) (by simp [Form.readsH]) (by simp [Form.readsL]) S3
     (by simp [Form.viaHL]) (by simp [Form.viaDE]) (fun _ h => by simp [Form.viaNN] at h)
   simp only [Form.writesH, Form.writesL] at S7
-  rw [mstep_exec D i7A S3.LA S3.atA w' (s' := ldRN s3 1 (Instr.immB (A.a.env 0) ⟨.ld, [.c, .imm (.num 0)]⟩))
-      (fun _ _ => rfl) rfl,
+  have en_S7 := mstep_exec D i7A S3.LA S3.atA w' (s' := ldRN s3 1 (Instr.immB (A.a.env 0) ⟨.ld, [.c, .imm (.num 0)]⟩))
+      (fun _ _ => rfl) rfl
+  rw [en_S7,
     mstep_exec D i7B S3.LB S3.atB w' (s' := ldRN t3 1 (Instr.immB (B.a.env 0) ⟨.ld, [.c, .imm (.num 0)]⟩))
       (fun _ _ => rfl) rfl] at S7 ⊢
   have r7 : (ldRN s3 1 (Instr.immB (A.a.env 0) ⟨.ld, [.c, .imm (.num 0)]⟩)).b = s3.b ∧
@@ -885,27 +938,29 @@ theorem blkR_cmp32 (D : Dev) {A B : Code} {lo hi : Nat} (hhi : hi ≤ 65536) (hl
       (ldRN s3 1 (Instr.immB (A.a.env 0) ⟨.ld, [.c, .imm (.num 0)]⟩)).de = s3.de ∧
       (ldRN s3 1 (Instr.immB (A.a.env 0) ⟨.ld, [.c, .imm (.num 0)]⟩)).sp = s3.sp := ⟨rfl, rfl, rfl, rfl⟩
   have r7' : (ldRN t3 1 (Instr.immB (B.a.env 0) ⟨.ld, [.c, .imm (.num 0)]⟩)).hl = t3.hl := rfl
-  generalize ldRN s3 1 (Instr.immB (A.a.env 0) ⟨.ld, [.c, .imm (.num 0)]⟩) = s7 at S7 r7 ⊢
+  generalize ldRN s3 1 (Instr.immB (A.a.env 0) ⟨.ld, [.c, .imm (.num 0)]⟩) = s7 at S7 r7 en_S7 ⊢
   generalize ldRN t3 1 (Instr.immB (B.a.env 0) ⟨.ld, [.c, .imm (.num 0)]⟩) = t7 at S7 r7' ⊢
   -- `or a`
   have S8 := seg_ord D hhi Form.orA (by intro h; cases h) i8A i8B (fun _ _ => ⟨rfl, rfl⟩)
     (by simp [Form.readsH]) (by simp [Form.readsL]) S7
     (by simp [Form.viaHL]) (by simp [Form.viaDE]) (fun _ h => by simp [Form.viaNN] at h)
   simp only [Form.writesH, Form.writesL] at S8
-  rw [mstep_exec D i8A S7.LA S7.atA w' (s' := orAS s7) (fun _ _ => rfl) (by simp only [orAS, alu_struct]; rfl),
+  have en_S8 := mstep_exec D i8A S7.LA S7.atA w' (s' := orAS s7) (fun _ _ => rfl) (by simp only [orAS, alu_struct]; rfl)
+  rw [en_S8,
     mstep_exec D i8B S7.LB S7.atB w' (s' := orAS t7) (fun _ _ => rfl) (by simp only [orAS, alu_struct]; rfl)] at S8 ⊢
   obtain ⟨o1, o2, o3⟩ := orAS_regs s7
   obtain ⟨o1', _, _⟩ := orAS_regs t7
   have o4 : (orAS s7).sp = s7.sp := by simp only [orAS, alu_struct]; rfl
-  generalize orAS s7 = s8 at S8 o1 o2 o3 o4 ⊢
+  generalize orAS s7 = s8 at S8 o1 o2 o3 o4 en_S8 ⊢
   generalize orAS t7 = t8 at S8 o1' ⊢
   -- the loop
-  have S17 := loopR_cmp_rounds D hhi hlo h1 lpA.left lpB.left 3 _ _ (S8.skip l9A l9B)
+  have S17' := loopR_cmp_rounds D hhi hlo h1 lpA.left lpB.left (List.cons_ne_nil _ _) 3 _ _ (S8.skip l9A l9B)
     (by simp only; rw [o3, r7.1]; exact hb3)
     (by simp only; rw [o1, r7.2.1, hl3, o1', r7', hl3']; exact hR)
     (by simp only; rw [o1, r7.2.1, hl3]; omega) (by simp only; rw [o1', r7', hl3']; omega)
     (by simp only; rw [o2, r7.2.2.1, de3]; exact hacc.1)
     (by simp only; rw [o2, r7.2.2.1, de3]; omega) (by simp only; rw [o4, r7.2.2.2]; exact rt)
+  have S17 := S17'.1
   have tl := lpA.right
   have tlB := lpB.right
   have i19A : A.items[r + 7 + 2 + 10]? = some (.ins Form.incC.instr) := tl.get 0 rfl
@@ -924,7 +979,10 @@ theorem blkR_cmp32 (D : Dev) {A B : Code} {lo hi : Nat} (hhi : hi ≤ 65536) (hl
   simp only [Form.writesH, Form.writesL] at S20
   have S21 := seg_ret D (cc := none) (fun _ h => by cases h) i21A i21B S20
   simp only [taken, if_true, Bool.not_false, Bool.and_self] at S21
-  exact S21
+  refine ⟨S21, ?_⟩
+  exact NZ.cons en_S7 (fun _ => S7.sp_ne (List.cons_ne_nil _ _)) (NZ.cons en_S8 (fun _ => S8.sp_ne (List.cons_ne_nil _ _))
+    (NZ.pre S17'.2 rfl (fun _ _ => S17.sp_ne (List.cons_ne_nil _ _)) (NZ.cons rfl (fun _ => S19.sp_ne (List.cons_ne_nil _ _))
+      (NZ.cons rfl (fun _ => S20.sp_ne (List.cons_ne_nil _ _)) (NZ.le1 _ _ (Nat.le_refl _))))))
 
 /-- info: 'Ember.Proof.PassSim.blkR_cmp32' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in #print axioms blkR_cmp32
@@ -951,15 +1009,19 @@ theorem blkR_copy (D : Dev) {A B : Code} {lo hi : Nat} (hhi : hi ≤ 65536)
     (hlB : B.items[dB]? = some (.label lit)) (hdB : B.items[dB + 1]? = some (.db vs))
     (hencA : ∀ ad, Item.encode (.db vs) (A.a.env ad) = .ok bs)
     (hencB : ∀ ad, Item.encode (.db vs) (B.a.env ad) = .ok bs) (hbs : bs.length = n + 1)
-    {x y : Cpu × D.W} (S : Sync D A B lo hi G kA kB th tl x y) :
-    Sync D A B lo hi G (kA + 4) (kB + 4) true true (mrun D (n + 4) x) (mrun D (n + 4) y) := by
+    {x y : Cpu × D.W} (S : Sync D A B lo hi G kA kB th tl x y) (hG : G ≠ []) :
+    Sync D A B lo hi G (kA + 4) (kB + 4) true true (mrun D (n + 4) x) (mrun D (n + 4) y) ∧ NZ D x (n + 4) := by
   obtain ⟨S0, _, g0A, g0B, hR⟩ := ldhl_lit D hhi hA0 hB0 hlA hdA hlB hdB hencA hencB S
+  suffices h : Sync D A B lo hi G (kA + 4) (kB + 4) true true (mrun D (n + 4) x) (mrun D (n + 4) y) ∧
+      NZ D (mstep D x) (1 + (1 + (n + 1))) from
+    ⟨h.1, by have := NZ.cons rfl (fun _ => S0.sp_ne hG) h.2; rwa [show 1 + (1 + (1 + (n + 1))) = n + 4 by omega] at this⟩
   rw [hbs] at g0A g0B hR
   rw [show n + 4 = 1 + (1 + (1 + (n + 1))) by omega, mrun_add D 1 _ x, mrun_add D 1 _ y,
     mrun_add D 1 _ (mrun D 1 x), mrun_add D 1 _ (mrun D 1 y),
     mrun_add D 1 _ (mrun D 1 (mrun D 1 x)), mrun_add D 1 _ (mrun D 1 (mrun D 1 y))]
   show Sync D A B lo hi G (kA + 3 + 1) (kB + 3 + 1) true true
-    (mrun D (n + 1) (mstep D (mstep D (mstep D x)))) (mrun D (n + 1) (mstep D (mstep D (mstep D y))))
+    (mrun D (n + 1) (mstep D (mstep D (mstep D x)))) (mrun D (n + 1) (mstep D (mstep D (mstep D y)))) ∧
+    NZ D (mstep D x) (1 + (1 + (n + 1)))
   generalize mstep D x = x' at S0 g0A g0B hR
   generalize mstep D y = y' at S0 g0B hR
   obtain ⟨s0, w⟩ := x'
@@ -992,9 +1054,9 @@ theorem blkR_copy (D : Dev) {A B : Code} {lo hi : Nat} (hhi : hi ≤ 65536)
   obtain ⟨de1, hl1, _⟩ := ldRP_de s0 (Instr.immW (A.a.env 0) ⟨.ld, [.de, .imm (.sym g 0)]⟩)
   obtain ⟨_, hl1', _⟩ := ldRP_de t0 (Instr.immW (B.a.env 0) ⟨.ld, [.de, .imm (.sym g 0)]⟩)
   simp only [Form.writesH, Form.writesL] at S1
-  generalize Instr.immW (A.a.env 0) ⟨.ld, [.de, .imm (.sym g 0)]⟩ = nd at S1 de1 hl1 hd1 ⊢
+  generalize Instr.immW (A.a.env 0) ⟨.ld, [.de, .imm (.sym g 0)]⟩ = nd at S1 de1 hl1 hd1 eA1 ⊢
   generalize Instr.immW (B.a.env 0) ⟨.ld, [.de, .imm (.sym g 0)]⟩ = nd' at S1 hl1' ⊢
-  generalize ldRP s0 1 nd = s1 at S1 de1 hl1 ⊢
+  generalize ldRP s0 1 nd = s1 at S1 de1 hl1 eA1 ⊢
   generalize ldRP t0 1 nd' = t1 at S1 hl1' ⊢
   -- `ld bc,n+1`
   have S2 := seg_ord D hhi (Form.ldBCI (.num (n + 1 : Nat))) (by intro h; cases h) hA2 hB2
@@ -1014,20 +1076,21 @@ theorem blkR_copy (D : Dev) {A B : Code} {lo hi : Nat} (hhi : hi ≤ 65536)
   obtain ⟨bc2, hl2, de2⟩ := ldRP_bc s1 (Instr.immW (A.a.env 0) ⟨.ld, [.bc, .imm (.num (n + 1 : Nat))]⟩)
   obtain ⟨_, hl2', _⟩ := ldRP_bc t1 (Instr.immW (B.a.env 0) ⟨.ld, [.bc, .imm (.num (n + 1 : Nat))]⟩)
   simp only [Form.writesH, Form.writesL] at S2
-  generalize Instr.immW (A.a.env 0) ⟨.ld, [.bc, .imm (.num (n + 1 : Nat))]⟩ = nc at S2 bc2 hl2 de2 hc2 ⊢
+  generalize Instr.immW (A.a.env 0) ⟨.ld, [.bc, .imm (.num (n + 1 : Nat))]⟩ = nc at S2 bc2 hl2 de2 hc2 eA2 ⊢
   generalize Instr.immW (B.a.env 0) ⟨.ld, [.bc, .imm (.num (n + 1 : Nat))]⟩ = nc' at S2 hl2' ⊢
-  generalize ldRP s1 0 nc = s2 at S2 bc2 hl2 de2 ⊢
+  generalize ldRP s1 0 nc = s2 at S2 bc2 hl2 de2 eA2 ⊢
   generalize ldRP t1 0 nc' = t2 at S2 hl2' ⊢
   -- `ldir`, all its rounds
   have hxA : s2.hl.toNat = s0.hl.toNat := by rw [hl2, hl1]
   have hxB : t2.hl.toNat = t0.hl.toNat := by rw [hl2', hl1']
-  have S3 := ldir_rom_rounds D hhi hA3 hB3 n _ _ S2 (by simp only; rw [bc2, hc2])
+  have S3 := ldir_rom_rounds D hhi hA3 hB3 hG n _ _ S2 (by simp only; rw [bc2, hc2])
     (by simp only; rw [hxA]; omega) (by simp only; rw [hxB]; omega)
     (fun i hi' => by
       simp only; rw [hxA, hxB]
       exact hR s2 t2 S2.LA S2.LB i (by omega))
     (by simp only; rw [de2, de1, hd1]; exact hdst.1) (by simp only; rw [de2, de1, hd1]; omega)
-  simpa only [Bool.not_false, Bool.and_self] using S3
+  refine ⟨by simpa only [Bool.not_false, Bool.and_self] using S3.1, ?_⟩
+  exact NZ.cons eA1 (fun _ => S1.sp_ne hG) (NZ.cons eA2 (fun _ => S2.sp_ne hG) S3.2)
 
 /-- info: 'Ember.Proof.PassSim.blkR_copy' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in #print axioms blkR_copy

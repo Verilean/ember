@@ -263,6 +263,10 @@ structure Glob (D : Dev) (A B : Code) (lo hi : Nat) (cert : List Row) (tr : List
     (acl : List AS) (lv : List (Nat × Nat)) (x0 : Cpu × D.W) : Prop where
   chk : RowsOK A.items B.items A.a B.a lo hi cert tr
   ab : AbsGlob A.items A.a lo hi cert acl lv
+  /-- The segments of more than one step of `A` that keep the frames are not in the activation of
+  no function: its stack is not empty then. -/
+  multi : ∀ k, ((rowAt cert k).tag = .pack ∨ (rowAt cert k).tag = .blkR ∨ (rowAt cert k).tag = .copyR) →
+    topE ∉ (rowAt cert k).act
   hlo : lo ≤ hi
   h1 : 1 ≤ hi
   hhi : hi ≤ 65536
@@ -330,6 +334,10 @@ theorem Glob.need {D : Dev} {A B : Code} {lo hi : Nat} {cert : List Row} {tr : L
     · simp only [mkACtx, prevA_fst] at hn
       exact needOK_spec hk hn hK
 
+/-- Frames on the stack where the row is not in the activation of no function. -/
+theorem frames_ne {G : List Frame} {act : List Nat} (hcur : cur G ∈ act) (h : topE ∉ act) : G ≠ [] := by
+  intro e; subst e; exact h hcur
+
 /-- A row of a meeting point is at an item. -/
 theorem Glob.item {D : Dev} {A B : Code} {lo hi : Nat} {cert : List Row} {tr : List (Nat × Bool × Bool)} {acl : List AS} {lv : List (Nat × Nat)}
     {x0 : Cpu × D.W} (Gl : Glob D A B lo hi cert tr acl lv x0) {k : Nat} (ht : (rowAt cert k).tag ≠ .none) :
@@ -353,7 +361,7 @@ theorem step_ord {D : Dev} {A B : Code} {lo hi : Nat} {cert : List Row} {tr : Li
     (S : Sync D A B lo hi G k (rowAt cert k).kb (rowAt cert k).th (rowAt cert k).tl x y)
     (hcur : cur G ∈ (rowAt cert k).act) (hF : FOK A cert tr G) (hx : ∃ n, x = mrun D n x0)
     (hK : ASat (acAt acl k) x.1) (hL : FX acl lv G) :
-    ∃ a b, 0 < a ∧ Inv D A B lo hi cert tr acl lv x0 (mrun D a x) (mrun D b y) := by
+    ∃ a b, 0 < a ∧ 0 < b ∧ NZ D x a ∧ Inv D A B lo hi cert tr acl lv x0 (mrun D a x) (mrun D b y) := by
   have hrow := Gl.row (k := k) (by rw [htag]; intro h; cases h)
   simp only [rowOK, htag] at hrow
   obtain ⟨f, a', b', hA, hB, hnh, hv, hrh, hrl, hnn, hs, hfc⟩ := ordOK_spec hrow
@@ -376,7 +384,7 @@ theorem step_ord {D : Dev} {A B : Code} {lo hi : Nat} {cert : List Row} {tr : Li
   have hK' := land_after Gl.ab hAk hab (absT_sound _ f hs' (immW_valOf A f pa) hK)
   rw [nextRow_drop] at hs
   obtain ⟨s1, s2, s3, s4, s5⟩ := succOK_spec hs
-  refine ⟨1, 1, Nat.one_pos, Or.inr ⟨G, k + 1, s1, ?_, s5 _ hcur, hF, reach_step hx 1, by rw [hm]; exact hK', hL⟩⟩
+  refine ⟨1, 1, Nat.one_pos, Nat.one_pos, NZ.le1 _ _ (Nat.le_refl _), Or.inr ⟨G, k + 1, s1, ?_, s5 _ hcur, hF, reach_step hx 1, by rw [hm]; exact hK', hL⟩⟩
   rw [s2]
   exact S'.mono s3 s4
 
@@ -464,7 +472,7 @@ theorem step_jump {D : Dev} {A B : Code} {lo hi : Nat} {cert : List Row} {tr : L
     (S : Sync D A B lo hi G k (rowAt cert k).kb (rowAt cert k).th (rowAt cert k).tl x y)
     (hcur : cur G ∈ (rowAt cert k).act) (hF : FOK A cert tr G) (hx : ∃ n, x = mrun D n x0)
     (hK : ASat (acAt acl k) x.1) (hL : FX acl lv G) :
-    ∃ a b, 0 < a ∧ Inv D A B lo hi cert tr acl lv x0 (mrun D a x) (mrun D b y) := by
+    ∃ a b, 0 < a ∧ 0 < b ∧ NZ D x a ∧ Inv D A B lo hi cert tr acl lv x0 (mrun D a x) (mrun D b y) := by
   have hrow := Gl.row (k := k) (by rw [htag]; intro h; cases h)
   simp only [rowOK, htag] at hrow
   obtain ⟨opA, opB, cc, l, li, a', b', hA, hB, hoA, hoB, hcc, hli, hs1, hs2⟩ := jumpOK_spec hrow
@@ -476,7 +484,7 @@ theorem step_jump {D : Dev} {A B : Code} {lo hi : Nat} {cert : List Row} {tr : L
   have hm : (mrun D 1 x).1 = jumped x.1 p c := by
     show (mstep D (x.1, x.2)).1 = _; rw [hmA]
   have htg := (Gl.ab.rows k _ hAk).2.1
-  refine ⟨1, 1, Nat.one_pos, Or.inr ?_⟩
+  refine ⟨1, 1, Nat.one_pos, Nat.one_pos, NZ.le1 _ _ (Nat.le_refl _), Or.inr ?_⟩
   by_cases ht : taken cc x.1 = true
   · rw [if_pos ht] at S'
     obtain ⟨s1, s2, s3, s4, s5⟩ := succOK_spec hs1
@@ -535,7 +543,7 @@ theorem step_djnz {D : Dev} {A B : Code} {lo hi : Nat} {cert : List Row} {tr : L
     (S : Sync D A B lo hi G k (rowAt cert k).kb (rowAt cert k).th (rowAt cert k).tl x y)
     (hcur : cur G ∈ (rowAt cert k).act) (hF : FOK A cert tr G) (hx : ∃ n, x = mrun D n x0)
     (_hK : ASat (acAt acl k) x.1) (hL : FX acl lv G) :
-    ∃ a b, 0 < a ∧ Inv D A B lo hi cert tr acl lv x0 (mrun D a x) (mrun D b y) := by
+    ∃ a b, 0 < a ∧ 0 < b ∧ NZ D x a ∧ Inv D A B lo hi cert tr acl lv x0 (mrun D a x) (mrun D b y) := by
   have hrow := Gl.row (k := k) (by rw [htag]; intro h; cases h)
   simp only [rowOK, htag] at hrow
   obtain ⟨l, li, a', b', hA, hB, hli, hs1, hs2⟩ := djnzOK_spec hrow
@@ -543,7 +551,7 @@ theorem step_djnz {D : Dev} {A B : Code} {lo hi : Nat} {cert : List Row} {tr : L
   have S' := seg_djnz D (drop_cons hA) hlA (drop_cons hB) hlB S
   have hAk := drop_cons hA
   have htg := (Gl.ab.rows k _ hAk).2.1
-  refine ⟨1, 1, Nat.one_pos, Or.inr ?_⟩
+  refine ⟨1, 1, Nat.one_pos, Nat.one_pos, NZ.le1 _ _ (Nat.le_refl _), Or.inr ?_⟩
   by_cases ht : (x.1.b - 1 != 0) = true
   · rw [if_pos ht] at S'
     obtain ⟨s1, s2, s3, s4, s5⟩ := succOK_spec hs1
@@ -586,7 +594,7 @@ theorem step_call {D : Dev} {A B : Code} {lo hi : Nat} {cert : List Row} {tr : L
     (S : Sync D A B lo hi G k (rowAt cert k).kb (rowAt cert k).th (rowAt cert k).tl x y)
     (hcur : cur G ∈ (rowAt cert k).act) (hF : FOK A cert tr G) (hx : ∃ n, x = mrun D n x0)
     (hK : ASat (acAt acl k) x.1) (hL : FX acl lv G) :
-    ∃ a b, 0 < a ∧ Inv D A B lo hi cert tr acl lv x0 (mrun D a x) (mrun D b y) := by
+    ∃ a b, 0 < a ∧ 0 < b ∧ NZ D x a ∧ Inv D A B lo hi cert tr acl lv x0 (mrun D a x) (mrun D b y) := by
   have hrow := Gl.row (k := k) (by rw [htag]; intro h; cases h)
   simp only [rowOK, htag] at hrow
   obtain ⟨l, li, a', b', hA, hB, hli, hs1, hs2⟩ := callOK_spec hrow
@@ -614,7 +622,7 @@ theorem step_call {D : Dev} {A B : Code} {lo hi : Nat} {cert : List Row} {tr : L
   obtain ⟨s1, s2, s3, s4, s5⟩ := succOK_spec hs1
   rw [nextRow_drop] at hs2
   obtain ⟨t1, t2, t3, t4, t5⟩ := succOK_spec hs2
-  refine ⟨1, 1, Nat.one_pos, Or.inr ⟨.ret (k + 1) ((rowAt cert k).kb + 1) li.ia :: G, li.ia,
+  refine ⟨1, 1, Nat.one_pos, Nat.one_pos, NZ.le1 _ _ (Nat.le_refl _), Or.inr ⟨.ret (k + 1) ((rowAt cert k).kb + 1) li.ia :: G, li.ia,
     by rw [hrA]; exact s1, ?_, ?_, ?_, reach_step hx 1, hK', hnone, hlv, hL⟩⟩
   · rw [hrA, s2]; exact S'.mono s3 s4
   · rw [hrA]; exact s5 _ (List.mem_singleton_self _)
@@ -631,11 +639,11 @@ theorem step_halt {D : Dev} {A B : Code} {lo hi : Nat} {cert : List Row} {tr : L
     {x0 : Cpu × D.W} (Gl : Glob D A B lo hi cert tr acl lv x0) {G : List Frame} {k : Nat} {x y : Cpu × D.W}
     (htag : (rowAt cert k).tag = .halt)
     (S : Sync D A B lo hi G k (rowAt cert k).kb (rowAt cert k).th (rowAt cert k).tl x y) :
-    ∃ a b, 0 < a ∧ Inv D A B lo hi cert tr acl lv x0 (mrun D a x) (mrun D b y) := by
+    ∃ a b, 0 < a ∧ 0 < b ∧ NZ D x a ∧ Inv D A B lo hi cert tr acl lv x0 (mrun D a x) (mrun D b y) := by
   have hrow := Gl.row (k := k) (by rw [htag]; intro h; cases h)
   simp only [rowOK, htag] at hrow
   obtain ⟨a', b', hA, hB⟩ := haltOK_spec hrow
-  exact ⟨1, 1, Nat.one_pos, Or.inl (seg_halt D (drop_cons hA) (drop_cons hB) S)⟩
+  exact ⟨1, 1, Nat.one_pos, Nat.one_pos, NZ.le1 _ _ (Nat.le_refl _), Or.inl (seg_halt D (drop_cons hA) (drop_cons hB) S)⟩
 
 theorem ldspOK_spec {as bs : List Item} {r : Row} {rs : List Row} (h : ldspOK as bs r rs = true) :
     ∃ a' b' : List Item, as = .ins ⟨.ld, [.sp, .imm (.num 0)]⟩ :: a' ∧ bs = .ins ⟨.ld, [.sp, .imm (.num 0)]⟩ :: b' ∧
@@ -650,7 +658,7 @@ theorem step_ldsp {D : Dev} {A B : Code} {lo hi : Nat} {cert : List Row} {tr : L
     (htag : (rowAt cert k).tag = .ldsp)
     (S : Sync D A B lo hi G k (rowAt cert k).kb (rowAt cert k).th (rowAt cert k).tl x y)
     (hx : ∃ n, x = mrun D n x0) :
-    ∃ a b, 0 < a ∧ Inv D A B lo hi cert tr acl lv x0 (mrun D a x) (mrun D b y) := by
+    ∃ a b, 0 < a ∧ 0 < b ∧ NZ D x a ∧ Inv D A B lo hi cert tr acl lv x0 (mrun D a x) (mrun D b y) := by
   have hrow := Gl.row (k := k) (by rw [htag]; intro h; cases h)
   simp only [rowOK, htag] at hrow
   obtain ⟨a', b', hA, hB, hs⟩ := ldspOK_spec hrow
@@ -658,7 +666,7 @@ theorem step_ldsp {D : Dev} {A B : Code} {lo hi : Nat} {cert : List Row} {tr : L
   have hnone := land_none Gl.ab (drop_cons hA) (by simp [absAfter, htag]) (by intro e; cases e)
   rw [nextRow_drop] at hs
   obtain ⟨s1, s2, s3, s4, s5⟩ := succOK_spec hs
-  refine ⟨1, 1, Nat.one_pos, Or.inr ⟨[], k + 1, s1, ?_, s5 _ (List.mem_singleton_self _), trivial, reach_step hx 1,
+  refine ⟨1, 1, Nat.one_pos, Nat.one_pos, NZ.le1 _ _ (Nat.le_refl _), Or.inr ⟨[], k + 1, s1, ?_, s5 _ (List.mem_singleton_self _), trivial, reach_step hx 1,
     by rw [hnone]; trivial, trivial⟩⟩
   rw [s2]; exact S'.mono s3 s4
 
@@ -678,7 +686,7 @@ theorem step_ldir {D : Dev} {A B : Code} {lo hi : Nat} {cert : List Row} {tr : L
     (S : Sync D A B lo hi G k (rowAt cert k).kb (rowAt cert k).th (rowAt cert k).tl x y)
     (hcur : cur G ∈ (rowAt cert k).act) (hF : FOK A cert tr G) (hx : ∃ n, x = mrun D n x0)
     (hK : ASat (acAt acl k) x.1) (hL : FX acl lv G) :
-    ∃ a b, 0 < a ∧ Inv D A B lo hi cert tr acl lv x0 (mrun D a x) (mrun D b y) := by
+    ∃ a b, 0 < a ∧ 0 < b ∧ NZ D x a ∧ Inv D A B lo hi cert tr acl lv x0 (mrun D a x) (mrun D b y) := by
   have hrow := Gl.row (k := k) (by rw [htag]; intro h; cases h)
   simp only [rowOK, htag] at hrow
   obtain ⟨a', b', hA, hB, hth, htl, hs⟩ := ldirOK_spec hrow
@@ -693,7 +701,7 @@ theorem step_ldir {D : Dev} {A B : Code} {lo hi : Nat} {cert : List Row} {tr : L
   obtain ⟨hmA, _⟩ := ldir_mstep D hAk S.LA S.atA x.2
   have hm : (mrun D 1 x).1 = ldirS x.1 := by
     show (mstep D (x.1, x.2)).1 = _; rw [hmA]
-  refine ⟨1, 1, Nat.one_pos, Or.inr ?_⟩
+  refine ⟨1, 1, Nat.one_pos, Nat.one_pos, NZ.le1 _ _ (Nat.le_refl _), Or.inr ?_⟩
   by_cases hb : (x.1.bc - 1 != 0) = true
   · rw [if_pos hb] at S'
     have h := (Gl.ab.rows k _ hAk).1
@@ -722,7 +730,7 @@ theorem step_pack {D : Dev} {A B : Code} {lo hi : Nat} {cert : List Row} {tr : L
     (S : Sync D A B lo hi G k (rowAt cert k).kb (rowAt cert k).th (rowAt cert k).tl x y)
     (hcur : cur G ∈ (rowAt cert k).act) (hF : FOK A cert tr G) (hx : ∃ n, x = mrun D n x0)
     (_hK : ASat (acAt acl k) x.1) (hL : FX acl lv G) :
-    ∃ a b, 0 < a ∧ Inv D A B lo hi cert tr acl lv x0 (mrun D a x) (mrun D b y) := by
+    ∃ a b, 0 < a ∧ 0 < b ∧ NZ D x a ∧ Inv D A B lo hi cert tr acl lv x0 (mrun D a x) (mrun D b y) := by
   have hrow := Gl.row (k := k) (by rw [htag]; intro h; cases h)
   simp only [rowOK, htag] at hrow
   obtain ⟨hA, hB, hs⟩ := packOK_spec hrow
@@ -732,8 +740,10 @@ theorem step_pack {D : Dev} {A B : Code} {lo hi : Nat} {cert : List Row} {tr : L
   obtain ⟨s1, s2, s3, s4, s5⟩ := succOK_spec hs
   obtain ⟨it, hit⟩ := Gl.item (k := k) (by rw [htag]; intro h; cases h)
   have hnone := (land_skip Gl.ab hit).2 (Or.inl htag)
-  refine ⟨4, 2, by decide, Or.inr ⟨G, k + 4, s1, ?_, s5 _ hcur, hF, reach_step hx 4, by rw [hnone]; trivial, hL⟩⟩
-  rw [s2]; exact S'.mono (fun e => by cases e) (fun e => by cases e)
+  have hG := frames_ne hcur (Gl.multi k (Or.inl htag))
+  refine ⟨4, 2, by decide, by decide, S'.2 (S.sp_ne hG),
+    Or.inr ⟨G, k + 4, s1, ?_, s5 _ hcur, hF, reach_step hx 4, by rw [hnone]; trivial, hL⟩⟩
+  rw [s2]; exact S'.1.mono (fun e => by cases e) (fun e => by cases e)
 
 
 /-! ## Returns -/
@@ -865,7 +875,7 @@ theorem step_ret {D : Dev} {A B : Code} {lo hi : Nat} {cert : List Row} {tr : Li
     (S : Sync D A B lo hi G k (rowAt cert k).kb (rowAt cert k).th (rowAt cert k).tl x y)
     (hcur : cur G ∈ (rowAt cert k).act) (hF : FOK A cert tr G) (hx : ∃ n, x = mrun D n x0)
     (hK : ASat (acAt acl k) x.1) (hL : FX acl lv G) :
-    ∃ a b, 0 < a ∧ Inv D A B lo hi cert tr acl lv x0 (mrun D a x) (mrun D b y) := by
+    ∃ a b, 0 < a ∧ 0 < b ∧ NZ D x a ∧ Inv D A B lo hi cert tr acl lv x0 (mrun D a x) (mrun D b y) := by
   have hrow := Gl.row (k := k) (by rw [htag]; intro h; cases h)
   simp only [rowOK, htag] at hrow
   obtain ⟨cc, a', b', hA, hB, hret, hcc, hs⟩ := retRowOK_spec hrow
@@ -878,15 +888,15 @@ theorem step_ret {D : Dev} {A B : Code} {lo hi : Nat} {cert : List Row} {tr : Li
   have hX := FX.tails ts _ hL
   cases cc with
   | none =>
-    obtain ⟨n, hn, S'⟩ := seg_retseq D (ts := ts) ⟨k, ⟨Nat.le_refl _, fun m h1 h2 => by omega⟩, Or.inl (drop_cons hA)⟩
+    obtain ⟨n, hn, S', nz⟩ := seg_retseq D (ts := ts) ⟨k, ⟨Nat.le_refl _, fun m h1 h2 => by omega⟩, Or.inl (drop_cons hA)⟩
       (drop_cons hB) hts S
-    exact ⟨n, 1, hn, inv_ret S' hF' ht (reach_step hx n) hX⟩
+    exact ⟨n, 1, hn, Nat.one_pos, nz, inv_ret S' hF' ht (reach_step hx n) hX⟩
   | some cnd =>
     have hcx := cc_some (hcc cnd rfl)
     have hAk : A.items[k]? = some (.ins ⟨.ret, [cnd]⟩) := drop_cons hA
     have hfall : taken (some cnd) x.1 = false → ∀ (S' : Sync D A B lo hi (tails ts ++ .ret rA rB e :: G') (k + 1)
         ((rowAt cert k).kb + 1) (rowAt cert k).th (rowAt cert k).tl (mstep D x) (mstep D y)),
-        ∃ a b, 0 < a ∧ Inv D A B lo hi cert tr acl lv x0 (mrun D a x) (mrun D b y) := by
+        ∃ a b, 0 < a ∧ 0 < b ∧ NZ D x a ∧ Inv D A B lo hi cert tr acl lv x0 (mrun D a x) (mrun D b y) := by
       intro hnt S'
       have hr := ret_mstep D (cc := some cnd) (fun _ h => by cases h; exact hcx) hAk S.LA S.atA x.2
       rw [if_neg (by rw [hnt]; decide)] at hr
@@ -901,7 +911,7 @@ theorem step_ret {D : Dev} {A B : Code} {lo hi : Nat} {cert : List Row} {tr : Li
       have hs' := hs rfl
       rw [nextRow_drop] at hs'
       obtain ⟨s1, s2, s3, s4, s5⟩ := succOK_spec hs'
-      refine ⟨1, 1, Nat.one_pos, Or.inr ⟨_, k + 1, s1, ?_, s5 _ hcur, hF, reach_step hx 1,
+      refine ⟨1, 1, Nat.one_pos, Nat.one_pos, NZ.le1 _ _ (Nat.le_refl _), Or.inr ⟨_, k + 1, s1, ?_, s5 _ hcur, hF, reach_step hx 1,
         by rw [hm]; exact hK', hL⟩⟩
       rw [s2]; exact S'.mono s3 s4
     cases ts with
@@ -909,15 +919,15 @@ theorem step_ret {D : Dev} {A B : Code} {lo hi : Nat} {cert : List Row} {tr : Li
       have S' := seg_ret D (cc := some cnd) (fun _ h => by cases h; exact hcx) (drop_cons hA) (drop_cons hB) S
       by_cases htk : taken (some cnd) x.1 = true
       · rw [if_pos htk] at S'
-        exact ⟨1, 1, Nat.one_pos, inv_ret S' hF' ht (reach_step hx 1) hX⟩
+        exact ⟨1, 1, Nat.one_pos, Nat.one_pos, NZ.le1 _ _ (Nat.le_refl _), inv_ret S' hF' ht (reach_step hx 1) hX⟩
       · rw [if_neg htk] at S'
         exact hfall (by simpa using htk) S'
     | cons p ts =>
       have S' := seg_retcc_tails D hcx (drop_cons hA) (drop_cons hB) hts S
       by_cases htk : taken (some cnd) x.1 = true
       · rw [if_pos htk] at S'
-        obtain ⟨n, hn, S''⟩ := S'
-        exact ⟨n, 1, hn, inv_ret S'' hF' ht (reach_step hx n) hX⟩
+        obtain ⟨n, hn, S'', nz⟩ := S'
+        exact ⟨n, 1, hn, Nat.one_pos, nz, inv_ret S'' hF' ht (reach_step hx n) hX⟩
       · rw [if_neg htk] at S'
         exact hfall (by simpa using htk) S'
 
@@ -962,7 +972,7 @@ theorem step_retThr {D : Dev} {A B : Code} {lo hi : Nat} {cert : List Row} {tr :
     (S : Sync D A B lo hi G k (rowAt cert k).kb (rowAt cert k).th (rowAt cert k).tl x y)
     (hcur : cur G ∈ (rowAt cert k).act) (hF : FOK A cert tr G) (hx : ∃ n, x = mrun D n x0)
     (_hK : ASat (acAt acl k) x.1) (hL : FX acl lv G) :
-    ∃ a b, 0 < a ∧ Inv D A B lo hi cert tr acl lv x0 (mrun D a x) (mrun D b y) := by
+    ∃ a b, 0 < a ∧ 0 < b ∧ NZ D x a ∧ Inv D A B lo hi cert tr acl lv x0 (mrun D a x) (mrun D b y) := by
   have hrow := Gl.row (k := k) (by rw [htag]; intro h; cases h)
   simp only [rowOK, htag] at hrow
   obtain ⟨cc, l, sa, a', b', hA, hB, hret, hcc, hsa, hra, hs⟩ := retThrOK_spec hrow
@@ -977,21 +987,21 @@ theorem step_retThr {D : Dev} {A B : Code} {lo hi : Nat} {cert : List Row} {tr :
   have hX := FX.tails ts _ hL
   cases cc with
   | none =>
-    obtain ⟨n, hn, S'⟩ := seg_retseq D (ts := ts)
+    obtain ⟨n, hn, S', nz⟩ := seg_retseq D (ts := ts)
       ⟨k, ⟨Nat.le_refl _, fun m h1 h2 => by omega⟩, Or.inr ⟨l, jl, drop_cons hA, hjl, hRA⟩⟩ (drop_cons hB) hts S
-    exact ⟨n, 1, hn, inv_ret S' hF' ht (reach_step hx n) hX⟩
+    exact ⟨n, 1, hn, Nat.one_pos, nz, inv_ret S' hF' ht (reach_step hx n) hX⟩
   | some cnd =>
     have S' := seg_retThrCC D (hcc cnd rfl) (drop_cons hA) hjl hRA (drop_cons hB) hts S
     by_cases htk : taken (some cnd) x.1 = true
     · rw [if_pos htk] at S'
-      obtain ⟨n, hn, S''⟩ := S'
-      exact ⟨n, 1, hn, inv_ret S'' hF' ht (reach_step hx n) hX⟩
+      obtain ⟨n, hn, S'', nz⟩ := S'
+      exact ⟨n, 1, hn, Nat.one_pos, nz, inv_ret S'' hF' ht (reach_step hx n) hX⟩
     · rw [if_neg htk] at S'
       have hs' := hs rfl
       rw [nextRow_drop] at hs'
       obtain ⟨s1, s2, s3, s4, s5⟩ := succOK_spec hs'
       have hnone := land_none Gl.ab (drop_cons hA) (by simp [absAfter, htag]) (by intro e; cases e)
-      refine ⟨1, 1, Nat.one_pos, Or.inr ⟨_, k + 1, s1, ?_, s5 _ hcur, hF, reach_step hx 1,
+      refine ⟨1, 1, Nat.one_pos, Nat.one_pos, NZ.le1 _ _ (Nat.le_refl _), Or.inr ⟨_, k + 1, s1, ?_, s5 _ hcur, hF, reach_step hx 1,
         by rw [hnone]; trivial, hL⟩⟩
       rw [s2]; exact S'.mono s3 s4
 
@@ -1017,7 +1027,7 @@ theorem step_condRet {D : Dev} {A B : Code} {lo hi : Nat} {cert : List Row} {tr 
     (S : Sync D A B lo hi G k (rowAt cert k).kb (rowAt cert k).th (rowAt cert k).tl x y)
     (hcur : cur G ∈ (rowAt cert k).act) (hF : FOK A cert tr G) (hx : ∃ n, x = mrun D n x0)
     (_hK : ASat (acAt acl k) x.1) (hL : FX acl lv G) :
-    ∃ a b, 0 < a ∧ Inv D A B lo hi cert tr acl lv x0 (mrun D a x) (mrun D b y) := by
+    ∃ a b, 0 < a ∧ 0 < b ∧ NZ D x a ∧ Inv D A B lo hi cert tr acl lv x0 (mrun D a x) (mrun D b y) := by
   have hrow := Gl.row (k := k) (by rw [htag]; intro h; cases h)
   simp only [rowOK, htag] at hrow
   obtain ⟨cnd, cnd', l, li, a', b', hA, hB, hret, hc, hinv, hseq, hli, hs⟩ := condRetOK_spec hrow
@@ -1041,12 +1051,12 @@ theorem step_condRet {D : Dev} {A B : Code} {lo hi : Nat} {cert : List Row} {tr 
   by_cases htk : taken (some cnd) x.1 = true
   · rw [if_pos htk] at S'
     obtain ⟨s1, s2, s3, s4, s5⟩ := succOK_spec hs
-    refine ⟨1, 1, Nat.one_pos, Or.inr ⟨_, li.ia, by rw [hrA]; exact s1, ?_, by rw [hrA]; exact s5 _ hcur0, hF0,
+    refine ⟨1, 1, Nat.one_pos, Nat.one_pos, NZ.le1 _ _ (Nat.le_refl _), Or.inr ⟨_, li.ia, by rw [hrA]; exact s1, ?_, by rw [hrA]; exact s5 _ hcur0, hF0,
       reach_step hx 1, by rw [hnone]; trivial, hL⟩⟩
     rw [hrA, s2]; exact S'.mono s3 s4
   · rw [if_neg htk] at S'
-    obtain ⟨n, hn, S''⟩ := S'
-    exact ⟨n, 1, hn, inv_ret S'' hF' ht (reach_step hx n) hX⟩
+    obtain ⟨n, hn, S'', nz⟩ := S'
+    exact ⟨n, 1, hn, Nat.one_pos, nz, inv_ret S'' hF' ht (reach_step hx n) hX⟩
 
 theorem tailOK_spec {c : Ctx} {as bs : List Item} {r : Row} (h : tailOK c as bs r = true) :
     ∃ (opB : Op) (l : String) (li : LInfo) (a' b' : List Item),
@@ -1081,7 +1091,7 @@ theorem step_tail {D : Dev} {A B : Code} {lo hi : Nat} {cert : List Row} {tr : L
     (S : Sync D A B lo hi G k (rowAt cert k).kb (rowAt cert k).th (rowAt cert k).tl x y)
     (hcur : cur G ∈ (rowAt cert k).act) (hF : FOK A cert tr G) (hx : ∃ n, x = mrun D n x0)
     (hK : ASat (acAt acl k) x.1) (hL : FX acl lv G) :
-    ∃ a b, 0 < a ∧ Inv D A B lo hi cert tr acl lv x0 (mrun D a x) (mrun D b y) := by
+    ∃ a b, 0 < a ∧ 0 < b ∧ NZ D x a ∧ Inv D A B lo hi cert tr acl lv x0 (mrun D a x) (mrun D b y) := by
   have hrow := Gl.row (k := k) (by rw [htag]; intro h; cases h)
   simp only [rowOK, htag] at hrow
   obtain ⟨opB, l, li, a', b', hA, hB, hop, hseq, htop, hli, hs, hle⟩ := tailOK_spec hrow
@@ -1104,7 +1114,7 @@ theorem step_tail {D : Dev} {A B : Code} {lo hi : Nat} {cert : List Row} {tr : L
     rw [show lookupL (mkTbl A.items cert 0) l = some li from hli] at h3
     simpa using List.all_eq_true.mp h3 _ hcur
   have hnone := land_none Gl.ab hAk (by simp [absAfter, htag]) (by intro e; cases e)
-  refine ⟨1, 1, Nat.one_pos, Or.inr ⟨.tail (k + 1) li.ia :: G, li.ia, by rw [hrA]; exact s1, ?_,
+  refine ⟨1, 1, Nat.one_pos, Nat.one_pos, NZ.le1 _ _ (Nat.le_refl _), Or.inr ⟨.tail (k + 1) li.ia :: G, li.ia, by rw [hrA]; exact s1, ?_,
     by rw [hrA]; exact s5 _ (List.mem_singleton_self _), ⟨hRS, hne, hle _ hcur, hF⟩, reach_step hx 1,
     by rw [hent]; trivial, hnone, hlv, hL⟩⟩
   rw [hrA, s2]; exact S'.mono s3 s4
@@ -1250,7 +1260,7 @@ theorem step_blk {D : Dev} {A B : Code} {lo hi : Nat} {cert : List Row} {tr : Li
     (S : Sync D A B lo hi G k (rowAt cert k).kb (rowAt cert k).th (rowAt cert k).tl x y)
     (hcur : cur G ∈ (rowAt cert k).act) (hF : FOK A cert tr G) (hx : ∃ n, x = mrun D n x0)
     (hK : ASat (acAt acl k) x.1) (hL : FX acl lv G) :
-    ∃ a b, 0 < a ∧ Inv D A B lo hi cert tr acl lv x0 (mrun D a x) (mrun D b y) := by
+    ∃ a b, 0 < a ∧ 0 < b ∧ NZ D x a ∧ Inv D A B lo hi cert tr acl lv x0 (mrun D a x) (mrun D b y) := by
   have hrow := Gl.row (k := k) (by rw [htag]; intro h; cases h)
   simp only [rowOK, htag] at hrow
   obtain ⟨f, a', b', hA, hB, hth, htl, hr, hp, hs⟩ := blkOK_spec hrow
@@ -1267,10 +1277,11 @@ theorem step_blk {D : Dev} {A B : Code} {lo hi : Nat} {cert : List Row} {tr : Li
   have hA' := drop_cons hA
   have hB' := drop_cons hB
   have hnone := land_none Gl.ab hA' (by simp [absAfter, htag]) (by intro e; cases e)
-  have fin : ∀ n, Sync D A B lo hi G (k + 1) ((rowAt cert k).kb + 1) false false (mrun D n x) (mrun D n y) → 0 < n →
-      ∃ a b, 0 < a ∧ Inv D A B lo hi cert tr acl lv x0 (mrun D a x) (mrun D b y) := by
-    intro n S' hn
-    refine ⟨n, n, hn, Or.inr ⟨G, k + 1, s1, ?_, s5 _ hcur, hF, reach_step hx n, by rw [hnone]; trivial, hL⟩⟩
+  have fin : ∀ n, Sync D A B lo hi G (k + 1) ((rowAt cert k).kb + 1) false false (mrun D n x) (mrun D n y) ∧
+      NZ D x n → 0 < n →
+      ∃ a b, 0 < a ∧ 0 < b ∧ NZ D x a ∧ Inv D A B lo hi cert tr acl lv x0 (mrun D a x) (mrun D b y) := by
+    intro n ⟨S', nz⟩ hn
+    refine ⟨n, n, hn, hn, nz, Or.inr ⟨G, k + 1, s1, ?_, s5 _ hcur, hF, reach_step hx n, by rw [hnone]; trivial, hL⟩⟩
     rw [s2]; exact S'.mono (fun e => by cases e) (fun e => by cases e)
   unfold ptrRoutine at hpr
   split at hpr <;> (try cases hpr)
@@ -1313,7 +1324,7 @@ theorem step_tailBlk {D : Dev} {A B : Code} {lo hi : Nat} {cert : List Row} {tr 
     (S : Sync D A B lo hi G k (rowAt cert k).kb (rowAt cert k).th (rowAt cert k).tl x y)
     (hcur : cur G ∈ (rowAt cert k).act) (hF : FOK A cert tr G) (hx : ∃ n, x = mrun D n x0)
     (hK : ASat (acAt acl k) x.1) (hL : FX acl lv G) :
-    ∃ a b, 0 < a ∧ Inv D A B lo hi cert tr acl lv x0 (mrun D a x) (mrun D b y) := by
+    ∃ a b, 0 < a ∧ 0 < b ∧ NZ D x a ∧ Inv D A B lo hi cert tr acl lv x0 (mrun D a x) (mrun D b y) := by
   have hrow := Gl.row (k := k) (by rw [htag]; intro h; cases h)
   simp only [rowOK, htag] at hrow
   obtain ⟨f, a', b', hA, hB, hf, hth, htl, hr, hp, hseq, htop⟩ := tailBlkOK_spec hrow
@@ -1336,14 +1347,14 @@ theorem step_tailBlk {D : Dev} {A B : Code} {lo hi : Nat} {cert : List Row} {tr 
   rcases hf with rfl | rfl
   · simp only [ptrRoutine, Option.some.injEq, Prod.mk.injEq] at hpr
     obtain ⟨_, rfl⟩ := hpr
-    obtain ⟨n, hn, S'⟩ := blkT_st32 D Gl.hhi Gl.hlo Gl.h1 (drop_cons hA) hRS (drop_cons hB) hLA hLB haccA haccB
+    obtain ⟨n, hn, S', nz⟩ := blkT_st32 D Gl.hhi Gl.hlo Gl.h1 (drop_cons hA) hRS (drop_cons hB) hLA hLB haccA haccB
       ⟨hacc.1, hacc.2⟩ hts S (by omega) hfoot
-    exact ⟨n, 9, hn, inv_ret S' hF' ht0 (reach_step hx n) hX⟩
+    exact ⟨n, 9, hn, by decide, nz, inv_ret S' hF' ht0 (reach_step hx n) hX⟩
   · simp only [ptrRoutine, Option.some.injEq, Prod.mk.injEq] at hpr
     obtain ⟨_, rfl⟩ := hpr
-    obtain ⟨n, hn, S'⟩ := blkT_bytes D Gl.hhi Gl.hlo Gl.h1 (name := "or") 6 (Or.inl rfl) exec_or_m rfl
+    obtain ⟨n, hn, S', nz⟩ := blkT_bytes D Gl.hhi Gl.hlo Gl.h1 (name := "or") 6 (Or.inl rfl) exec_or_m rfl
       (drop_cons hA) hRS (drop_cons hB) hLA hLB haccA haccB ⟨hacc.1, hacc.2⟩ hts S (by omega) hfoot
-    exact ⟨n, _, hn, inv_ret S' hF' ht0 (reach_step hx n) hX⟩
+    exact ⟨n, _, hn, by omega, nz, inv_ret S' hF' ht0 (reach_step hx n) hX⟩
 
 /-- info: 'Ember.Proof.PassSim.step_tailBlk' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in #print axioms step_tailBlk
@@ -1369,7 +1380,7 @@ theorem step_blkR {D : Dev} {A B : Code} {lo hi : Nat} {cert : List Row} {tr : L
     (S : Sync D A B lo hi G k (rowAt cert k).kb (rowAt cert k).th (rowAt cert k).tl x y)
     (hcur : cur G ∈ (rowAt cert k).act) (hF : FOK A cert tr G) (hx : ∃ n, x = mrun D n x0)
     (hK : ASat (acAt acl k) x.1) (hL : FX acl lv G) :
-    ∃ a b, 0 < a ∧ Inv D A B lo hi cert tr acl lv x0 (mrun D a x) (mrun D b y) := by
+    ∃ a b, 0 < a ∧ 0 < b ∧ NZ D x a ∧ Inv D A B lo hi cert tr acl lv x0 (mrun D a x) (mrun D b y) := by
   have hrow := Gl.row (k := k) (by rw [htag]; intro h; cases h)
   simp only [rowOK, htag] at hrow
   obtain ⟨l, f, a', b', hA, hB, hf1, hf2, hr, hl, hs⟩ := blkROK_spec hrow
@@ -1390,25 +1401,27 @@ theorem step_blkR {D : Dev} {A B : Code} {lo hi : Nat} {cert : List Row} {tr : L
   have hA1 := drop_cons2 hA
   have hB1 := drop_cons2 hB
   have hnone := (land_skip Gl.ab hA0).1 htag
-  have fin : ∀ n, Sync D A B lo hi G (k + 2) ((rowAt cert k).kb + 2) true true (mrun D n x) (mrun D n y) → 0 < n →
-      ∃ a b, 0 < a ∧ Inv D A B lo hi cert tr acl lv x0 (mrun D a x) (mrun D b y) := by
-    intro n S' hn
-    refine ⟨n, n, hn, Or.inr ⟨G, k + 2, s1, ?_, s5 _ hcur, hF, reach_step hx n, by rw [hnone]; trivial, hL⟩⟩
+  have fin : ∀ n, Sync D A B lo hi G (k + 2) ((rowAt cert k).kb + 2) true true (mrun D n x) (mrun D n y) ∧
+      NZ D x n → 0 < n →
+      ∃ a b, 0 < a ∧ 0 < b ∧ NZ D x a ∧ Inv D A B lo hi cert tr acl lv x0 (mrun D a x) (mrun D b y) := by
+    intro n ⟨S', nz⟩ hn
+    refine ⟨n, n, hn, hn, nz, Or.inr ⟨G, k + 2, s1, ?_, s5 _ hcur, hF, reach_step hx n, by rw [hnone]; trivial, hL⟩⟩
     rw [s2]; exact S'.mono s3 s4
+  have hG := frames_ne hcur (Gl.multi k (Or.inr (Or.inl htag)))
   unfold ptrRoutine at hpr
   split at hpr <;> (try cases hpr)
   · exact fin 9 (blkR_ld32 D Gl.hhi Gl.hlo Gl.h1 hA0 hB0 hA1 hB1 hLA hLB haccA haccB ⟨hacc.1, hacc.2⟩ hlA hdA hlB hdB
-      hencA hencB hbs S (by omega)) (by decide)
+      hencA hencB hbs S (by omega) hG) (by decide)
   · exact absurd rfl hf1
   · have S' := blkR_bytes D Gl.hhi Gl.hlo Gl.h1 (name := "add") 1 (Or.inr rfl) exec_adc_a_m rfl hA0 hB0 hA1 hB1
-      hLA hLB haccA haccB ⟨hacc.1, hacc.2⟩ hlA hdA hlB hdB hencA hencB hbs S (by omega)
+      hLA hLB haccA haccB ⟨hacc.1, hacc.2⟩ hlA hdA hlB hdB hencA hencB hbs S (by omega) hG
     exact fin _ S' (by simp)
   · have S' := blkR_bytes D Gl.hhi Gl.hlo Gl.h1 (name := "sub") 3 (Or.inr rfl) exec_sbc_a_m rfl hA0 hB0 hA1 hB1
-      hLA hLB haccA haccB ⟨hacc.1, hacc.2⟩ hlA hdA hlB hdB hencA hencB hbs S (by omega)
+      hLA hLB haccA haccB ⟨hacc.1, hacc.2⟩ hlA hdA hlB hdB hencA hencB hbs S (by omega) hG
     exact fin _ S' (by simp)
   · exact absurd rfl hf2
   · exact fin 45 (blkR_cmp32 D Gl.hhi Gl.hlo Gl.h1 hA0 hB0 hA1 hB1 hLA hLB haccA haccB ⟨hacc.1, hacc.2⟩ hlA hdA hlB hdB
-      hencA hencB hbs S (by omega)) (by decide)
+      hencA hencB hbs S (by omega) hG) (by decide)
 
 /-- info: 'Ember.Proof.PassSim.step_blkR' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in #print axioms step_blkR
@@ -1441,7 +1454,7 @@ theorem step_copyR {D : Dev} {A B : Code} {lo hi : Nat} {cert : List Row} {tr : 
     (S : Sync D A B lo hi G k (rowAt cert k).kb (rowAt cert k).th (rowAt cert k).tl x y)
     (hcur : cur G ∈ (rowAt cert k).act) (hF : FOK A cert tr G) (hx : ∃ n, x = mrun D n x0)
     (_hK : ASat (acAt acl k) x.1) (hL : FX acl lv G) :
-    ∃ a b, 0 < a ∧ Inv D A B lo hi cert tr acl lv x0 (mrun D a x) (mrun D b y) := by
+    ∃ a b, 0 < a ∧ 0 < b ∧ NZ D x a ∧ Inv D A B lo hi cert tr acl lv x0 (mrun D a x) (mrun D b y) := by
   have hrow := Gl.row (k := k) (by rw [htag]; intro h; cases h)
   simp only [rowOK, htag] at hrow
   obtain ⟨l, g, n, d, a', hA, htk, hn1, hn2, hl, hv, hd, hd0, hdlo, hdhi, hs⟩ := copyROK_spec hrow
@@ -1488,13 +1501,15 @@ theorem step_copyR {D : Dev} {A B : Code} {lo hi : Nat} {cert : List Row} {tr : 
   have hencA : ∀ ad, Item.encode (.db vs) (A.a.env ad) = .ok (vs.map dbByte) := fun ad => db_encode vs hnums _
   have hencB : ∀ ad, Item.encode (.db vs) (B.a.env ad) = .ok (vs.map dbByte) := fun ad => db_encode vs hnums _
   have hbs : (vs.map dbByte).length = m + 1 := by rw [List.length_map, hlen]
+  have hG := frames_ne hcur (Gl.multi k (Or.inr (Or.inr htag)))
   have S' := blkR_copy D Gl.hhi hA0 hB0 hA1 hB1 hA2 hB2 hA3 hB3 hgA hgB
-    ⟨hlo', by omega⟩ (by omega) hlA hdA hlB hdB hencA hencB hbs S
+    ⟨hlo', by omega⟩ (by omega) hlA hdA hlB hdB hencA hencB hbs S hG
   rw [rowN_drop _ _ _ (by decide)] at hs
   obtain ⟨s1, s2, s3, s4, s5⟩ := succOK_spec hs
   have hnone := (land_skip Gl.ab hA0).2 (Or.inr htag)
-  refine ⟨m + 4, m + 4, by omega, Or.inr ⟨G, k + 4, s1, ?_, s5 _ hcur, hF, reach_step hx _, by rw [hnone]; trivial, hL⟩⟩
-  rw [s2]; exact S'.mono s3 s4
+  refine ⟨m + 4, m + 4, by omega, by omega, S'.2,
+    Or.inr ⟨G, k + 4, s1, ?_, s5 _ hcur, hF, reach_step hx _, by rw [hnone]; trivial, hL⟩⟩
+  rw [s2]; exact S'.1.mono s3 s4
 
 /-- info: 'Ember.Proof.PassSim.step_copyR' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in #print axioms step_copyR
@@ -1566,7 +1581,7 @@ again. -/
 theorem step_inv {D : Dev} {A B : Code} {lo hi : Nat} {cert : List Row} {tr : List (Nat × Bool × Bool)} {acl : List AS} {lv : List (Nat × Nat)}
     {x0 : Cpu × D.W} (Gl : Glob D A B lo hi cert tr acl lv x0) (x y : Cpu × D.W)
     (hI : Inv D A B lo hi cert tr acl lv x0 x y) (hx : x.1.halted = false) :
-    ∃ a b, 0 < a ∧ Inv D A B lo hi cert tr acl lv x0 (mrun D a x) (mrun D b y) := by
+    ∃ a b, 0 < a ∧ 0 < b ∧ NZ D x a ∧ Inv D A B lo hi cert tr acl lv x0 (mrun D a x) (mrun D b y) := by
   rcases hI with hd | ⟨G, k, ht, S, hcur, hF, hr, hK, hL⟩
   · rw [hd.1] at hx; cases hx
   obtain ⟨k', ht', hb, ha, S', hcur', hK'⟩ := past_zero Gl _ k rfl ht S hcur hK
@@ -1607,7 +1622,8 @@ theorem passes_halt {D : Dev} {A B : Code} {lo hi : Nat} {cert : List Row} {tr :
     refine Or.inr ⟨[], 0, by rw [hr0]; exact ht, ?_, by rw [hr0]; exact htop, trivial, ⟨0, rfl⟩,
       by rw [Gl.ab.first]; trivial, trivial⟩
     rw [hr0, hkb, hth, htl]; exact S0
-  refine sim_halts D (Inv D A B lo hi cert tr acl lv x0) (step_inv Gl) ?_ N x0 y0 hI hN
+  refine sim_halts D (Inv D A B lo hi cert tr acl lv x0)
+    (fun x y h hx => by obtain ⟨a, b, ha, _, _, h'⟩ := step_inv Gl x y h hx; exact ⟨a, b, ha, h'⟩) ?_ N x0 y0 hI hN
   intro x y hI hx
   rcases hI with hd | ⟨_, _, _, S, _⟩
   · exact ⟨hd.2.1, hd.2.2⟩

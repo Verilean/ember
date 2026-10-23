@@ -115,11 +115,33 @@ theorem sync0 (inputs : Array Input) :
 theorem symVal_acc : symVal StackH.asm "rt_acc" = some 32768 ∧ symVal StackD.asm "rt_acc" = some 32768 := by
   constructor <;> decide +kernel
 
+/-- The rows of `pack`, `blkR`, `copyR` of the certificate are not in the activation of no function. -/
+def multiOK (r : Row) : Bool :=
+  !(decide (r.tag = .pack) || decide (r.tag = .blkR) || decide (r.tag = .copyR)) || !(r.act.contains topE)
+
+theorem multi_all : CertD.rows.all multiOK = true := by decide +kernel
+
+theorem multiD : ∀ k, ((rowAt CertD.rows k).tag = .pack ∨ (rowAt CertD.rows k).tag = .blkR ∨
+    (rowAt CertD.rows k).tag = .copyR) → topE ∉ (rowAt CertD.rows k).act := by
+  intro k ht hmem
+  cases e : CertD.rows[k]? with
+  | none =>
+    have h0 : rowAt CertD.rows k = default := by simp [rowAt, e]
+    rw [h0] at ht
+    rcases ht with t | t | t <;> cases t
+  | some r =>
+    have hr : rowAt CertD.rows k = r := by simp [rowAt, e]
+    rw [hr] at ht hmem
+    have h := List.all_eq_true.mp multi_all r (List.mem_of_getElem? e)
+    unfold multiOK at h
+    rcases ht with t | t | t <;> simp [t] at h <;> exact h hmem
+
 /-- **What the theorem takes, for the stack's images.** -/
 theorem glob (inputs : Array Input) :
     Glob hD codeH codeD CertD.lo CertD.hi CertD.rows CertD.tr CertD.acl CertD.lv (x0 inputs) where
   chk := CertD.certD_ok
   ab := CertD.absD_ok
+  multi := multiD
   hlo := by decide
   h1 := by decide
   hhi := by decide
