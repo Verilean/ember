@@ -15,7 +15,10 @@ M4w needs on the host side).
 To do: the board and hardware steps (M4.8, M4z.5), Wi-Fi on a board (M4w:
 the ESP-IDF component), the Sparkle SoC (M4s), the rest of the P2/P3
 proofs (by-reference parameters in M5.8, M5.9) and the rest of the
-proof of the back end (M7.3 `IR → Z80`; M7.1, M7.2 and M7.4 are done).
+proof of the back end beyond the SLIP stack's test-harness images (M7.1,
+M7.2 and M7.4 are done; M7.3 `IR → Z80` is done for those images, as
+built by default and without the passes, on the Lean model — not for
+every IR program, nor the board's runtime and interrupts).
 
 **Targets: the Z80 and the ESP32.**  The ESP32 variant is the
 **ESP32-C3** (RISC-V, rv32imc): it keeps the RISC-V path that CompCert

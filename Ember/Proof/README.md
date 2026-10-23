@@ -286,8 +286,10 @@ and none of them is proved:
    `Ember/C/Sem.lean` — which is itself a definition, tested against gcc
    and SDCC through the emitted programs, not derived from the C
    standard.  Of the translation to Z80, the step to the IR is proved
-   (M7.1) and so is the encoder (M7.4); the code generator is tested,
-   not proved.
+   (M7.1) and so is the encoder (M7.4); the code generator and the
+   passes on the assembly are proved for the SLIP build's images for the
+   test harness (`StackH`, `StackD`) on the Lean model, given `StackSrc`
+   (M7.3, "The code generator" below), and tested for other programs.
 
 ### Theorems
 
@@ -673,8 +675,8 @@ of the code generator, which needs every access to stay in its array.
 * **the IR semantics against the interpreter**: `IR.Sem` and the
   `partial` interpreter `Ember/Z80/IRInterp.lean` are tested against
   each other, not proved equal;
-* **from the IR on**: see "The code generator" below (M7.3, in
-  progress).
+* **from the IR on**: see "The code generator" below (M7.3: done for
+  the SLIP build's images for the test harness, not for every program).
 
 ### The encoder (M7.4)
 
@@ -705,7 +707,24 @@ model's own `execBlock`; `Asm.relax` (it runs before `assemble`, which
 is what the theorem is about); the text parser of the runtime's
 assembly.
 
-### The code generator (M7.3, in progress)
+### The code generator (M7.3)
+
+**Scope.**  M7.3 is done for the SLIP build of the stack with the test
+harness's runtime, on the Lean model of the machine (`Ember.Z80.Machine`,
+not hardware): the image without the passes on the assembly (`StackH`)
+and the image as `build` makes it by default (`StackD`), loaded and
+stepped as the tests do, for any input — they halt having transmitted
+and dropped what `Spec.step` does (`stackH_halts`, `stackD_halts`), the
+trace printed is the Spec's with no trap (`stackH_trace`,
+`stackD_trace`, `…_no_trap`, `…_trace_lines`), and the `tcb` observer's
+lines, when it gives them, are the Spec's control block after each item
+(`stackH_tcb_obs`, `stackD_tcb_obs`; soundness only — that the observer
+always gives lines is not proved).  Taken of the program: `StackSrc`
+(it is the checked SLIP build); that the written-out IR, items and
+bytes are those of `IR.lower` and `build` is `#guard`.  Not in M7.3: the
+back end for every IR program, the board's runtime, start-up and
+interrupts, the routines and operations the stack does not use, real
+hardware.
 
 `Ember/Z80/Codegen.lean` turns a function of the IR into assembly
 items, one instruction at a time, remembering what `A`, `HL` and the
@@ -763,12 +782,15 @@ footprint (`ZCtx.wr`) has changed.
 | `loop_iter`, `loop_run` (`Z80HarnessLoop.lean`) | the harness's loop that calls the entry, for any image (`LoopNeed`: where the loop is, its count of idle calls, the entry); the loopback image's `loop_iter`/`loop_run` are now these |
 | **`stackH_run`**, `stackH_run_halt` (`Z80StackHRun.lean`) | the image of the stack for the harness **from reset**: start-up — the RAM cleared, **the initial values of `iss` and `ip_id` copied from the ROM** (the bytes there are computed on the assembled image; the IR's initial memory in RAM is those two values and zero, `st0_ram`) — then the loop: for any number of calls of `main` that end in the IR's semantics from its initial state, the machine of the harness is at the head of the loop with the world they leave, or it left the loop and stopped with the input used up.  Taken here: `Moves` (a call of `main` with input remaining moves the position in the input) and that the IR's calls end — both discharged in `stackH_spec_halt` |
 | **`stackH_spec_halt`** (`Z80StackHSpec.lean`) | the image of the stack for the harness **against the Spec**, from reset, for any input: the machine of the harness stops (`di; halt`) holding the world of some number of calls of `main` in the Ember semantics that leave no input, and the kept lines of that world — transmissions and drops, each with the number of its input — are those of `Spec.step`, input by input.  Composes `stackH_run_halt` with `main_step`/`main_run_all` (M5.6: a call never traps, reads one item; so `Moves`, `good_step`) and `lower_iter` (M7.1).  **Taken:** `StackSrc p` — that `p` is the checked SLIP build (`TcpAll`, `TcpReasons`, `main_fn`), lowered to `Stack.ir`, accepted by `progOkB`/`irOkB` with this layout; the parts that can be computed are a `#guard` on `Net.prog.check` |
-| **`stackH_halts`** (`Z80StackHMachine.lean`; `run_sim_of` in `Z80Machine.lean`) | the same **on the machine the tests run**: the image `assemble` makes of `StackH.items`, loaded into `Ember.Z80.Machine` as the tests load it (`harnessMachine`) and stepped by `Machine.step`, for any input: after some number of steps the CPU is halted and the machine stands for a world (`Sim`) with no input left whose transmissions and drops are those of `Spec.step`.  Not in it (see `stackH_trace`): the notes and `tcb` lines (the comparison keeps transmissions and drops), the image as built by default, a board |
-| **`stackH_trace`** (`Z80StackHTrace.lean`; `Target.runToHalt`, `Target.inputLines` in `Ember/Z80/Target.lean`) | **the trace the tests print**: the same image loaded as `Tools.Z80.machineOf` loads it (`loaded`; `#guard`: `build` without the passes gives these bytes at 0) and run by `Target.runHarness` with the program's names of drops and notes, for any header and input: from some number of steps on (`maxSteps`) the run does not fail, its transmissions and drops — each with the number of its input, in order — are those of `Spec.run` (`keptLines`), and its input lines are the inputs.  `runHarness` steps by a recursion on the steps (`runToHalt`) and prints by list functions, so that the proof follows it (the trace it prints is the one it printed before; `lake test` compares it).  Not in it: the notes and the line a trap would add (see `stackH_trace_lines`, `stackH_no_trap`), the image as built by default, a board |
-| **`stackH_trace_lines`** (`Z80StackHTrace.lean`; `inputLines_evs`) | **the whole trace**, notes included: as `stackH_trace` runs it, the trace is, for each input in turn, its line, then that input's events in the world the Ember semantics leaves when the input is used up (`main` called until then, `mainIter`) — transmissions, drops and notes by the program's names — and nothing else (no line saying a trap was recorded).  So the image prints what the Ember semantics does, notes included (the notes are the program's, not the Spec's: "connection-reset-by-peer 0" against the Spec's "connection reset by peer", which the comparison with the Spec does not keep).  Not in it: `tcb` lines, the image as built by default, a board |
+| **`stackH_halts`** (`Z80StackHMachine.lean`; `run_sim_of` in `Z80Machine.lean`) | the same **on the machine the tests run**: the image `assemble` makes of `StackH.items`, loaded into `Ember.Z80.Machine` as the tests load it (`harnessMachine`) and stepped by `Machine.step`, for any input: after some number of steps the CPU is halted and the machine stands for a world (`Sim`) with no input left whose transmissions and drops are those of `Spec.step`.  Not in it (see `stackH_trace`): the notes and `tcb` lines (the comparison keeps transmissions and drops), the image as built by default (see `stackD_halts`, `stackD_trace`, `stackD_trace_lines`), a board |
+| **`stackH_trace`** (`Z80StackHTrace.lean`; `Target.runToHalt`, `Target.inputLines` in `Ember/Z80/Target.lean`) | **the trace the tests print**: the same image loaded as `Tools.Z80.machineOf` loads it (`loaded`; `#guard`: `build` without the passes gives these bytes at 0) and run by `Target.runHarness` with the program's names of drops and notes, for any header and input: from some number of steps on (`maxSteps`) the run does not fail, its transmissions and drops — each with the number of its input, in order — are those of `Spec.run` (`keptLines`), and its input lines are the inputs.  `runHarness` steps by a recursion on the steps (`runToHalt`) and prints by list functions, so that the proof follows it (the trace it prints is the one it printed before; `lake test` compares it).  Not in it: the notes and the line a trap would add (see `stackH_trace_lines`, `stackH_no_trap`), the image as built by default (see `stackD_halts`, `stackD_trace`, `stackD_trace_lines`), a board |
+| **`stackH_trace_lines`** (`Z80StackHTrace.lean`; `inputLines_evs`) | **the whole trace**, notes included: as `stackH_trace` runs it, the trace is, for each input in turn, its line, then that input's events in the world the Ember semantics leaves when the input is used up (`main` called until then, `mainIter`) — transmissions, drops and notes by the program's names — and nothing else (no line saying a trap was recorded).  So the image prints what the Ember semantics does, notes included (the notes are the program's, not the Spec's: "connection-reset-by-peer 0" against the Spec's "connection reset by peer", which the comparison with the Spec does not keep).  Not in it: `tcb` lines, the image as built by default (see `stackD_halts`, `stackD_trace`, `stackD_trace_lines`), a board |
 | **`stackH_no_trap`** (`Z80StackHTrace.lean`; `SemTrapped.lean`, `trapIn` and `Sim.trapped` in `Z80Machine.lean`, `hdev` in `Z80HarnessW.lean`) | **no trap is recorded**: on the machine the tests run, for any input, the CPU halts a first time, and then no event the harness recorded is a trap (`HEvent.trap`, a write to port `0xD7`); further steps leave it halted with the same events.  The proofs' machine records a write to `0xD7` in the world (`World.trapped`, a field of its own: no note, no `tcb` line), `Sim` ties it to the harness's events, and the Ember semantics never sets it (`exec_trapped`, `call_trapped`: normally or in a trap of the language); the world at the halt is the Ember semantics', so no trap was recorded.  Checked on small machines (`Z80SimCheck`, `#guard`): the two machines side by side on no input, a tick, an empty chunk, bytes and a tick, with notes (one of value `0xFFFFFFFF`) and a write to `0xD7` — the relation holds after every step, and fails with the device as it was before (a write to `0xD7` ignored).  `runHarness` prints a trap line only when it was recorded at an input (none with no input) |
-| **`tcb_checkpoint`** (`TcbCheckpoint.lean`), **`stackH_tcb_ir`**, **`stackH_tcb_ram`** (`Z80StackHTcb.lean`) | **the state the Spec's `tcb` lines describe, where the program holds it, after every input item**: the Spec writes a `tcb` line (`logTcb`, the text `Tcb.describe`) at the end of some TCP actions; the Ember program writes none.  The observation point is between two items, after a call of `main`: the global `t` (the connection record, 35 bytes at `0x8009`) and `pend` (the echo buffer, 256 bytes at `0x802C`) hold the Spec's control block after the same items (`TcbRel`) — in the Ember semantics (`tcb_checkpoint`, from `MainInv`), in the IR's memory (`stackH_tcb_ir`; `lower_iter_mem`: `lower_iter` with the globals in memory, `GRel`), and in the RAM of the machine the tests run when it is at the head of its loop (`stackH_tcb_ram`: the two are shared bytes of the plan, `AtLoop.mem`), for every `j`, or the machine stopped before with the input used up.  The fields and their order: `RawTcb.describe` writes of the record what `Tcb.describe` writes of the control block — state by name, `snd.una`, `snd.nxt`, `rcv.nxt`, pending length, `sent`, retransmission timer/retries (`TcbRel.describe_eq`).  Not in it: the lines — the program writes no `tcb` line, and the state after an item is the state of the last line the item wrote, not of every line (`Spec.byteInput`: a byte that ends a frame logs, then a tick that waited for the end of the frame logs again; a tick that gives up a frame runs `tickInput` twice); items are bytes and ticks, not inputs; the image as built by default, a board |
+| **`tcb_checkpoint`** (`TcbCheckpoint.lean`), **`stackH_tcb_ir`**, **`stackH_tcb_ram`** (`Z80StackHTcb.lean`) | **the state the Spec's `tcb` lines describe, where the program holds it, after every input item**: the Spec writes a `tcb` line (`logTcb`, the text `Tcb.describe`) at the end of some TCP actions; the Ember program writes none.  The observation point is between two items, after a call of `main`: the global `t` (the connection record, 35 bytes at `0x8009`) and `pend` (the echo buffer, 256 bytes at `0x802C`) hold the Spec's control block after the same items (`TcbRel`) — in the Ember semantics (`tcb_checkpoint`, from `MainInv`), in the IR's memory (`stackH_tcb_ir`; `lower_iter_mem`: `lower_iter` with the globals in memory, `GRel`), and in the RAM of the machine the tests run when it is at the head of its loop (`stackH_tcb_ram`: the two are shared bytes of the plan, `AtLoop.mem`), for every `j`, or the machine stopped before with the input used up.  The fields and their order: `RawTcb.describe` writes of the record what `Tcb.describe` writes of the control block — state by name, `snd.una`, `snd.nxt`, `rcv.nxt`, pending length, `sent`, retransmission timer/retries (`TcbRel.describe_eq`).  Not in it: the lines — the program writes no `tcb` line, and the state after an item is the state of the last line the item wrote, not of every line (`Spec.byteInput`: a byte that ends a frame logs, then a tick that waited for the end of the frame logs again; a tick that gives up a frame runs `tickInput` twice); items are bytes and ticks, not inputs; the image as built by default (its observer's lines: `stackD_tcb_obs`), a board |
 | **`stackH_tcb_obs`** (`Z80StackHTcbObs.lean`; the observer `Ember/Z80/TcbObs.lean`, `ember-z80 tcb-obs`) | **the lines of the `tcb` observer of the RAM**: an observation mode apart from `Target.runHarness` (its trace and the size gate unchanged): the machine runs as the harness runs it, and at every head of the loop (`rt_main`, the stack empty, not halted) but the first the observer writes a line — at the number of the input whose item the call read, the text `Tcb.describe` would write of the record `t` (`describeAt`), one per item, in order; it fails unless it saw one head more than there are items, or when the steps run out.  The addresses come from the image as built (`addrsOf`: refused unless the program's `t` is the record `Tcb` of `Ember.Net`, and unless the image has `rt_main`; `#guard addrsAgree`: 32777 and the `rt_main` of the assembled items).  `stackH_tcb_obs`: for the image without the passes, for any input, from some number of steps on, **when the observer gives lines they are the Spec's control block after the first `j + 1` items** (`chk_chain`: the heads of the loop after each call of `main`, by `loop_iter`; `filter_range_eq`: the heads the observer saw are those).  Sound, not total: that it gives lines (that `main` does not pass `rt_main` with the stack empty) is not proved, the observer checks the count.  It runs as `scan` (one step at a time, only the lines kept; `scan_eq`, `run_eq`: what `obsList`, which the proof reads, gives).  Not the Spec's `tcb` lines: those are written inside an item, two for some (a byte that ends a frame, then a tick that waited for it), and the last of them is not always the state after the item (a tick that waited and counted the timer down) — `Z80Tests` keeps both cases, and a frame given up by a second tick |
+| **`passes_halt`**, **`stackD_halts`** (`Z80PassSim.lean` … `Z80PassMaster.lean`, `Z80PassStack.lean`; `Z80PassAbs*.lean`) | **the image as built by default** (`StackD`: `retThreading`, `sweep`, `peephole`, `packHigh`, `relax` over the items) against the image without the passes (`StackH`), run side by side in the harness's devices: a relation at matched items (`Sync`), proved for every kind of segment the match pairs; a certificate of meeting points made by `ember-passcert` outside the proofs and checked by the kernel (`certD_ok`), and what is known of `StackH`'s registers there (`absD_ok`, checked by the kernel) — so when `StackH`'s run halts, so does `StackD`'s with the same devices.  `stackD_halts`: loaded and run as the tests do, for any input, it halts having transmitted and dropped what `Spec.step` does; taken: `StackSrc` only.  That `StackD`'s items and bytes are `build`'s by default: `#guard` |
+| **`stackD_trace`**, **`stackD_no_trap`**, **`stackD_trace_lines`** (`Z80PassStackTrace.lean`) | what `stackH_trace`, `stackH_no_trap`, `stackH_trace_lines` say, of `StackD` (`#guard isLoadedD`: these are the bytes `build` gives by default) |
+| **`stackD_tcb_obs`** (`Z80PassMeet.lean`, `Z80PassStackTcb.lean`) | what `stackH_tcb_obs` says, of `StackD`: every segment has `StackD`'s stack not empty strictly inside it (`NZ`), so every head of `StackH`'s loop is a meeting point with no frames, at `rt_main`'s row, where `StackD` is at the head of its loop with the same RAM and world (`#guard addrsAgreeD`).  Soundness only, as for `StackH`: that the observer gives lines is not proved |
 
 **Checked, not proved** (translation validation, on every function
 generated): `jumpsOk` — what the generator assumes the registers hold
@@ -873,11 +895,13 @@ image without the passes, and given `StackSrc` of the Ember program
 (its computable parts, and that the written-out IR and items are the
 lowering and the build, are `#guard`s).  For the board the checks of its layout
 pass (`#guard`, not the kernel) and its image is not connected.  Of the images as
-built by default nothing is proved: `build` runs `retThreading`,
-`sweep`, `peephole`, `packHigh` and `relax` over the items, 303 bytes
-of 7159 in the SLIP build; `ember-z80 own-build --plain` is the image
-without them, tested like the other (random programs, the loopback, the
-corpus).  Not proved: for the board, start-up, the interrupt routine and the
+built by default (`build` runs `retThreading`, `sweep`, `peephole`,
+`packHigh` and `relax` over the items, 303 bytes of 7159 in the SLIP
+build) the stack's for the harness is proved (`StackD`: `stackD_halts`,
+`stackD_trace`, `stackD_no_trap`, `stackD_trace_lines`,
+`stackD_tcb_obs`, through `passes_halt`); for other programs the passes
+are tested (random programs, the loopback, the corpus; `ember-z80
+own-build --plain` is the image without them).  Not proved: for the board, start-up, the interrupt routine and the
 loop that calls `main`; interrupts in any image.  The stack: `Z.rtK` is what a
 routine of the runtime needs below its return address — 0 for the
 harness loopback (proved), 32 in the plans of the board builds
@@ -900,9 +924,10 @@ loopback image.
 Of the images: the stack's for
 the board (its plan passes the
 checks, by `#guard`; its image is not connected), the board's loopback
-image beyond its functions, and every image as built by default — the passes
-on the assembly (`retThreading`, `sweep`, `peephole`, `packHigh`,
-`relax`) are not proved.  Interrupts are not in the machine of the
+image beyond its functions, and every image as built by default but the
+stack's for the harness (`StackD`) — the passes on the assembly
+(`retThreading`, `sweep`, `peephole`, `packHigh`, `relax`) are proved
+for that image only, not in general.  Interrupts are not in the machine of the
 proofs.
 
 ### Not proven
@@ -914,7 +939,7 @@ proofs.
   ARP, DHCP) has no refinement proofs;
 * lines other than transmissions and drops (`pkt`, `tcb`, notes) are
   not compared;
-* the Z80 back end from the IR on: the translation from the IR to machine code (M7.3) is proved in part ("The code generator": instructions of one and two bytes and functions, under assumptions still to be checked) and otherwise tested (the encoder, M7.4, is proved); and what "The emitted C" and "The IR of the Z80 back end" above list as not covered;
+* the Z80 back end from the IR on, beyond the SLIP build's images for the test harness: M7.3 is proved for `StackH` and `StackD` on the Lean model, given `StackSrc` ("The code generator"), not for every IR program — other programs' images are tested; not proved: the board's runtime, start-up and interrupts, the routines and operations the stack does not use (multiplication, division, variable shifts, wide `not`/`neg`/`zero`, eight-byte values, MMIO, `input.frame`), real hardware, and that the `tcb` observer always gives lines; and what "The emitted C" and "The IR of the Z80 back end" above list as not covered;
 * that a function *traps* exactly when the Spec rejects: the theorems
   are for states that satisfy their invariants, and show that from those
   no call traps (the fuel given is enough and every index is in range).
