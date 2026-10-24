@@ -5,8 +5,8 @@ import Ember.Proof.Z80Mul
 # Ember.Proof.Z80ExtW — `ext` to and from four bytes (plan M7.3)
 
 Zero-extension of `A` or `HL` into the accumulator by a routine of the
-runtime; the low two bytes of a four-byte value from the accumulator or
-from memory.
+runtime; the low two bytes (`ext24_ok`) and the low byte (`ext14_ok`) of
+a four-byte value from the accumulator or from memory.
 -/
 
 namespace Ember.Proof.Z80Gen
@@ -222,6 +222,103 @@ theorem ext24_ok (ok : Z.OK) (hT : FnLay Z E) (F : GFinal Z base sF) (d : Dst) (
       show v % 2 ^ (8 * 2) % 2 ^ (8 * 2) = v % 2 ^ (8 * 4) % 65536
       have : (2 : Nat) ^ (8 * 2) = 65536 := by decide
       have : (2 : Nat) ^ (8 * 4) = 65536 * 65536 := by decide
+      omega
+
+/-- **`ext` to one byte from four**: the low byte. -/
+theorem ext14_ok (ok : Z.OK) (hT : FnLay Z E) (F : GFinal Z base sF) (d : Dst) (src : Opd) (s0 : GS) :
+    wpg (genInstr (.ext 1 d 4 src)) E
+      (InsPost Z E base sF dt (dtAfter dt d) (.ext 1 d 4 src)
+        ((∀ v, src ≠ .const v → Rd Z E dt 4 src) ∧ Wr Z E 1 d) s0) s0 := by
+  simp only [genInstr, store, Codegen.load, wpg_bind, wpg_get, show (1 : Nat) < 4 from by decide, if_true,
+    show ((4 : Nat) == 2) = false from rfl, Bool.false_eq_true, if_false, beq_self_eq_true]
+  have mem_case : ∀ o : Opd, (∀ v, o ≠ .const v) →
+      wpg (do
+        let p ← addrOf o
+        ins .ld [.a, .mem p]
+        setRegs fun r => { r with a := [] }
+        storeA d) E
+        (InsPost Z E base sF dt (dtAfter dt d) (.ext 1 d 4 o)
+          ((∀ v, o ≠ .const v → Rd Z E dt 4 o) ∧ Wr Z E 1 d) s0) s0 := by
+    intro o hc
+    simp only [wpg_bind]
+    refine wpg_mono (addrOf_ok o s0) ?_
+    intro p s1 ⟨ho1, hr1, hp, hsp, _, hj1, hl1, hlv⟩
+    subst hp
+    simp only [wpg_ins, wpg_setRegs]
+    refine wpg_mono (thenStoreA (dt := dt) ok hT F d s0 _ (∀ v, o ≠ .const v → Rd Z E dt 4 o)
+      (fun ist tmps => IR.modN 1 (IR.Sem.opd Z.c ist tmps 4 o))
+      ⟨by simp [ho1], by simp [hj1], by simp [hl1]⟩ (fun hx hrd' fr ist tmps s R hat => ?_)) (fun _ s2 h => h)
+    have hrd : Rd Z E dt 4 o := hrd' 0 (hc 0)
+    obtain ⟨ad, had, hpc⟩ := hat
+    obtain ⟨hv, hb⟩ := opd_val (n := 4) ok hrd hsp hc ad
+    have hnn : (Instr.immW (Z.a.env ad) ⟨.ld, [.a, .mem (opdVal E o)]⟩).toNat = opdAddr Z E o :=
+      immW_toNat _ _ _ _ rfl hv (by omega)
+    obtain ⟨hst, hat'⟩ := run_ins ok F (s0 := s1)
+      (s1 := { s1 with out := s1.out.push (.ins ⟨.ld, [.a, .mem (opdVal E o)]⟩) })
+      (i := ⟨.ld, [.a, .mem (opdVal E o)]⟩) ((GExt.regs _ _).trans hx) rfl R.img R.run
+      (by rw [ho1]; exact ⟨ad, had, hpc⟩)
+      (s' := ({ (skip (op1 s) 2) with
+        a := (op1 s).rd (Instr.immW (Z.a.env ad) ⟨.ld, [.a, .mem (opdVal E o)]⟩) }).tick 13)
+      (fun ad' had' => by
+        rw [ho1, had] at had'
+        cases had'
+        intro _
+        rfl) rfl
+    refine ⟨_, hst, hat', R.of_sys (by simp only [Sys, zsim, and_self]) rfl (fun o h => by rw [← hr1]; exact h)
+      (fun o ho hown => R.rhl o (by rw [← hr1]; exact ho) hown) (fun n o h => by rw [← hr1]; exact h), ?_⟩
+    simp only [zsim]
+    show (s.mem.get! _).toNat = _
+    rw [hnn, ← rd_one _ _ (by omega), modN1_mod, ← opd_mem hrd hsp hc hlv R, rd_low s.mem _ 1 3]
+  by_cases hacc : (s0.regs.acc == some (4, src)) = true
+  · simp only [hacc, if_true, wpg_bind, wpg_ins, wpg_setRegs]
+    have hacc' : s0.regs.acc = some (4, src) := by simpa using hacc
+    refine wpg_mono (thenStoreA (dt := dt) ok hT F d s0 _ (∀ v, src ≠ .const v → Rd Z E dt 4 src)
+      (fun ist tmps => IR.modN 1 (IR.Sem.opd Z.c ist tmps 4 src))
+      ((GExt.push _ _).trans (GExt.regs _ _)) (fun hx hrd fr ist tmps s R hat => ?_)) (fun _ s2 h => h)
+    obtain ⟨ad, had, hpc⟩ := hat
+    have hacr := ok.accRam
+    have href : AccRef Z := ⟨_, ⟨.ld, [.a, .mem (.sym "rt_acc")]⟩, 0,
+      F.emitted (s := { s0 with out := s0.out.push (.ins ⟨.ld, [.a, .mem (.sym "rt_acc")]⟩) })
+        ((GExt.regs _ _).trans hx) rfl, rfl⟩
+    have hnn : (Instr.immW (Z.a.env ad) ⟨.ld, [.a, .mem (.sym "rt_acc")]⟩).toNat = Z.acc :=
+      immW_toNat _ _ _ _ rfl (sym_val ad (ok.accSym href)) (by omega)
+    obtain ⟨hst, hat'⟩ := run_ins ok F (s0 := s0)
+      (s1 := { s0 with out := s0.out.push (.ins ⟨.ld, [.a, .mem (.sym "rt_acc")]⟩) })
+      (i := ⟨.ld, [.a, .mem (.sym "rt_acc")]⟩) ((GExt.regs _ _).trans hx) rfl R.img R.run ⟨ad, had, hpc⟩
+      (s' := ({ (skip (op1 s) 2) with
+        a := (op1 s).rd (Instr.immW (Z.a.env ad) ⟨.ld, [.a, .mem (.sym "rt_acc")]⟩) }).tick 13)
+      (fun ad' had' => by
+        rw [had] at had'
+        cases had'
+        intro _
+        rfl) rfl
+    have hown : Own E src := by
+      cases src with
+      | const v => trivial
+      | tmp t => trivial
+      | slot sl => exact Rd.own (dt := dt) (n := 4) (hrd 0 (by intro h; cases h))
+    refine ⟨_, hst, hat', R.of_sys (by simp only [Sys, zsim, and_self]) rfl (fun o h => h)
+      (fun o ho hown => R.rhl o ho hown) (fun n o h => h), ?_⟩
+    simp only [zsim]
+    show (s.mem.get! _).toNat = _
+    rw [hnn, ← rd_one _ _ (by omega), modN1_mod, ← R.racc 4 src hacc' hown, rd_low s.mem _ 1 3]
+  · simp only [hacc, Bool.false_eq_true, if_false]
+    cases src with
+    | slot sl => exact mem_case (.slot sl) (fun v h => by cases h)
+    | tmp t => exact mem_case (.tmp t) (fun v h => by cases h)
+    | const v =>
+      simp only [wpg_bind]
+      refine wpg_mono (loadA_ok (dt := dt) ok F (.const (v % 2 ^ bits 1)) s0) ?_
+      intro _ s1 ⟨hx1, _, _, hl⟩
+      refine wpg_mono (thenStoreA (dt := dt) ok hT F d s0 s1 (∀ w, Opd.const v ≠ .const w → Rd Z E dt 4 (.const v))
+        (fun ist tmps => IR.modN 1 (IR.Sem.opd Z.c ist tmps 4 (.const v))) hx1
+        (fun hx _ fr ist tmps s R hat => ?_)) (fun _ s2 h => h)
+      obtain ⟨s', st, at', R', _, hA⟩ := hl hx fr ist tmps s trivial R hat
+      refine ⟨s', st, at', R', ?_⟩
+      rw [hA, modN1_mod]
+      show v % 2 ^ (8 * 1) % 2 ^ (8 * 1) = v % 2 ^ (8 * 4) % 256
+      have : (2 : Nat) ^ (8 * 1) = 256 := by decide
+      have : (2 : Nat) ^ (8 * 4) = 256 * 16777216 := by decide
       omega
 
 end

@@ -45,7 +45,7 @@ def Covered : IR.Instr → Bool
   | .mov n _ _ | .bin _ n _ _ _ | .cmp _ n _ _ _ | .br _ n _ _ _ => size12 n || n == 4
   | .not n _ _ | .neg n _ _ => size12 n
   | .ext n _ m _ => (n == 1 && m == 2) || (n == 2 && m == 1) || (n == 4 && m == 2) || (n == 4 && m == 1) ||
-      (n == 2 && m == 4)
+      (n == 2 && m == 4) || (n == 1 && m == 4)
   | .shift _ n _ _ _ amt => (size12 n && isConst amt) || (n == 4 && isConst16 amt)
   | .lea _ p => addrCov p
   | .load n _ p | .store n p _ => (size12 n || n == 4) && addrCov p
@@ -241,9 +241,10 @@ theorem ins0_ok (ok : Z.OK) (hT : FnLay Z E) (F : GFinal Z base sF) (hrt : RtOK 
         intro _ s1 ⟨hx, h⟩
         exact ⟨hx, fun hxF hN => h hxF (hN 16 rfl)⟩
   | ext n d m src =>
-    have hnm : (n = 1 ∧ m = 2) ∨ (n = 2 ∧ m = 1) ∨ (n = 4 ∧ m = 2) ∨ (n = 4 ∧ m = 1) ∨ (n = 2 ∧ m = 4) := by
+    have hnm : (n = 1 ∧ m = 2) ∨ (n = 2 ∧ m = 1) ∨ (n = 4 ∧ m = 2) ∨ (n = 4 ∧ m = 1) ∨ (n = 2 ∧ m = 4) ∨
+        (n = 1 ∧ m = 4) := by
       simpa [Covered, or_assoc] using hc
-    rcases hnm with ⟨rfl, rfl⟩ | ⟨rfl, rfl⟩ | ⟨rfl, rfl⟩ | ⟨rfl, rfl⟩ | ⟨rfl, rfl⟩
+    rcases hnm with ⟨rfl, rfl⟩ | ⟨rfl, rfl⟩ | ⟨rfl, rfl⟩ | ⟨rfl, rfl⟩ | ⟨rfl, rfl⟩ | ⟨rfl, rfl⟩
     · refine wpg_mono (ext12_ok (dt := dt) ok hT F d src s0) ?_
       intro _ s1 ⟨hx, h⟩
       exact ⟨hx, fun hxF hN => h hxF hN⟩
@@ -257,6 +258,9 @@ theorem ins0_ok (ok : Z.OK) (hT : FnLay Z E) (F : GFinal Z base sF) (hrt : RtOK 
       intro _ s1 ⟨hx, h⟩
       exact ⟨hx, fun hxF hN => h hxF hN⟩
     · refine wpg_mono (ext24_ok (dt := dt) ok hT F d src s0) ?_
+      intro _ s1 ⟨hx, h⟩
+      exact ⟨hx, fun hxF hN => h hxF hN⟩
+    · refine wpg_mono (ext14_ok (dt := dt) ok hT F d src s0) ?_
       intro _ s1 ⟨hx, h⟩
       exact ⟨hx, fun hxF hN => h hxF hN⟩
   | load n d p =>
