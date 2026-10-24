@@ -175,6 +175,7 @@ import Ember.Proof.Z80Machine
 import Ember.Proof.Z80WideIR
 import Ember.Proof.Z80WideHItems
 import Ember.Proof.Z80WideH
+import Ember.Proof.Z80WideHSpec
 
 /-!
 # Ember.Proof — proofs (plan M5): about the reference stack (P1), and that Ember code refines it (P2)
@@ -312,9 +313,18 @@ The Z80 back end (M7, begun) — `Ember.Z80.IR.Sem` is the semantics of its IR:
   addresses** (`Ember.Z80.Wide`) for the harness, without the passes: its functions do what the IR's do,
   nothing taken of the runtime (`wideH_ok`); from reset, on the machine of the proofs (`hbus`, `hdev`), when
   the IR's run ends with the input used up the machine halts holding its world (`wideH_halts`), and when a
-  call traps in the IR it reaches `rt_trap` holding the world of the trap (`wideH_traps`; `rt_trap` loops,
-  it does not halt).  `Moves` is proved for any input (`moves`).  IR level: not composed with the Ember
-  semantics, not carried to `Ember.Z80.Machine` or to the trace `runHarness` prints (tests compare those);
+  call traps in the IR it reaches the label `rt_trap` holding the world of the trap (`wideH_traps`; the
+  items there are `out (0xD7),a; di; halt; jr rt_trap_l` — this theorem claims nothing beyond the label).
+  `Moves` is proved for any input (`moves`);
+* `Z80WideHSpec`: the same against the **Ember semantics** (`lower_iter`, `lower_trap`) and on **`Ember.Z80.Machine`
+  as the tests build it** (`step_sim`): when `j` calls of `main` end in `Lang.Sem` (`callN`) and leave no
+  input, `Machine.step` gets to a halted CPU standing for the world of `i ≤ j` of them
+  (`wideH_spec_halt`, `wideH_harness_halts`); when the next call traps in `Lang.Sem` with input remaining,
+  it gets to the label `rt_trap` standing for the world of the trap, or halted earlier
+  (`wideH_spec_trap`, `wideH_harness_trap`) — not the trap port's write nor the halt after the label
+  (stepping on needs `Img` at the label, which `Trapped` does not carry).  That the calls end or trap is the
+  hypothesis on `callN`, evaluated for the test's two inputs (`#guard`).  Not to the trace `runHarness`
+  prints, not the image as built by default;
 
 * `Z80Note`, `Z80Wide`, `Z80Bytes`: the harness's `rt_note`, and the routines on the accumulator, `rt_shr8`,
   proved from their items;

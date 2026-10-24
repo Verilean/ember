@@ -35,8 +35,8 @@ What the statements are about, and what they are not: the image is
 the passes, the IR what `IR.lower` returns and the layout what `build`
 computes are `#guard`s.  The machine is the CPU model with the harness's
 ports (`hbus`, `hdev`).  Not the image as built by default (with the
-passes on the assembly); not a theorem about the Ember semantics of the
-program.
+passes on the assembly).  These theorems are about the IR's runs; against
+the Ember semantics and on `Ember.Z80.Machine`: `Z80WideHSpec`.
 -/
 
 namespace Ember.Proof.Z80Gen.WideH
@@ -575,8 +575,10 @@ theorem wideH_halts :
 /-- info: 'Ember.Proof.Z80Gen.WideH.wideH_halts' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in #print axioms wideH_halts
 
-/-- **A trap of the IR's run reaches `rt_trap` in the image** (which
-then loops with interrupts off: it does not halt): from reset, when `j`
+/-- **A trap of the IR's run reaches `rt_trap` in the image** — the
+label: its items are `out (0xD7),a; di; halt; jr rt_trap_l`, and this
+theorem claims nothing of them (`Trapped`: at the label, not halted, the
+shared bytes as the IR's): from reset, when `j`
 calls of `main` end in the IR's semantics and the next one, with input
 remaining, traps, the machine gets to `rt_trap` holding the world of the
 trap — or it stopped earlier, the input used up. -/
