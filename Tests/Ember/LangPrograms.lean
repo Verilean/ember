@@ -202,11 +202,36 @@ ember def strict_and := do
 
 def p4 : Prog := { globals := [g3], fns := [strict_and], entry := "strict_and" }
 
+ember global wa : [u32; 4]
+ember global wv : u32 := 305419896
+
+/-- A `store` of four bytes through an address (M7.3, `store4_ok`): the
+own back end puts the value in the accumulator before the address (it
+saved the address with `push hl` around `loadAcc` before).  A value read
+from a global, one the accumulator holds already (the sum), a constant
+from the literal pool, and an index out of range for the second input. -/
+ember def wide_store := do
+  let k : u16 ← input.next()
+  if k == 0xFFFF then
+    return
+  let i : u8 := (k : u8) % 4
+  wa[i] := wv
+  wa[(i + 1) % 4] := wv + (k : u32)
+  wa[(i + 2) % 4] := 70000
+  out.byte((wa[i] : u8))
+  out.byte((wa[(i + 1) % 4] : u8))
+  out.byte((wa[(i + 2) % 4] : u8))
+  wa[(k : u8)] := wv
+  out.end()
+
+def p5 : Prog := { globals := [wa, wv], fns := [wide_store], entry := "wide_store" }
+
 def progs : List (String × Prog × Array Ember.Trace.Input) :=
   [("regress_trap_after_event", p1, #[.rx (ByteArray.mk #[0xf1])]),
    ("regress_call_then_trap", p2, #[.rx (ByteArray.mk #[0x5c])]),
    ("regress_call_changes_index", p3, #[.rx (ByteArray.mk #[0x64])]),
-   ("regress_strict_and", p4, #[.rx (ByteArray.mk #[0x64])])]
+   ("regress_strict_and", p4, #[.rx (ByteArray.mk #[0x64])]),
+   ("regress_wide_store", p5, #[.rx (ByteArray.mk #[0x02, 0x07])])]
 
 end Regress
 

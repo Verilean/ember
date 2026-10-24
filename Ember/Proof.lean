@@ -96,6 +96,7 @@ import Ember.Proof.Z80Acc
 import Ember.Proof.Z80AccOps
 import Ember.Proof.Z80ExtW
 import Ember.Proof.Z80MemW
+import Ember.Proof.Z80StoreW
 import Ember.Proof.Z80CallFn
 import Ember.Proof.Z80Ins
 import Ember.Proof.Z80Fn
@@ -274,6 +275,8 @@ The Z80 back end (M7, begun) — `Ember.Z80.IR.Sem` is the semantics of its IR:
 * `Z80Acc`, `Z80AccOps`, `Z80ExtW`: values of four bytes in the runtime's accumulator — `loadAcc_ok`,
   `storeAcc_ok`, `mov`, `bin`, `cmp`, `br`, `ext`, by routines taken with specifications (`RtW`);
 * `Z80MemW`: `load` of four bytes through an address (`load4_ok`: `genAddr`, `rt_ld32`, `storeAcc`);
+* `Z80StoreW`: `store` of four bytes through an address (`store4_ok`: `loadAcc`, `genAddr` — `genAddr_acc` —,
+  `rt_st32`);
 * `Z80Ret`, `Z80CallFn`, `Z80After`, `Z80Eff`, `Z80Ins`: `ret`, `trap`, `call` of a function of the
   program, effects through the runtime's routines (`RtEff`), and every covered instruction in one
   statement (`ins_ok`), in the machine around the CPU (`WSteps`, `ZCtx.wrel`) — every instruction of the

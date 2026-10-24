@@ -499,7 +499,7 @@ def needB (P : Plan) (E : GEnv) (dts : List Nat) : IR.Instr → Bool
      | _ => true)
   | .lea d p => addrNeedB P E dts p && wrDB P E 2 d
   | .load n d p => addrNeedB P E dts p && addrDataB P p n && wrDB P E n d
-  | .store n p src => addrNeedB P E dts p && addrStoreB P E p n && rdB P E dts n src
+  | .store n p src => addrNeedB P E dts p && addrStoreB P E p n && rdNB P E dts n src
   | .br _ n a b l => rdNB P E dts n a && rdNB P E dts n b && P.labels.contains (lname E l)
   | .jmp _ | .label _ => true
   | .ret v => (match v with | some (n, o) => rdNB P E dts n o | none => true)
@@ -556,7 +556,7 @@ theorem needB_sound (hlab : Labels P M) (hlit : Lits P M) (hdt : ∀ t, t ∈ dt
     exact ⟨addrNeedB_sound hlab hdt h.1.1, addrDataB_sound h.1.2, wrDB_sound h.2⟩
   | store n p src =>
     simp only [needB, Bool.and_eq_true] at h
-    exact ⟨addrNeedB_sound hlab hdt h.1.1, addrStoreB_sound h.1.2, rdB_sound hdt h.2⟩
+    exact ⟨addrNeedB_sound hlab hdt h.1.1, addrStoreB_sound h.1.2, rdNB_sound hlit hdt h.2⟩
   | br op n a b l =>
     simp only [needB, Bool.and_eq_true, List.contains_iff_mem] at h
     exact ⟨rdNB_sound hlit hdt h.1.1, rdNB_sound hlit hdt h.1.2, hlab _ h.2⟩

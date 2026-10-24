@@ -12,8 +12,8 @@ decides them; the `#guard`s say it accepts every function of the builds
 of the stack — the SLIP build, the loopback program — as `IR.lower`
 returns them.  (The other parts speak of the layout; no checker yet.)
 `coverage` counts what the instruction theorems cover in a build: all
-of the SLIP build and the loopback program, 1560 of the 1562
-instructions of each Ethernet build (`#guard`s).
+of the SLIP build and the loopback program, 1561 of the 1562
+instructions of each Ethernet build (`#guard`s; `input.frame` is left).
 -/
 
 namespace Ember.Proof.Z80Gen
@@ -89,18 +89,25 @@ def isLoad4 : IR.Instr → Bool
   | .load 4 _ _ => true
   | _ => false
 
-/-- What is left of the Ethernet builds: a `store` of four bytes through an address, `input.frame`. -/
+/-- A `store` of four bytes through an address (`store4_ok`). -/
+def isStore4 : IR.Instr → Bool
+  | .store 4 _ _ => true
+  | _ => false
+
+/-- What is left of the Ethernet builds: `input.frame`. -/
 def ethLeft : List IR.Instr → Bool
-  | [.store 4 _ _, .eff .inputFrame [] _] => true
+  | [.eff .inputFrame [] _] => true
   | _ => false
 
 -- the SLIP build and the loopback program: every instruction covered
 #guard (coverage Ember.Net.prog).map (fun (a, u) => (a.length, u.length)) == some (1073, 0)
 #guard (coverage Ember.Net.Loop.prog).map (fun (a, u) => (a.length, u.length)) == some (79, 0)
--- the three Ethernet builds: 1560 of 1562, their `load` of four bytes through an address among them
+-- the three Ethernet builds: 1561 of 1562, their `load` and `store` of four bytes through an address
+-- among them
 #guard [Ember.Net.Eth.prog, Ember.Net.Eth.progDhcp, Ember.Net.Eth.progFor false 296].all fun p =>
   match coverage p with
-  | some (a, u) => a.length == 1562 && ethLeft u && a.any fun i => isLoad4 i && Covered i
+  | some (a, u) => a.length == 1562 && ethLeft u && (a.any fun i => isLoad4 i && Covered i) &&
+      a.any fun i => isStore4 i && Covered i
   | none => false
 
 /-- info: 'Ember.Proof.Z80Gen.shapeB_sound' depends on axioms: [propext, Quot.sound] -/

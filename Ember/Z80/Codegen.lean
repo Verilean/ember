@@ -932,13 +932,10 @@ def genInstr (i : IR.Instr) : GM Unit := do
       ins .inc [.hl]
       ins .ld [.mhl, .d]
     else
-      if r.acc == some (n, src) then
-        genAddr p
-      else
-        genAddr p
-        ins .push [.hl]
-        loadAcc n src
-        ins .pop [.hl]
+      -- the value first (nothing if the accumulator holds it), then the
+      -- address: `genAddr` keeps the accumulator, so `HL` needs no saving
+      loadAcc n src
+      genAddr p
       call s!"rt_st{bits n}"
       setRegs fun r => { r with a := [], hl := [] }
     killSlots

@@ -777,7 +777,8 @@ footprint (`ZCtx.wr`) has changed.
 | `genAddr_ok`, `lea_ok`, `load1_ok`, `load2_ok`, `store1_ok`, `store2_ok` | an address into `HL` — static root, an index of one or two bytes checked in line or by `rt_bound` and scaled by a power of two — and memory through it; a failed check gets to `rt_trap`, as the IR's instruction traps |
 | `shift1_ok`, `shift2_ok`, `shift4_ok` | shifts by a constant: repeated `add`, `srl`/`rr`, a byte moved, or the runtime's routine |
 | `loadAcc_ok`, `storeAcc_ok`, `movW_ok`, `binW_ok`, `flagsW_ok`, `ext42_ok`, … (`Z80Acc.lean`, `Z80AccOps.lean`, `Z80ExtW.lean`) | values of four bytes: the operand into the runtime's accumulator (a constant from the literal pool), the operation by a routine of the runtime, the accumulator stored |
-| `load4_ok` (`Z80MemW.lean`) | a `load` of four bytes through an address: the address into `HL` (`genAddr_ok`, its index check), the four bytes into the accumulator by `rt_ld32`, stored as the IR's `load` stores them (in the Ethernet builds; `store` of four bytes through an address not covered) |
+| `load4_ok` (`Z80MemW.lean`) | a `load` of four bytes through an address: the address into `HL` (`genAddr_ok`, its index check), the four bytes into the accumulator by `rt_ld32`, stored as the IR's `load` stores them (in the Ethernet builds) |
+| `store4_ok`, `genAddr_acc`, `st4_tail` (`Z80StoreW.lean`) | a `store` of four bytes through an address: the value into the accumulator (`loadAcc_ok`), the address into `HL` (`genAddr_ok`; the accumulator still holds the value — the states agree after `genAddr`, `rt_bound` included, with the tracker's claim, which `genAddr_acc` shows unchanged), `rt_st32` (`RtW.st`) writes it as the IR's `store` does |
 | `eff_ok` (`Z80Eff.lean`) | an effect's code calls the effect's routine with its argument in `A` (a note's value in the accumulator): afterwards the machine stands for the world `IR.Sem.effect` gives (`out.byte`, `out.end`, `drop`, `note`, `input.next`, `ring.pop`) |
 | **`ins_ok`** (`Z80Ins.lean`) | for a covered instruction and whatever `IR.Sem.step` says it does: the code reaches the next item with the states agreeing after it; or the label's item; or calls the function and stores its result; or returns (`RetSt`); or reaches `rt_trap` — in the machine around the CPU, which stands for the IR's world before and after (`MAfter`).  An instruction without effects is proved to do no I/O whatever the bus would answer (`Steps`, `After`) and lifted (`After.lift`) |
 | `genBody_ok`, `Chain.fns` (`Z80Fn.lean`) | the generator's states before and after every instruction of a body, each with the promise of `ins_ok` |
@@ -940,16 +941,19 @@ harness loopback (proved), 32 in the plans of the board builds
 routine of `Runtime.pieces`, not proved).
 
 **Covered** (`Covered`): all 1073 instructions of the SLIP build's IR,
-all 79 of the loopback program's, 1560 of the 1562 of each Ethernet
+all 79 of the loopback program's, 1561 of the 1562 of each Ethernet
 build's (`Z80Shape`: `coverage`, `#guard`) — with `load4_ok`
-(`Z80MemW`), a `load` of four bytes through an address (`arp_ip[i]`
-in `arp_update`): the address by `genAddr`, the bytes by `rt_ld32`
-(`RtW.ld`, its `HLApart` from the bytes being shared bytes), then
-`storeAcc`.  This is an instruction theorem: no theorem is about an
-image of the Ethernet builds.  **Not covered:** shifts by a variable,
-`zero`, `not`/`neg` on four bytes, a `store` of four bytes through an
-address (its code keeps the address on the stack, `push hl`, while
-`loadAcc` runs), values of eight bytes, the
+(`Z80MemW`) and `store4_ok` (`Z80StoreW`), memory of four bytes
+through an address (`arp_ip[i]` in `arp_update`): the address by
+`genAddr`, the bytes by `rt_ld32` or `rt_st32` (`RtW`; their `HLApart`
+from the bytes being shared bytes).  For the store the generator puts
+the value in the accumulator before the address (it used to save the
+address with `push hl` around `loadAcc`, which needed more stack than
+`FnStatic` grants; the SLIP build and the loopback program have no such
+store, their images are unchanged).  These are instruction theorems:
+no theorem is about an image of the Ethernet builds.  **Not covered:**
+shifts by a variable, `zero`, `not`/`neg` on four bytes, values of
+eight bytes, the
 MMIO effects and `input.frame`, an address through a pointer
 (by-reference parameters).  Of the runtime: multiplication, division,
 the shifts but `rt_shr8`, `rt_neg16`, `and`/`xor` and the eight-byte

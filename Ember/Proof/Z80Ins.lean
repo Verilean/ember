@@ -1,6 +1,6 @@
 import Ember.Proof.Z80After
 import Ember.Proof.Z80Mem
-import Ember.Proof.Z80MemW
+import Ember.Proof.Z80StoreW
 import Ember.Proof.Z80Eff
 import Ember.Proof.Z80Shift
 import Ember.Proof.Z80Acc
@@ -48,8 +48,7 @@ def Covered : IR.Instr → Bool
       (n == 2 && m == 4)
   | .shift _ n _ _ _ amt => (size12 n && isConst amt) || (n == 4 && isConst16 amt)
   | .lea _ p => addrCov p
-  | .load n _ p => (size12 n || n == 4) && addrCov p
-  | .store n p _ => size12 n && addrCov p
+  | .load n _ p | .store n p _ => (size12 n || n == 4) && addrCov p
   | .jmp _ | .label _ | .trap => true
   | .ret v => (v.map fun p => size12 p.1 || p.1 == 4).getD true
   | .call _ ret reg =>
@@ -59,6 +58,18 @@ def Covered : IR.Instr → Bool
 
 theorem size124 {n : Nat} (h : (size12 n || n == 4) = true) : n = 1 ∨ n = 2 ∨ n = 4 := by
   simpa [size12, or_assoc] using h
+
+theorem RdN.small {Z : ZCtx} {E : GEnv} {dt : Nat → Prop} {n : Nat} {o : Opd} (hn : n ≤ 2)
+    (h : RdN Z E dt n o) : Rd Z E dt n o := by
+  unfold RdN at h
+  rw [if_pos hn] at h
+  exact h
+
+theorem RdN.wide {Z : ZCtx} {E : GEnv} {dt : Nat → Prop} {n : Nat} {o : Opd} (hn : ¬ n ≤ 2)
+    (h : RdN Z E dt n o) : RdW Z E dt n o := by
+  unfold RdN at h
+  rw [if_neg hn] at h
+  exact h
 
 /-- What an instruction needs of the program. -/
 def Need (Z : ZCtx) (E : GEnv) (dt : Nat → Prop) : IR.Instr → Prop
@@ -70,7 +81,7 @@ def Need (Z : ZCtx) (E : GEnv) (dt : Nat → Prop) : IR.Instr → Prop
   | .shift _ n d a m amt => ∀ k, amt = .const k → (RdN Z E dt n a ∧ k < 2 ^ (8 * m)) ∧ Wr Z E n d
   | .lea d p => AddrNeed Z E dt p ∧ Wr Z E 2 d
   | .load n d p => AddrNeed Z E dt p ∧ AddrData Z p n ∧ Wr Z E n d
-  | .store n p src => AddrNeed Z E dt p ∧ AddrStore Z E p n ∧ Rd Z E dt n src
+  | .store n p src => AddrNeed Z E dt p ∧ AddrStore Z E p n ∧ RdN Z E dt n src
   | .br _ n a b l => RdN Z E dt n a ∧ RdN Z E dt n b ∧ ∃ j : Nat, Z.items[j]? = some (Item.label (lname E l))
   | .jmp _ | .label _ => True
   | .ret v => ∀ n o, v = some (n, o) → RdN Z E dt n o
@@ -262,15 +273,18 @@ theorem ins0_ok (ok : Z.OK) (hT : FnLay Z E) (F : GFinal Z base sF) (hrt : RtOK 
       intro _ s1 ⟨hx, h⟩
       exact ⟨hx, fun hxF hN => h hxF hN⟩
   | store n p src =>
-    have hc' : (size12 n && addrCov p) = true := hc
+    have hc' : ((size12 n || n == 4) && addrCov p) = true := hc
     rw [Bool.and_eq_true] at hc'
-    rcases size12_spec hc'.1 with rfl | rfl
+    rcases size124 hc'.1 with rfl | rfl | rfl
     · refine wpg_mono (store1_ok (dt := dt) ok hT F hrt hdep p src hc'.2 s0) ?_
       intro _ s1 ⟨hx, h⟩
-      exact ⟨hx, fun hxF hN => h hxF hN⟩
+      exact ⟨hx, fun hxF hN => h hxF ⟨hN.1, hN.2.1, RdN.small (by decide) hN.2.2⟩⟩
     · refine wpg_mono (store2_ok (dt := dt) ok hT F hrt hdep p src hc'.2 s0) ?_
       intro _ s1 ⟨hx, h⟩
-      exact ⟨hx, fun hxF hN => h hxF hN⟩
+      exact ⟨hx, fun hxF hN => h hxF ⟨hN.1, hN.2.1, RdN.small (by decide) hN.2.2⟩⟩
+    · refine wpg_mono (store4_ok (dt := dt) ok hT F hrt hdep p src hc'.2 s0) ?_
+      intro _ s1 ⟨hx, h⟩
+      exact ⟨hx, fun hxF hN => h hxF ⟨hN.1, hN.2.1, RdN.wide (by decide) hN.2.2⟩⟩
   | lea d p =>
     refine wpg_mono (lea_ok (dt := dt) ok hT F hrt hdep d p hc s0) ?_
     intro _ s1 ⟨hx, h⟩
