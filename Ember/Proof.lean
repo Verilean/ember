@@ -172,6 +172,9 @@ import Ember.Proof.Z80LoopHItems
 import Ember.Proof.Z80LoopH
 import Ember.Proof.Z80LoopHSpec
 import Ember.Proof.Z80Machine
+import Ember.Proof.Z80WideIR
+import Ember.Proof.Z80WideHItems
+import Ember.Proof.Z80WideH
 
 /-!
 # Ember.Proof — proofs (plan M5): about the reference stack (P1), and that Ember code refines it (P2)
@@ -305,6 +308,13 @@ The Z80 back end (M7, begun) — `Ember.Z80.IR.Sem` is the semantics of its IR:
   `lower_iter`) and carried to the machine the tests run (`Ember.Z80.Machine`, `step_sim`): **the loopback
   image, loaded and run as the tests do, processes all its input and stops with the world the Ember
   semantics has** (`loopH_spec_halt`, `loopH_halts`).
+* `Z80WideIR`, `Z80WideHItems`, `Z80WideH`: **the image of a small program on four-byte values through
+  addresses** (`Ember.Z80.Wide`) for the harness, without the passes: its functions do what the IR's do,
+  nothing taken of the runtime (`wideH_ok`); from reset, on the machine of the proofs (`hbus`, `hdev`), when
+  the IR's run ends with the input used up the machine halts holding its world (`wideH_halts`), and when a
+  call traps in the IR it reaches `rt_trap` holding the world of the trap (`wideH_traps`; `rt_trap` loops,
+  it does not halt).  `Moves` is proved for any input (`moves`).  IR level: not composed with the Ember
+  semantics, not carried to `Ember.Z80.Machine` or to the trace `runHarness` prints (tests compare those);
 
 * `Z80Note`, `Z80Wide`, `Z80Bytes`: the harness's `rt_note`, and the routines on the accumulator, `rt_shr8`,
   proved from their items;

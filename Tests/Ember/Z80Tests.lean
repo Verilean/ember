@@ -1,4 +1,5 @@
 import Ember.Tools.Z80
+import Ember.Z80.Wide
 import Tests.Ember.TargetTests
 import Tests.Ember.LangTests
 
@@ -92,6 +93,10 @@ def ownExamples : IO Nat := do
         else roundInputs (rounds seed 4 40)
       cases := cases.push (n, p, ins)
   for (n, p, ins) in regress do cases := cases.push (n, p, ins)
+  -- the program of the image theorems `Ember.Proof.Z80WideH` (wideH_halts, wideH_traps), on the two inputs
+  -- evaluated there: indices in range, then one out of range
+  cases := cases.push ("wide", Ember.Z80.Wide.prog, #[.rx (ByteArray.mk #[1, 2])])
+  cases := cases.push ("wide", Ember.Z80.Wide.prog, #[.rx (ByteArray.mk #[2, 7])])
   for (n, p) in Guard.progs do
     for ins in Guard.inputs do cases := cases.push (n, p, ins)
   let mut bad := 0
@@ -103,14 +108,15 @@ def ownExamples : IO Nat := do
       if Tools.Cc.trapped it then traps := traps + 1
       for (what, r) in [("IR", IR.run p ins), ("IR with inlining", IR.run p ins (inline := true)),
                         ("IR semantics", IR.Sem.run p ins), ("IR semantics with inlining", IR.Sem.run p ins (inline := true)),
-                        ("own back end", Tools.Z80.ownRun p ins)] do
+                        ("own back end", Tools.Z80.ownRun p ins),
+                        ("own back end without the passes", Tools.Z80.ownRun p ins (passes := false))] do
         match r with
         | .ok t =>
           if !Tools.Fuzz.agree it t then
             bad := bad + 1
             IO.println s!"FAIL {n}: interpreter vs {what}\n{(diff it t { observable := false }).report}"
         | .error e => bad := bad + 1; IO.println s!"FAIL {n}: {what}: {e}"
-  IO.println s!"z80 own back end: {cases.size} runs of the examples, regressions and index-check programs ({traps} of them trap): interpreter = IR = IR semantics = generated code; {bad} failures"
+  IO.println s!"z80 own back end: {cases.size} runs of the examples, regressions and index-check programs ({traps} of them trap): interpreter = IR = IR semantics = generated code, with and without the passes on the assembly; {bad} failures"
   return bad
 
 /-- Traces agree only when the program's notes do — names, values, how

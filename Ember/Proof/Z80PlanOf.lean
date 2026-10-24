@@ -58,7 +58,7 @@ def opdC (n : Nat) : Opd → List (Nat × Nat)
 
 /-- The wide constants an instruction reads. -/
 def constsOf : IR.Instr → List (Nat × Nat)
-  | .mov n _ s => opdC n s
+  | .mov n _ s | .store n _ s => opdC n s
   | .bin _ n _ a b | .cmp _ n _ a b | .br _ n a b _ => opdC n a ++ opdC n b
   | .shift _ n _ a _ _ => opdC n a
   | .eff _ args _ => args.flatMap fun a => opdC a.1 a.2

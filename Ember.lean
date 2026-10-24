@@ -40,6 +40,7 @@ import Ember.Z80.RtCheck
 import Ember.Z80.Check
 import Ember.Z80.Machine
 import Ember.Z80.Target
+import Ember.Z80.Wide
 import Ember.Tools.Cli
 import Ember.Tools.Host
 import Ember.Tools.Cc
