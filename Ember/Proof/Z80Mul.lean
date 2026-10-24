@@ -22,7 +22,7 @@ def RtBound (Z : ZCtx) : Prop :=
       ∃ s', Steps c s' ∧ s'.halted = false ∧ s'.ramStart = c.ramStart ∧ s'.mem.size = 65536 ∧
         FreeStack Z c s' ∧ s'.a = c.a ∧ s'.de = c.de ∧
         (if c.hl.toNat < c.bc.toNat then s'.pc = c.rd16 c.sp ∧ s'.sp = c.sp + 2 ∧ s'.hl = c.hl
-         else ∃ j : Nat, Z.items[j]? = some (Item.label "rt_trap") ∧ At Z.addrs j s')
+         else ∃ j : Nat, Z.items[j]? = some (Item.label "rt_trap") ∧ At Z.addrs j s' ∧ Img Z.a 0 s')
 
 /-- The effects whose routines are specified so far. -/
 def effKnown : Ember.Lang.Effect → Bool

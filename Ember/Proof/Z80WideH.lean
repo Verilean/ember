@@ -372,6 +372,7 @@ there, the machine gets to `rt_trap` holding the world of the trap — or
 it left the loop earlier and stopped, the input used up. -/
 theorem wideH_trap :
     ∃ (a : Assembled) (addrs : List Nat), assemble items = .ok a ∧
+      (∀ μ, (Zof a addrs μ).OK) ∧
       ∀ (inputs : Array Ember.Trace.Input) (s : Cpu), s.pc.toNat = 0 → Img a 0 s → s.halted = false →
         s.ramStart.toNat = 0x8000 → s.mem.size = 65536 →
         ∀ (j m : Nat) (st' st'' : IR.Sem.St), Moves m (st0 inputs) → irIter m img.ctx j (st0 inputs) = some st' →
@@ -382,7 +383,7 @@ theorem wideH_trap :
             WSteps (Zof a addrs (0, 0)) (s, ((st0 inputs).world, 0, (0, 0), (0, 0))) (s', w') ∧
             s'.halted = true ∧ s'.iff1 = false ∧ w'.1 = st_i.world ∧ st_i.world.next.1 = 0xFFFF) := by
   obtain ⟨a, addrs, ha, hsize, hset⟩ := wideH_setting
-  refine ⟨a, addrs, ha, fun inputs s hpc I hh hrs hsz j m st' st'' hmv hit hne htr => ?_⟩
+  refine ⟨a, addrs, ha, fun μ => (hset μ).1, fun inputs s hpc I hh hrs hsz j m st' st'' hmv hit hne htr => ?_⟩
   rcases run_core ha hsize hset inputs s hpc I hh hrs hsz j m st' hmv hit with ⟨s1, w1, stp, L⟩ | hr
   · rcases Z80Gen.loop_iter (loopNeed ha) hsize hset L m with ⟨hex, _⟩ | ⟨_, hit2⟩
     · exact absurd hex hne
@@ -578,12 +579,14 @@ theorem wideH_halts :
 /-- **A trap of the IR's run reaches `rt_trap` in the image** — the
 label: its items are `out (0xD7),a; di; halt; jr rt_trap_l`, and this
 theorem claims nothing of them (`Trapped`: at the label, not halted, the
-shared bytes as the IR's): from reset, when `j`
+shared bytes as the IR's, the image in ROM; on from the label:
+`wideH_harness_trap_halt`): from reset, when `j`
 calls of `main` end in the IR's semantics and the next one, with input
 remaining, traps, the machine gets to `rt_trap` holding the world of the
 trap — or it stopped earlier, the input used up. -/
 theorem wideH_traps :
     ∃ (a : Assembled) (addrs : List Nat), assemble items = .ok a ∧
+      (∀ μ, (Zof a addrs μ).OK) ∧
       ∀ (inputs : Array Ember.Trace.Input) (s : Cpu), s.pc.toNat = 0 → Img a 0 s → s.halted = false →
         s.ramStart.toNat = 0x8000 → s.mem.size = 65536 →
         ∀ (j m : Nat) (st' st'' : IR.Sem.St), irIter m img.ctx j (st0 inputs) = some st' →
@@ -593,8 +596,8 @@ theorem wideH_traps :
           (∃ i st_i s' w', i ≤ j ∧ irIter m img.ctx i (st0 inputs) = some st_i ∧
             WSteps (Zof a addrs (0, 0)) (s, ((st0 inputs).world, 0, (0, 0), (0, 0))) (s', w') ∧
             s'.halted = true ∧ s'.iff1 = false ∧ w'.1 = st_i.world ∧ st_i.world.next.1 = 0xFFFF) := by
-  obtain ⟨a, addrs, ha, h⟩ := wideH_trap
-  exact ⟨a, addrs, ha, fun inputs s hpc I hh hrs hsz j m st' st'' hit hne htr =>
+  obtain ⟨a, addrs, ha, hok, h⟩ := wideH_trap
+  exact ⟨a, addrs, ha, hok, fun inputs s hpc I hh hrs hsz j m st' st'' hit hne htr =>
     h inputs s hpc I hh hrs hsz j m st' st'' (moves inputs m) hit hne htr⟩
 
 /-- info: 'Ember.Proof.Z80Gen.WideH.wideH_traps' depends on axioms: [propext, Classical.choice, Quot.sound] -/

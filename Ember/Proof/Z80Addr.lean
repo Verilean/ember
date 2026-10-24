@@ -222,8 +222,8 @@ theorem checkRt_ok (ok : Z.OK) (hT : FnLay Z E) (F : GFinal Z base sF) (hrt : Rt
     · rw [hde', de_congr cs.d cs.e, hk0.2.2]
     · exact hhl'
   · rw [if_neg hin] at hcase
-    obtain ⟨j, hj, hatj⟩ := hcase
-    refine ⟨j, hj, hatj, hh', fun x hxd => ?_⟩
+    obtain ⟨j, hj, hatj, himg⟩ := hcase
+    refine ⟨j, hj, hatj, hh', fun x hxd => ?_, himg⟩
     have hns := ok.nostack x hxd
     rw [hmem x (by omega) (ok.rtData x hxd), hk0.1.1]
     exact R.mem x hxd
@@ -263,7 +263,7 @@ theorem genCheck_ok (ok : Z.OK) (hT : FnLay Z E) (F : GFinal Z base sF) (hrt : R
         simp only [checkDelta, hl]
         omega
       · rw [if_neg (fun h' => hin ((hlen _).mpr h'))] at hcase
-        exact ⟨j, hj, hcase, M'.2, fun y hyd => by rw [hk.1.1]; exact R.mem y hyd⟩
+        exact ⟨j, hj, hcase, M'.2, fun y hyd => by rw [hk.1.1]; exact R.mem y hyd, M'.1⟩
     | none =>
       refine wpg_mono (checkRt_ok (dt := dt) ok hT F hrt hdep len s0) ?_
       intro _ s1 ⟨hx1, hr1, h⟩

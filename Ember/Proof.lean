@@ -321,8 +321,9 @@ The Z80 back end (M7, begun) — `Ember.Z80.IR.Sem` is the semantics of its IR:
   input, `Machine.step` gets to a halted CPU standing for the world of `i ≤ j` of them
   (`wideH_spec_halt`, `wideH_harness_halts`); when the next call traps in `Lang.Sem` with input remaining,
   it gets to the label `rt_trap` standing for the world of the trap, or halted earlier
-  (`wideH_spec_trap`, `wideH_harness_trap`) — not the trap port's write nor the halt after the label
-  (stepping on needs `Img` at the label, which `Trapped` does not carry).  That the calls end or trap is the
+  (`wideH_spec_trap`, `wideH_harness_trap`), and on from it through `out (0xD7),a; di; halt` (`trap_tail`;
+  `Trapped` and `RtBound` carry the image in ROM): the CPU halted with interrupts off, the trap recorded among
+  the harness's events and in the world (`wideH_harness_trap_halt`; the harness has no maskable interrupt).  That the calls end or trap is the
   hypothesis on `callN`, evaluated for the test's two inputs (`#guard`).  Not to the trace `runHarness`
   prints, not the image as built by default;
 

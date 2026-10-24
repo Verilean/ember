@@ -523,7 +523,7 @@ theorem rt_bound_ok (ok : Z.OK) (hsz : Z.a.bytes.size < 65536) {k j : Nat} (hhas
       have : c4.de = c.de := by rw [hc4]; simp only [zsim]; exact hde3
       simpa only [Cpu.de] using this
     · rw [if_neg hlt]
-      exact ⟨j, htrap, at6⟩
+      exact ⟨j, htrap, at6, M5.1⟩
 
 /-! ## Routines on registers -/
 

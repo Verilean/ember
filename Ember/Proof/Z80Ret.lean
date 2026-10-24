@@ -36,10 +36,11 @@ structure RetSt (Z : ZCtx) (f : IR.Fn) (fr : Fr) (ist : IR.Sem.St) (sz : Option 
   out : ∀ x, ¬ Z.wr f.name x → s'.mem.get! x = fr.mem.get! x
   res : ∀ n, sz = some n → ResIn Z n (r.getD 0) s'
 
-/-- The CPU is at `rt_trap`, the shared bytes as the IR left them. -/
+/-- The CPU is at `rt_trap`, the shared bytes as the IR left them, the image in ROM (what stepping on from
+the label needs). -/
 def Trapped (Z : ZCtx) (ist : IR.Sem.St) (s' : Cpu) : Prop :=
   ∃ j, Z.items[j]? = some (Item.label "rt_trap") ∧ At Z.addrs j s' ∧ s'.halted = false ∧
-    ∀ x, Z.data x → s'.mem.get! x = ist.mem.get! x
+    (∀ x, Z.data x → s'.mem.get! x = ist.mem.get! x) ∧ Img Z.a 0 s'
 
 section
 variable {Z : ZCtx} {E : GEnv} {base : Nat} {sF : GS} {dt : Nat → Prop} {fr : Fr}
@@ -164,7 +165,7 @@ theorem trap_ok (ok : Z.OK) (F : GFinal Z base sF) (s0 : GS) :
   have hk : Z.items[base + s0.out.size]? = some (.ins ⟨.jp, [.imm (.sym "rt_trap")]⟩) :=
     F.at hx (by simp)
   obtain ⟨s', st, at', M', hS, _⟩ := jp_step ok hk hlab R.mach hat
-  exact ⟨s', st, j, hlab, at', M'.2, fun x hxd => by rw [hS.1]; exact R.mem x hxd⟩
+  exact ⟨s', st, j, hlab, at', M'.2, fun x hxd => by rw [hS.1]; exact R.mem x hxd, M'.1⟩
 
 end
 

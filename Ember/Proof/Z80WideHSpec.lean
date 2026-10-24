@@ -18,12 +18,14 @@ with the lowering (`lower_iter`, `lower_trap`, M7.1) and carried to
 * `wideH_spec_trap`, `wideH_harness_trap`: **when `j` calls end and
   the next one, with input remaining, traps in the Ember semantics**,
   the machine gets to the label `rt_trap`, standing for the world of the
-  trap — or it halted earlier, the input used up.  The items at that
-  label are `out (0xD7),a; di; halt; jr rt_trap_l`; these theorems claim
-  nothing of them: neither the write to the trap port nor the halt.
-  (`Trapped` gives the label, not halted, the shared bytes; stepping on
-  needs the image in ROM there, `Img`, which `Trapped` and `RtBound` do
-  not carry.)
+  trap — or it halted earlier, the input used up.
+* `wideH_harness_trap_halt`: the same, and on from the label, whose
+  items are `out (0xD7),a; di; halt; jr rt_trap_l` (`trap_tail`, from the
+  image in ROM there, which `Trapped` carries): the trap port written —
+  the harness records a trap among its events (`trapIn`), the world
+  says so (`trapped`) —, interrupts off (`iff1 = false`), the CPU
+  halted.  The machine of the harness has no maskable interrupt (no
+  serial input, no tick); that the CPU stays halted is not stated.
 
 What is taken: `WideSrc p` of the Ember program — its computable parts a
 `#guard` on `Ember.Z80.Wide.prog.check`; and the calls' ending as the
@@ -133,6 +135,7 @@ halted earlier, the input used up.  Nothing is said of the items after
 the label. -/
 theorem wideH_spec_trap (p : Lang.Prog) (S : WideSrc p) :
     ∃ (a : Assembled) (addrs : List Nat), assemble items = .ok a ∧
+      (∀ μ, (Zof a addrs μ).OK) ∧
       ∀ (inputs : Array Input) (s : Cpu), s.pc.toNat = 0 → Img a 0 s → s.halted = false →
         s.ramStart.toNat = 0x8000 → s.mem.size = 65536 →
         ∀ (k j : Nat) (st1 st2 : Lang.Sem.St), callN k p "main" j (Lang.Sem.initial p inputs) = some st1 →
@@ -142,8 +145,8 @@ theorem wideH_spec_trap (p : Lang.Prog) (S : WideSrc p) :
           (∃ i sti s' w', i ≤ j ∧ callN k p "main" i (Lang.Sem.initial p inputs) = some sti ∧
             WSteps (Zof a addrs (0, 0)) (s, ((st0 inputs).world, 0, (0, 0), (0, 0))) (s', w') ∧
             s'.halted = true ∧ s'.iff1 = false ∧ w'.1 = sti.world ∧ sti.world.next.1 = 0xFFFF) := by
-  obtain ⟨a, addrs, ha, ht⟩ := wideH_traps
-  refine ⟨a, addrs, ha, fun inputs s hpc I hhl hrs hsz k j st1 st2 hj hne htr => ?_⟩
+  obtain ⟨a, addrs, ha, hok, ht⟩ := wideH_traps
+  refine ⟨a, addrs, ha, hok, fun inputs s hpc I hhl hrs hsz k j st1 st2 hj hne htr => ?_⟩
   obtain ⟨m, ist1, ist2, hit, htrI, hw2⟩ := lower_trap S.lowered layout S.okP S.okIR inputs k j st1 st2
     (by rw [← LoopH.callN_eq p S.entry]; exact hj) (by rw [S.entry]; exact htr)
   rw [ctx_eq p S, init_eq p S] at hit
@@ -218,7 +221,7 @@ label `rt_trap`.**  When `j` calls of `main` end in the Ember semantics
 and the next one, with input remaining, traps: after some number of
 `Machine.step`s the CPU is at the label `rt_trap` (`Trapped`), the
 machine standing for the world of the trap — or it halted earlier, the
-input used up.  Not claimed: the write to the trap port (`0xD7`) and the
+input used up.  Not claimed here (see `wideH_harness_trap_halt`): the write to the trap port (`0xD7`) and the
 halt that follow the label. -/
 theorem wideH_harness_trap (p : Lang.Prog) (S : WideSrc p) :
     ∃ (a : Assembled) (addrs : List Nat), assemble items = .ok a ∧
@@ -232,7 +235,7 @@ theorem wideH_harness_trap (p : Lang.Prog) (S : WideSrc p) :
           callN k p "main" i (Lang.Sem.initial p inputs) = some sti ∧ sti.world.next.1 = 0xFFFF ∧
           (LoopH.mrun n (LoopH.harnessMachine a inputs)).cpu.halted = true ∧
           LoopH.Sim img.ctx (LoopH.mrun n (LoopH.harnessMachine a inputs)) w' ∧ w'.1 = sti.world) := by
-  obtain ⟨a, addrs, ha, hspec⟩ := wideH_spec_trap p S
+  obtain ⟨a, addrs, ha, _, hspec⟩ := wideH_spec_trap p S
   have hsz := image_small a ha
   refine ⟨a, addrs, ha, fun inputs k j st1 st2 hj hne htr => ?_⟩
   have R := LoopH.harness_reset a inputs hsz
@@ -247,6 +250,118 @@ theorem wideH_harness_trap (p : Lang.Prog) (S : WideSrc p) :
 
 /-- info: 'Ember.Proof.Z80Gen.WideH.wideH_harness_trap' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in #print axioms wideH_harness_trap
+
+/-! ## After the label: the trap port, `di`, `halt`
+
+`rt_trap` is `out (0xD7),a; di; halt; jr rt_trap_l` in the harness's
+runtime.  From the label (`Trapped`, the image in ROM there) the three
+instructions run as their items say: the write to `0xD7` records the trap
+in the world the machine stands for (`hdev`), `di` clears `iff1`, `halt`
+halts.  The machine of the harness has no maskable interrupt (no serial
+input, no tick, `Sim`), so nothing would take the CPU out of the halt;
+that the CPU stays halted is not needed here and not stated. -/
+
+theorem zh_dev (I : ImgIn) (a : Assembled) (addrs : List Nat) (μ : Nat × Nat) (w : HW) (e : IoEvent) :
+    (I.ZH a addrs μ).dev w e = hdev I.ctx w e := rfl
+
+/-- The items at `rt_trap`, in the image. -/
+def trapItems : List Item :=
+  [.label "rt_trap", .ins ⟨.out, [.mem (.num 0xD7), .a]⟩, .label "rt_trap_l", .ins ⟨.di, []⟩, .ins ⟨.halt, []⟩]
+
+theorem trapItems_at : (items.drop 235).take trapItems.length = trapItems := by decide +kernel
+
+theorem trap_idx {j : Nat} (h : items[j]? = some (.label "rt_trap")) : j = 235 := by
+  have hall : ∀ j, j < items.length → items[j]? = some (.label "rt_trap") → j = 235 := by decide +kernel
+  have hlt : j < items.length := by
+    rcases Nat.lt_or_ge j items.length with h' | h'
+    · exact h'
+    · rw [List.getElem?_eq_none h'] at h; cases h
+  exact hall j hlt h
+
+/-- **From the label `rt_trap`**: the trap port written (the world says
+a trap was recorded), interrupts off, the CPU halted. -/
+theorem trap_tail {a : Assembled} {addrs : List Nat} {μ : Nat × Nat} (ok : (Zof a addrs μ).OK) {ist : IR.Sem.St}
+    {s : Cpu} (T : Trapped (Zof a addrs μ) ist s) (w : HW) :
+    ∃ s3, WSteps (Zof a addrs μ) (s, w) (s3, ({ w.1 with trapped := true }, w.2)) ∧ s3.halted = true ∧
+      s3.iff1 = false := by
+  obtain ⟨j, hj, hat, hh, _, I⟩ := T
+  have hj' := trap_idx hj
+  subst hj'
+  have H : Has (Zof a addrs μ) 235 trapItems := has_of trapItems_at
+  have M : Mach (Zof a addrs μ) s := ⟨I, hh⟩
+  have at1 : At (Zof a addrs μ).addrs (235 + 1) s := at_label ok (H.get 0 rfl) hat
+  obtain ⟨st1, at2⟩ := wstep_item ok (H.get 1 rfl) M at1 w
+    (s' := (({ (skip (op1 s) 1) with
+      io := .write (mk16 (op1 s).a (byteOf (Int.ofNat 0xD7))) (op1 s).a } : Cpu).tick 11)) (fun ad _ => rfl)
+  have M1 : Mach (Zof a addrs μ) (({ (skip (op1 s) 1) with
+      io := .write (mk16 (op1 s).a (byteOf (Int.ofNat 0xD7))) (op1 s).a } : Cpu).tick 11) :=
+    M.sys (by simp only [Sys, skip, zsim, and_self])
+  have hdev1 : (Zof a addrs μ).dev w (.write (mk16 (op1 s).a (byteOf (Int.ofNat 0xD7))) (op1 s).a) =
+      ({ w.1 with trapped := true }, w.2) := by
+    have hb : byteOf (215 : Int) = (215 : UInt8) := rfl
+    rw [show (Zof a addrs μ).dev w (.write (mk16 (op1 s).a (byteOf (Int.ofNat 0xD7))) (op1 s).a) =
+      hdev img.ctx w (.write (mk16 (op1 s).a (byteOf (Int.ofNat 0xD7))) (op1 s).a) from zh_dev img a addrs μ w _]
+    simp [hdev, lo_mk16, hb]
+  rw [show (({ (skip (op1 s) 1) with
+      io := .write (mk16 (op1 s).a (byteOf (Int.ofNat 0xD7))) (op1 s).a } : Cpu).tick 11).io =
+      .write (mk16 (op1 s).a (byteOf (Int.ofNat 0xD7))) (op1 s).a from rfl, hdev1] at st1
+  have at3 := at_label ok (H.get 2 rfl) (at2 rfl)
+  generalize hc1 : (({ (skip (op1 s) 1) with
+      io := .write (mk16 (op1 s).a (byteOf (Int.ofNat 0xD7))) (op1 s).a } : Cpu).tick 11) = c1 at st1 M1 at3
+  obtain ⟨st2, at4⟩ := wstep_item ok (H.get 3 rfl) M1 at3 ({ w.1 with trapped := true }, w.2)
+    (s' := ({ op1 c1 with iff1 := false, iff2 := false } : Cpu).tick 4) (fun ad _ => rfl)
+  have M2 : Mach (Zof a addrs μ) (({ op1 c1 with iff1 := false, iff2 := false } : Cpu).tick 4) :=
+    M1.sys (by simp only [Sys, zsim, and_self])
+  have hq : ∀ c : Cpu, c.io = .none → ∀ w' : HW, (Zof a addrs μ).dev w' c.io = w' := fun c h w' => by
+    rw [h]; rfl
+  rw [hq _ rfl] at st2
+  obtain ⟨st3, _⟩ := wstep_item ok (H.get 4 rfl) M2 (at4 rfl) ({ w.1 with trapped := true }, w.2)
+    (s' := ({ op1 (({ op1 c1 with iff1 := false, iff2 := false } : Cpu).tick 4) with halted := true } : Cpu).tick 4)
+    (fun ad _ => rfl)
+  rw [hq _ rfl] at st3
+  exact ⟨_, st1.trans (st2.trans st3), rfl, rfl⟩
+
+/-- **On `Ember.Z80.Machine`, as the tests build it: a trap halts the
+machine with the trap recorded.**  When `j` calls of `main` end in the
+Ember semantics and the next one, with input remaining, traps there:
+after some number of `Machine.step`s the CPU is halted with interrupts
+off (`rt_trap`: the write to `0xD7`, `di`, `halt`), the harness has
+recorded a trap among its events (`trapIn`), and the machine stands for
+the world of the trap with the trap recorded — or it halted earlier, the
+input used up. -/
+theorem wideH_harness_trap_halt (p : Lang.Prog) (S : WideSrc p) :
+    ∃ a : Assembled, assemble items = .ok a ∧
+      ∀ (inputs : Array Input) (k j : Nat) (st1 st2 : Lang.Sem.St),
+        callN k p "main" j (Lang.Sem.initial p inputs) = some st1 → st1.world.next.1 ≠ 0xFFFF →
+        Lang.Sem.call k p st1 "main" [] = .trap st2 →
+        (∃ (n : Nat) (w' : HW),
+          (LoopH.mrun n (LoopH.harnessMachine a inputs)).cpu.halted = true ∧
+          (LoopH.mrun n (LoopH.harnessMachine a inputs)).cpu.iff1 = false ∧
+          LoopH.trapIn (LoopH.mrun n (LoopH.harnessMachine a inputs)).events = true ∧
+          LoopH.Sim img.ctx (LoopH.mrun n (LoopH.harnessMachine a inputs)) w' ∧
+          w'.1 = { st2.world with trapped := true }) ∨
+        (∃ (i : Nat) (sti : Lang.Sem.St) (n : Nat) (w' : HW), i ≤ j ∧
+          callN k p "main" i (Lang.Sem.initial p inputs) = some sti ∧ sti.world.next.1 = 0xFFFF ∧
+          (LoopH.mrun n (LoopH.harnessMachine a inputs)).cpu.halted = true ∧
+          LoopH.Sim img.ctx (LoopH.mrun n (LoopH.harnessMachine a inputs)) w' ∧ w'.1 = sti.world) := by
+  obtain ⟨a, addrs, ha, hok, hspec⟩ := wideH_spec_trap p S
+  have hsz := image_small a ha
+  refine ⟨a, ha, fun inputs k j st1 st2 hj hne htr => ?_⟩
+  have R := LoopH.harness_reset a inputs hsz
+  rcases hspec inputs _ R.pc R.img R.run R.rs R.msz k j st1 st2 hj hne htr with
+    ⟨s', w', ist2, stp, hw, _, htp⟩ | ⟨i, sti, s', w', hi, hci, ⟨n, hn⟩, hh, _, hw, hex⟩
+  · obtain ⟨s3, st3, hh3, hif3⟩ := trap_tail (hok (0, 0)) htp w'
+    obtain ⟨n, hn⟩ := stp.trans st3
+    obtain ⟨hc, Sn⟩ := run_sim a addrs n _ _ (sim0 a inputs hsz)
+    rw [hn] at hc Sn
+    refine Or.inl ⟨n, _, by rw [hc]; exact hh3, by rw [hc]; exact hif3, ?_, Sn, by rw [hw]⟩
+    rw [← Sn.trapped]
+  · obtain ⟨hc, Sn⟩ := run_sim a addrs n _ _ (sim0 a inputs hsz)
+    rw [hn] at hc Sn
+    exact Or.inr ⟨i, sti, n, w', hi, hci, hex, by rw [hc]; exact hh, Sn, hw⟩
+
+/-- info: 'Ember.Proof.Z80Gen.WideH.wideH_harness_trap_halt' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in #print axioms wideH_harness_trap_halt
 
 /-! ## The two inputs of the test, in the Ember semantics (evaluated)
 
