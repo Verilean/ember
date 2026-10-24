@@ -113,6 +113,47 @@ theorem binW_ok (ok : Z.OK) (hT : FnLay Z E) (F : GFinal Z base sF) {n : Nat} (h
   obtain ⟨s3, st3, at3, R3⟩ := hs hxF fr ist tmps s'' _ hwr R2 at2 (by rw [hrel, ha, hb])
   exact ⟨s3, (st1.trans st2).trans st3, at3, R3⟩
 
+/-- **`not` of four bytes**, an operand that is not a constant: the accumulator complemented by
+`rt_not32` (`RtOK.not32`). -/
+theorem notW_ok (ok : Z.OK) (hT : FnLay Z E) (F : GFinal Z base sF) (hrt : RtOK Z)
+    (hdep : Z.rtK + 2 ≤ Z.depth E.fn.name) (d : Dst) (a : Opd) (hc : ∀ v, a ≠ .const v) (s0 : GS) :
+    wpg (genInstr (.not 4 d a)) E
+      (InsPost Z E base sF dt (dtAfter dt d) (.not 4 d a) (Rd Z E dt 4 a ∧ Wr Z E 4 d) s0) s0 := by
+  have hname : s!"rt_not{bits 4}" = "rt_not32" := rfl
+  simp only [genInstr, store, Codegen.load, show ((4 : Nat) == 1) = false from rfl,
+    show ((4 : Nat) == 2) = false from rfl, Bool.false_eq_true, if_false, hname, wpg_bind]
+  refine wpg_mono (loadAcc_ok (dt := dt) ok hT F (by omega) hrt.wide hdep a s0) ?_
+  intro _ s1 ⟨hx1, hacc1, hl⟩
+  simp only [wpg_call, killAll, wpg_setRegs]
+  refine wpg_mono (storeAcc_ok (dt := dt) ok hT F (by omega) hrt.wide hdep d _) ?_
+  intro _ s2 ⟨hx2, hs⟩
+  have hmid : GExt s1 { s1 with out := s1.out.push (.ins ⟨.call, [.imm (.sym "rt_not32")]⟩), regs := {} } :=
+    ⟨by simp, List.suffix_refl _, List.suffix_refl _⟩
+  refine ⟨hx1.trans (hmid.trans hx2), fun hxF ⟨hrd, hwr⟩ fr ist tmps s R hat => ?_⟩
+  have hrw : RdW Z E dt 4 a := by
+    cases a with
+    | const v => exact absurd rfl (hc v)
+    | slot sl => exact hrd
+    | tmp t => exact hrd
+  obtain ⟨s', st1, at1, R1⟩ := hl (hmid.trans (hx2.trans hxF)) fr ist tmps s hrw R hat
+  have hv := R1.racc 4 a hacc1 (Rd.own_w hrw)
+  obtain ⟨c1, s'', cs, st2, at2, hrel, hfree, hsp', hh', hrs', hsz'⟩ := acc_call ok F (s0 := s1)
+    (s1 := { s1 with out := s1.out.push (.ins ⟨.call, [.imm (.sym "rt_not32")]⟩) })
+    ((GExt.regs _ _).trans (hx2.trans hxF)) rfl hrt.not32 hdep R1 at1 (fun _ _ => trivial)
+  have hroom := R1.room
+  have hstk := ok.stack
+  have hacr := ok.accRam
+  have hacs := ok.accStack
+  have hspv : s'.sp.toNat = fr.sp.toNat := by rw [R1.sp]
+  have hc1 : IR.Sem.rd c1.mem Z.acc 4 = IR.Sem.rd s'.mem Z.acc 4 :=
+    rd_congr _ _ _ _ (by omega) (fun x h1 h2 => cs.mem x (by omega))
+  have R2 : Rel Z E fr dt {} ist tmps s'' :=
+    R1.acc_free ok hT hfree hsz' hrs' hh' hsp' (fun o ho => by cases ho) (fun o ho => by cases ho)
+      (fun sl h => by cases h) (fun sl h => by cases h) (fun k o h => by cases h) (fun k sl h => by cases h)
+      (fun k o h => by cases h)
+  obtain ⟨s3, st3, at3, R3⟩ := hs hxF fr ist tmps s'' _ hwr R2 at2 (by rw [hrel, hc1, hv])
+  exact ⟨s3, (st1.trans st2).trans st3, at3, R3⟩
+
 /-- **A comparison of wide values leaves its result in the flags.** -/
 theorem flagsW_ok (ok : Z.OK) (hT : FnLay Z E) (F : GFinal Z base sF) {n : Nat} (hn : 2 < n ∧ n ≤ 8)
     (hrt : RtW Z n) (hdep : Z.rtK + 2 ≤ Z.depth E.fn.name) (op : Cmp) (a b : Opd) (s0 : GS) :

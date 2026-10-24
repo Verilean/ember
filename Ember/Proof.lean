@@ -116,6 +116,7 @@ import Ember.Proof.Z80Boot
 import Ember.Proof.Z80Note
 import Ember.Proof.Z80Wide
 import Ember.Proof.Z80Bytes
+import Ember.Proof.Z80Not
 import Ember.Proof.Z80HarnessW
 import Ember.Proof.Z80ImageParts
 import Ember.Proof.Z80GenChunks
@@ -277,7 +278,8 @@ The Z80 back end (M7, begun) — `Ember.Z80.IR.Sem` is the semantics of its IR:
 * `Z80Ext`, `Z80Shift`, `Z80Addr`, `Z80Mem`: `ext`, shifts by a constant; an address into `HL` with its
   index check (`genAddr_ok`); `lea`, `load`, `store`;
 * `Z80Acc`, `Z80AccOps`, `Z80ExtW`: values of four bytes in the runtime's accumulator — `loadAcc_ok`,
-  `storeAcc_ok`, `mov`, `bin`, `cmp`, `br`, `ext`, by routines taken with specifications (`RtW`);
+  `storeAcc_ok`, `mov`, `bin`, `cmp`, `br`, `ext`, `not` (of an operand that is not a constant, by `rt_not32`),
+  by routines taken with specifications (`RtW`, `RtOK.not32`);
 * `Z80MemW`: `load` of four bytes through an address (`load4_ok`: `genAddr`, `rt_ld32`, `storeAcc`);
 * `Z80StoreW`: `store` of four bytes through an address (`store4_ok`: `loadAcc`, `genAddr` — `genAddr_acc` —,
   `rt_st32`);
@@ -327,6 +329,7 @@ The Z80 back end (M7, begun) — `Ember.Z80.IR.Sem` is the semantics of its IR:
   hypothesis on `callN`, evaluated for the test's two inputs (`#guard`).  Not to the trace `runHarness`
   prints, not the image as built by default;
 
+* `Z80Not`: `rt_not32` proved from its items (`rt_not32_ok`);
 * `Z80Note`, `Z80Wide`, `Z80Bytes`: the harness's `rt_note`, and the routines on the accumulator, `rt_shr8`,
   proved from their items;
 * `Z80HarnessW`, `Z80ImageParts`, `Z80GenChunks`, `Z80GenOut`, `Z80AsmChunks`, `Z80StackIR`, `Z80StackHItems`,

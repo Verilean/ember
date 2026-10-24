@@ -135,6 +135,7 @@ theorem stackH_setting :
           cmp := rt_cmp32_ok ok hsize hK (has_of hcmp) }
       accA := rt_acc_a_ok ok hsize (has_of hacc)
       accHL := rt_acc_hl_ok ok hsize (has_of hacc)
+      not32 := acc _ _ _ (by rw [calls_eq]; decide)
       eff := fun e he => by
         cases e with
         | inputNext => exact harness_input ok H hsize (has_of hin) _ (Or.inl rfl)

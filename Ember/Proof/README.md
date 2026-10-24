@@ -776,7 +776,7 @@ footprint (`ZCtx.wr`) has changed.
 | `mov1_ok` … `cmp_ok`, `br_ok`, `jmp_ok`, `label_ok`, `ret_ok`, `trap_ok`, `call_ok` | the code of each instruction, for values of one and two bytes |
 | `genAddr_ok`, `lea_ok`, `load1_ok`, `load2_ok`, `store1_ok`, `store2_ok` | an address into `HL` — static root, an index of one or two bytes checked in line or by `rt_bound` and scaled by a power of two — and memory through it; a failed check gets to `rt_trap`, as the IR's instruction traps |
 | `shift1_ok`, `shift2_ok`, `shift4_ok` | shifts by a constant: repeated `add`, `srl`/`rr`, a byte moved, or the runtime's routine |
-| `loadAcc_ok`, `storeAcc_ok`, `movW_ok`, `binW_ok`, `flagsW_ok`, `ext42_ok`, … (`Z80Acc.lean`, `Z80AccOps.lean`, `Z80ExtW.lean`) | values of four bytes: the operand into the runtime's accumulator (a constant from the literal pool), the operation by a routine of the runtime, the accumulator stored |
+| `loadAcc_ok`, `storeAcc_ok`, `movW_ok`, `binW_ok`, `flagsW_ok`, `notW_ok`, `ext42_ok`, `ext14_ok`, … (`Z80Acc.lean`, `Z80AccOps.lean`, `Z80ExtW.lean`) | values of four bytes: the operand into the runtime's accumulator (a constant from the literal pool), the operation by a routine of the runtime, the accumulator stored; `notW_ok`: `not` of four bytes, of an operand that is not a constant, by `rt_not32`; `ext14_ok`: the low byte of four bytes, from the accumulator or from memory |
 | `load4_ok` (`Z80MemW.lean`) | a `load` of four bytes through an address: the address into `HL` (`genAddr_ok`, its index check), the four bytes into the accumulator by `rt_ld32`, stored as the IR's `load` stores them (in the Ethernet builds) |
 | `store4_ok`, `genAddr_acc`, `st4_tail` (`Z80StoreW.lean`) | a `store` of four bytes through an address: the value into the accumulator (`loadAcc_ok`), the address into `HL` (`genAddr_ok`; the accumulator still holds the value — the states agree after `genAddr`, `rt_bound` included, with the tracker's claim, which `genAddr_acc` shows unchanged), `rt_st32` (`RtW.st`) writes it as the IR's `store` does |
 | `eff_ok` (`Z80Eff.lean`) | an effect's code calls the effect's routine with its argument in `A` (a note's value in the accumulator): afterwards the machine stands for the world `IR.Sem.effect` gives (`out.byte`, `out.end`, `drop`, `note`, `input.next`, `ring.pop`) |
@@ -856,7 +856,7 @@ what a function of the stack does needs its refinement proof changed,
 then rebuilds the image's modules from `Z80StackIR` on.
 
 **Assumed for now:** `RtOK` — the specifications of the runtime's
-routines (`rt_mul8`, `rt_div8`, …, `rt_not16`, `rt_neg16`, the shifts,
+routines (`rt_mul8`, `rt_div8`, …, `rt_not16`, `rt_neg16`, `rt_not32`, the shifts,
 `rt_bound`, the routines on the accumulator `rt_ld32`, `rt_st32`,
 `rt_add32`, …, `rt_cmp32`, `rt_acc_a`, `rt_acc_hl`, and the routine of
 each covered effect: it returns having done to the machine what the
@@ -872,8 +872,8 @@ stack.  Without it the specifications were not true of the routines
 go; `rt_cmp32` pushes; `rt_st32` could write its own return address);
 the generated code is shown to call them so (`ptr_ok`: a wide operand
 is in the literal pool, in a shared slot or in a temporary's slot).
-Proved from their items: `rt_bound`, `rt_not16`, `rt_shr8`, the
-routines on the accumulator (`rt_ld32`, `rt_st32`, `rt_acc_a`,
+Proved from their items: `rt_bound`, `rt_not16`, `rt_not32`
+(`rt_not32_ok`, `Z80Not`), `rt_shr8`, the routines on the accumulator (`rt_ld32`, `rt_st32`, `rt_acc_a`,
 `rt_acc_hl`, `rt_add32`, `rt_sub32`, `rt_or32`, `rt_cmp32`) and the five
 effect routines of the test harness — every routine the functions of
 the stack's image for the harness call (`stackH_ok` takes none).  Not
@@ -953,15 +953,21 @@ the value in the accumulator before the address (it used to save the
 address with `push hl` around `loadAcc`, which needed more stack than
 `FnStatic` grants; the SLIP build and the loopback program have no such
 store, their images are unchanged).  These are instruction theorems:
-no theorem is about an image of the Ethernet builds.  **Not covered:**
-shifts by a variable, `zero`, `not`/`neg` on four bytes, values of
-eight bytes, the
+no theorem is about an image of the Ethernet builds.  Covered as well
+(instruction theorems only): `ext` to one byte from four (`ext14_ok`)
+and `not` of four bytes of an operand that is not a constant (`notW_ok`,
+by `rt_not32`) — with them `regress_wide_store` is covered whole and
+`crc32` but for its shifts of four bytes by a constant (evaluated outside
+the proofs, not a `#guard`); no theorem is about the images of these
+programs.  **Not covered:**
+shifts by a variable, `zero`, `not` of a constant and `neg` on four
+bytes, values of eight bytes, the
 MMIO effects and `input.frame`, an address through a pointer
 (by-reference parameters).  Of the runtime: multiplication, division,
 the shifts but `rt_shr8`, `rt_neg16`, `and`/`xor` and the eight-byte
 routines on the accumulator, the MMIO routines, and everything of the
 board's runtime (its effects, start-up, the interrupt routine and the
-ring) — proved are `rt_bound`, `rt_not16`, `rt_shr8`, the routines on
+ring) — proved are `rt_bound`, `rt_not16`, `rt_not32`, `rt_shr8`, the routines on
 four bytes of the accumulator the stack calls, the harness's five effect
 routines, `rt_zero`, and the harness's start-up and loop for the
 loopback image.

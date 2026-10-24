@@ -74,6 +74,9 @@ structure RtOK (Z : ZCtx) : Prop where
   /-- accumulator := `A`, := `HL`, zero-extended to its eight bytes -/
   accA : RtAcc Z "rt_acc_a" (fun _ => True) (fun s s' => IR.Sem.rd s'.mem Z.acc 8 = s.a.toNat)
   accHL : RtAcc Z "rt_acc_hl" (fun _ => True) (fun s s' => IR.Sem.rd s'.mem Z.acc 8 = s.hl.toNat)
+  /-- accumulator := its four bytes complemented (`rt_not32_ok`, from the routine's items) -/
+  not32 : RtAcc Z "rt_not32" (fun _ => True)
+    (fun s s' => IR.Sem.rd s'.mem Z.acc 4 = 2 ^ (8 * 4) - 1 - IR.Sem.rd s.mem Z.acc 4)
   eff : ∀ e, effKnown e = true → RtEff Z e
   shl8 : RtPure Z "rt_shl8" (fun s s' => s'.a.toNat = s.a.toNat * 2 ^ s.b.toNat % 256 ∧ s'.hl = s.hl)
   shr8 : RtPure Z "rt_shr8" (fun s s' => s'.a.toNat = s.a.toNat / 2 ^ s.b.toNat ∧ s'.hl = s.hl)

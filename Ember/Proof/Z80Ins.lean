@@ -43,7 +43,8 @@ def isConst16 : Opd → Bool
 /-- The instructions the proofs cover so far. -/
 def Covered : IR.Instr → Bool
   | .mov n _ _ | .bin _ n _ _ _ | .cmp _ n _ _ _ | .br _ n _ _ _ => size12 n || n == 4
-  | .not n _ _ | .neg n _ _ => size12 n
+  | .not n _ a => size12 n || (n == 4 && !isConst a)
+  | .neg n _ _ => size12 n
   | .ext n _ m _ => (n == 1 && m == 2) || (n == 2 && m == 1) || (n == 4 && m == 2) || (n == 4 && m == 1) ||
       (n == 2 && m == 4) || (n == 1 && m == 4)
   | .shift _ n _ _ _ amt => (size12 n && isConst amt) || (n == 4 && isConst16 amt)
@@ -137,13 +138,22 @@ theorem ins0_ok (ok : Z.OK) (hT : FnLay Z E) (F : GFinal Z base sF) (hrt : RtOK 
       intro _ s1 ⟨hx, h⟩
       exact ⟨hx, fun hxF hN => h hxF hN⟩
   | not n d a =>
-    rcases size12_spec hc with rfl | rfl
-    · refine wpg_mono (not1_ok (dt := dt) ok hT F d a s0) ?_
+    have hc' : (size12 n || (n == 4 && !isConst a)) = true := hc
+    by_cases h12 : size12 n = true
+    · rcases size12_spec h12 with rfl | rfl
+      · refine wpg_mono (not1_ok (dt := dt) ok hT F d a s0) ?_
+        intro _ s1 ⟨hx, h⟩
+        exact ⟨hx, fun hxF hN => h hxF hN⟩
+      · refine wpg_mono (not2_ok (dt := dt) ok hT F d a s0) ?_
+        intro _ s1 ⟨hx, h⟩
+        exact ⟨hx, fun hxF hN => h hxF ⟨hN.1, hN.2, hrt, hdep⟩⟩
+    · have h4 : (n == 4 && !isConst a) = true := by simpa [h12] using hc'
+      simp only [Bool.and_eq_true, beq_iff_eq, Bool.not_eq_true'] at h4
+      obtain ⟨rfl, hk⟩ := h4
+      have hnc : ∀ v, a ≠ .const v := fun v h => by subst h; cases hk
+      refine wpg_mono (notW_ok (dt := dt) ok hT F hrt hdep d a hnc s0) ?_
       intro _ s1 ⟨hx, h⟩
       exact ⟨hx, fun hxF hN => h hxF hN⟩
-    · refine wpg_mono (not2_ok (dt := dt) ok hT F d a s0) ?_
-      intro _ s1 ⟨hx, h⟩
-      exact ⟨hx, fun hxF hN => h hxF ⟨hN.1, hN.2, hrt, hdep⟩⟩
   | neg n d a =>
     rcases size12_spec hc with rfl | rfl
     · refine wpg_mono (neg1_ok (dt := dt) ok hT F d a s0) ?_
