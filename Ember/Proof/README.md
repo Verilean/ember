@@ -963,7 +963,11 @@ whole (`Tests/Ember/Z80Cover.lean`, `#guard`: 30 instructions, none left;
 in `Tests` because the program is, and built by `tools/ember/ci.sh`)
 and `crc32` is covered whole
 (`Z80Cover`, `#guard`: 34 instructions, none left); no theorem is about
-the images of these programs.  **Not covered:**
+the images of these programs.  For one on the image of
+`regress_wide_store`, its IR and the items and layout of its image for the
+harness are written out (`Z80RegressWIR`, `Z80RegressWHItems`; that they
+are the lowering's and `build`'s are `#guard`s, the lowering's in
+`Tests/Ember/Z80RegressW.lean`).  **Not covered:**
 shifts by a variable, `zero`, `not` of a constant and `neg` on four
 bytes, values of eight bytes, the
 MMIO effects and `input.frame`, an address through a pointer

@@ -179,6 +179,8 @@ import Ember.Proof.Z80WideIR
 import Ember.Proof.Z80WideHItems
 import Ember.Proof.Z80WideH
 import Ember.Proof.Z80WideHSpec
+import Ember.Proof.Z80RegressWIR
+import Ember.Proof.Z80RegressWHItems
 
 /-!
 # Ember.Proof — proofs (plan M5): about the reference stack (P1), and that Ember code refines it (P2)
@@ -330,6 +332,10 @@ The Z80 back end (M7, begun) — `Ember.Z80.IR.Sem` is the semantics of its IR:
   the harness's events and in the world (`wideH_harness_trap_halt`; the harness has no maskable interrupt).  That the calls end or trap is the
   hypothesis on `callN`, evaluated for the test's two inputs (`#guard`).  Not to the trace `runHarness`
   prints, not the image as built by default;
+* `Z80RegressWIR`, `Z80RegressWHItems`: the IR of `regress_wide_store` (a fixture of `Tests`) and the items and
+  layout of its image for the harness, without the passes, written out for a theorem on that image (none yet):
+  `isBuilt` here and, in `Tests/Ember/Z80RegressW.lean`, that the IR is the program's lowering are `#guard`s
+  (evaluation, not proof);
 
 * `Z80Not`: `rt_not32` proved from its items (`rt_not32_ok`);
 * `Z80ShrW`: `rt_shr32` proved from its items (`rt_shr32_ok`);
