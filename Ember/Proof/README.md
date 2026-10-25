@@ -973,10 +973,14 @@ every function of that image does what `IR.Sem.callF` does or reaches
 the ROM, `copy_ok`, and the harness's loop) `regressH_halts` — IR calls
 that end with the input used up: the machine halts with their world —
 and `regressH_traps` — a call that traps: the machine reaches the label
-`rt_trap` with the world of the trap — with `Moves` proved.  These are
-about the IR's runs: not composed with the Ember semantics, not carried
-to `Ember.Z80.Machine`, nothing past the label `rt_trap`; no theorem is
-about the image of `crc32`.  **Not covered:**
+`rt_trap` with the world of the trap — with `Moves` proved; and, composed
+with the lowering and carried to `Ember.Z80.Machine` (`Z80RegressWHSpec`:
+`regressH_harness_halts`, `regressH_harness_trap`,
+`regressH_harness_trap_halt`), the same against the Ember semantics of a
+program `p` with `RegressSrc p` — that the checked `Regress.p5` has it is
+`#guard`s in `Tests/Ember/Z80RegressW.lean` (evaluation: the checker is
+`partial`).  Not the trace `runHarness` prints, not the image as built by
+default; no theorem is about the image of `crc32`.  **Not covered:**
 shifts by a variable, `zero`, `not` of a constant and `neg` on four
 bytes, values of eight bytes, the
 MMIO effects and `input.frame`, an address through a pointer

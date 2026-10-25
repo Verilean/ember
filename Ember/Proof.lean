@@ -183,6 +183,7 @@ import Ember.Proof.Z80RegressWIR
 import Ember.Proof.Z80RegressWHItems
 import Ember.Proof.Z80RegressWH
 import Ember.Proof.Z80RegressWHRun
+import Ember.Proof.Z80RegressWHSpec
 
 /-!
 # Ember.Proof — proofs (plan M5): about the reference stack (P1), and that Ember code refines it (P2)
@@ -342,8 +343,14 @@ The Z80 back end (M7, begun) — `Ember.Z80.IR.Sem` is the semantics of its IR:
 * `Z80RegressWHRun`: that image from reset — start-up (the RAM cleared, the initial value of `wv` copied from
   the ROM, `copy_ok`) and the harness's loop: `regressH_halts` (IR calls that end with the input used up: the
   machine halts with their world), `regressH_traps` (a call that traps: the machine reaches the label `rt_trap`
-  with the world of the trap), `moves` proved.  About the IR's runs: not the Ember semantics, not
-  `Ember.Z80.Machine`, nothing past the label `rt_trap`;
+  with the world of the trap), `moves` proved;
+* `Z80RegressWHSpec`: composed with the lowering (`lower_iter`, `lower_trap`) and carried to
+  `Ember.Z80.Machine` (`step_sim`): `regressH_spec_halt`, `regressH_harness_halts` (calls of `wide_store` that
+  end in `Lang.Sem` with the input used up: the machine halts standing for their world),
+  `regressH_spec_trap`, `regressH_harness_trap` (a call that traps: the label `rt_trap`, the world of the
+  trap), `regressH_harness_trap_halt` (on through `out (0xD7),a; di; halt`).  Taken: `RegressSrc p` — of the
+  checked `Regress.p5` (in `Tests`) its parts are `#guard`s in `Tests/Ember/Z80RegressW.lean`, evaluation,
+  not proof.  Not the trace `runHarness` prints, not the image as built by default;
 
 * `Z80Not`: `rt_not32` proved from its items (`rt_not32_ok`);
 * `Z80ShrW`: `rt_shr32` proved from its items (`rt_shr32_ok`);
