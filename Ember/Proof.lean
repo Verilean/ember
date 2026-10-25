@@ -184,6 +184,8 @@ import Ember.Proof.Z80RegressWHItems
 import Ember.Proof.Z80RegressWH
 import Ember.Proof.Z80RegressWHRun
 import Ember.Proof.Z80RegressWHSpec
+import Ember.Proof.Z80Crc32IR
+import Ember.Proof.Z80Crc32HItems
 
 /-!
 # Ember.Proof — proofs (plan M5): about the reference stack (P1), and that Ember code refines it (P2)
@@ -351,6 +353,10 @@ The Z80 back end (M7, begun) — `Ember.Z80.IR.Sem` is the semantics of its IR:
   trap), `regressH_harness_trap_halt` (on through `out (0xD7),a; di; halt`).  Taken: `RegressSrc p` — of the
   checked `Regress.p5` (in `Tests`) its parts are `#guard`s in `Tests/Ember/Z80RegressW.lean`, evaluation,
   not proof.  Not the trace `runHarness` prints, not the image as built by default;
+* `Z80Crc32IR`, `Z80Crc32HItems`: the IR of `crc32` (`Ember.Lang.Examples`) and the items and layout of its image
+  for the harness, without the passes, written out: that the IR is the program's lowering, the items and
+  layout `build`'s, and the computable parts of the checked program are `#guard`s (evaluation, not proof);
+  no theorem on that image yet;
 
 * `Z80Not`: `rt_not32` proved from its items (`rt_not32_ok`);
 * `Z80ShrW`: `rt_shr32` proved from its items (`rt_shr32_ok`);

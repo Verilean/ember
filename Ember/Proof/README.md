@@ -980,7 +980,10 @@ with the lowering and carried to `Ember.Z80.Machine` (`Z80RegressWHSpec`:
 program `p` with `RegressSrc p` — that the checked `Regress.p5` has it is
 `#guard`s in `Tests/Ember/Z80RegressW.lean` (evaluation: the checker is
 `partial`).  Not the trace `runHarness` prints, not the image as built by
-default; no theorem is about the image of `crc32`.  **Not covered:**
+default.  For `crc32` the IR and the items and layout of its image for
+the harness are written out (`Z80Crc32IR`, `Z80Crc32HItems`; `#guard`s
+that they are the lowering's and `build`'s); no theorem is about that
+image yet.  **Not covered:**
 shifts by a variable, `zero`, `not` of a constant and `neg` on four
 bytes, values of eight bytes, the
 MMIO effects and `input.frame`, an address through a pointer
