@@ -39,6 +39,9 @@ structure ImgIn where
   items : List Item
   /-- Where the generated items start in the image. -/
   genOff : Nat
+  /-- Labels the plan takes the image to have: `rt_trap`, for the code of index checks and traps — none for a
+  program without them (`Z80Check` asks for it only there). -/
+  labels : List String := ["rt_trap"]
 
 namespace ImgIn
 
@@ -47,7 +50,7 @@ def ctx (I : ImgIn) : IR.Ctx :=
 
 def planIn (I : ImgIn) (envs : List (IR.Fn × Array Bool × Option (Array Bool))) : PlanIn :=
   { c := I.ctx, envs, ramStart := I.ramStart, stackLo := I.stackLo, stackHi := I.stackHi, acc := I.acc,
-    rtK := I.rtK, rt := I.rt, labels := ["rt_trap"] }
+    rtK := I.rtK, rt := I.rt, labels := I.labels }
 
 /-- The environments of the functions (none when the generator fails). -/
 def envs (I : ImgIn) : List (IR.Fn × Array Bool × Option (Array Bool)) :=

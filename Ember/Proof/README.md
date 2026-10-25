@@ -879,8 +879,8 @@ Proved from their items: `rt_bound`, `rt_not16`, `rt_not32`
 effect routines of the test harness — every routine the functions of
 the stack's image for the harness call (`stackH_ok` takes none).  Not
 proved, tested only (`rt-check`): multiplication, division, the other
-shifts (`rt_shl32`, the eight-byte ones), `rt_neg16`, `and`/`xor` on the accumulator, the eight-byte
-routines.  The board's routines (the ring filled by the interrupt
+shifts (`rt_shl32`, the eight-byte ones), `rt_neg16`, the eight-byte
+routines (`rt_and32` and `rt_xor32` are proved since, `Z80AndXor`).  The board's routines (the ring filled by the interrupt
 routine) need interrupts in the machine of the proofs, which it does
 not have — `WSteps` runs instructions only.
 
@@ -982,16 +982,21 @@ program `p` with `RegressSrc p` — that the checked `Regress.p5` has it is
 `partial`).  Not the trace `runHarness` prints, not the image as built by
 default.  For `crc32` the IR and the items and layout of its image for
 the harness are written out (`Z80Crc32IR`, `Z80Crc32HItems`; `#guard`s
-that they are the lowering's and `build`'s); no theorem is about that
-image yet.  **Not covered:**
+that they are the lowering's and `build`'s), and `crc32H_ok`
+(`Z80Crc32H`) says every function of that image does what
+`IR.Sem.callF` does, the routines it calls proved from their items
+(`rt_and32` and `rt_xor32` in `Z80AndXor`) — the functions only: not
+start-up, reset, the loop, the Ember semantics or `Ember.Z80.Machine`.
+The image has no `rt_trap`; `ImgIn.labels` (default `["rt_trap"]`) is
+empty for it.  **Not covered:**
 shifts by a variable, `zero`, `not` of a constant and `neg` on four
 bytes, values of eight bytes, the
 MMIO effects and `input.frame`, an address through a pointer
 (by-reference parameters).  Of the runtime: multiplication, division,
-the shifts but `rt_shr8` and `rt_shr32`, `rt_neg16`, `and`/`xor` and the eight-byte
+the shifts but `rt_shr8` and `rt_shr32`, `rt_neg16` and the eight-byte
 routines on the accumulator, the MMIO routines, and everything of the
 board's runtime (its effects, start-up, the interrupt routine and the
-ring) — proved are `rt_bound`, `rt_not16`, `rt_not32`, `rt_shr8`, `rt_shr32`, the routines on
+ring) — proved are `rt_bound`, `rt_not16`, `rt_not32`, `rt_shr8`, `rt_shr32`, `rt_and32`, `rt_xor32`, the routines on
 four bytes of the accumulator the stack calls, the harness's five effect
 routines, `rt_zero`, and the harness's start-up and loop for the
 loopback image.
