@@ -775,7 +775,7 @@ footprint (`ZCtx.wr`) has changed.
 | `loadA_ok`, `loadHL_ok`, `storeA_ok`, `storeHL_ok` | an operand into `A`/`HL`, and those to a destination — a store the generator leaves out included |
 | `mov1_ok` … `cmp_ok`, `br_ok`, `jmp_ok`, `label_ok`, `ret_ok`, `trap_ok`, `call_ok` | the code of each instruction, for values of one and two bytes |
 | `genAddr_ok`, `lea_ok`, `load1_ok`, `load2_ok`, `store1_ok`, `store2_ok` | an address into `HL` — static root, an index of one or two bytes checked in line or by `rt_bound` and scaled by a power of two — and memory through it; a failed check gets to `rt_trap`, as the IR's instruction traps |
-| `shift1_ok`, `shift2_ok`, `shift4_ok` | shifts by a constant: repeated `add`, `srl`/`rr`, a byte moved, or the runtime's routine |
+| `shift1_ok`, `shift2_ok`, `shift4_ok`, `shiftR4_ok` | shifts by a constant: repeated `add`, `srl`/`rr`, a byte moved, or the runtime's routine; `shiftR4_ok`: four bytes right by a constant `1..31` other than 16, by `rt_shr32` |
 | `loadAcc_ok`, `storeAcc_ok`, `movW_ok`, `binW_ok`, `flagsW_ok`, `notW_ok`, `ext42_ok`, `ext14_ok`, … (`Z80Acc.lean`, `Z80AccOps.lean`, `Z80ExtW.lean`) | values of four bytes: the operand into the runtime's accumulator (a constant from the literal pool), the operation by a routine of the runtime, the accumulator stored; `notW_ok`: `not` of four bytes, of an operand that is not a constant, by `rt_not32`; `ext14_ok`: the low byte of four bytes, from the accumulator or from memory |
 | `load4_ok` (`Z80MemW.lean`) | a `load` of four bytes through an address: the address into `HL` (`genAddr_ok`, its index check), the four bytes into the accumulator by `rt_ld32`, stored as the IR's `load` stores them (in the Ethernet builds) |
 | `store4_ok`, `genAddr_acc`, `st4_tail` (`Z80StoreW.lean`) | a `store` of four bytes through an address: the value into the accumulator (`loadAcc_ok`), the address into `HL` (`genAddr_ok`; the accumulator still holds the value — the states agree after `genAddr`, `rt_bound` included, with the tracker's claim, which `genAddr_acc` shows unchanged), `rt_st32` (`RtW.st`) writes it as the IR's `store` does |
@@ -805,6 +805,7 @@ footprint (`ZCtx.wr`) has changed.
 | `djnz_step`, `byte_loop`, `rt_or32_ok` (`Z80Bytes.lean`) | `djnz` to a label of the image; the loop `ld a,(de); op (hl); ld (de),a; inc hl; inc de; djnz` run `B` times is `runB` on memory, for any ALU operation, the flags going from one byte to the next; and `rt_or32` from its items (`#guard`: the piece of `Runtime.pieces`), with `HLApart`: the accumulator's four bytes are or-ed with those at `HL`, no other byte changes, no stack is used.  Not yet used by a theorem of an image |
 | `rt_add32_ok`, `rt_sub32_ok` (`Z80Bytes.lean`) | `rt_add32` and `rt_sub32` from their items (`#guard`: the pieces of `Runtime.pieces`), with `HLApart`: after `or a` clears the carry, `adc`/`sbc` through the four bytes leave the sum, or the difference, modulo 2³² (`runB_add`, `runB_sub`: the carry, or borrow, of each byte goes into the next — `adc_val`, `adc_c`, `sbc_val`, `sbc_c`); no other byte changes, no stack is used.  Not yet used by a theorem of an image |
 | `rt_shr8_ok` (`Z80Bytes.lean`) | `rt_shr8` from its items (`#guard`: the piece of `Runtime.pieces`): `A` is shifted right by `B` — at once when `B` is zero (`inc b; dec b; ret z`), else `B` times `srl a` — with `HL` and memory as they were; no stack is used.  Not yet used by a theorem of an image |
+| `rt_shr32_ok` (`Z80ShrW.lean`) | `rt_shr32` from its items (`#guard`: the piece of `Runtime.pieces`), with `2 ≤ rtK`: the accumulator's four bytes shifted right by `B` — at once when `B` is zero, else `B` rounds, each with `BC` kept on the stack, of `dec hl; rr (hl); djnz` over the bytes from the top down after `or a` clears the carry; nothing else written but the two bytes of the free stack.  Used by `shiftR4_ok`, by no theorem of an image |
 | `rt_cmp32_ok` (`Z80Bytes.lean`) | `rt_cmp32` from its items (`#guard`: the piece of `Runtime.pieces`), with `HLApart` and `2 ≤ rtK`: `Z` when the accumulator's four bytes are those at `HL`, `C` when they are less (`cmpB_spec`: the borrow through the bytes, the differences or-ed into `C`; `inc c; dec c` keeps the carry).  It keeps `AF` on the stack while it or-s a byte into `C` — the two bytes below the stack pointer, which is why the bytes at `HL` are to be out of the stack and the runtime to have two bytes of it — and writes nothing else.  Not yet used by a theorem of an image; the plans so far have `rtK = 0` (loopback harness, no wide routine) or a placeholder (board) |
 | `litB_sound`, `ImgIn.ok` (`Z80Image.lean`) | the literal pool of an image, checked: for every wide constant of the program the label of its literal is in the image below the RAM and the bytes the assembler put there are the constant's (`litB`, computed on the assembled bytes) — so `LitOK`, which the theorems about wide operands take.  `ImgIn.check` asks it of every literal (it used to ask that there be none) |
 | `Gens.prog`, `ImgIn.plan_parts`, `ImgIn.ok_partsOn` (`Z80ImageParts.lean`) | an image checked in parts: `pass1B`/`pass2B` run one pass of the generator on one function and compare what it gives with what is written (`FnPart`); chained along the program (`Gens`) they give `progEnvs` and `genProg` of it; with `okB` of the plan, `fnStaticB` of each function and what `PartsOn` asks of the image the items assemble to (each a theorem of its own), the conclusion of `ImgIn.ok`; and the plan of the image is that of the environments checked so (`plan_parts`), so no check needs the kernel to run the generator over the program.  (The kernel cannot run the generator over the stack in one evaluation: it keeps the generator's states as unevaluated terms — over 40 GB, stopped.  A function at a time it can: at most about 11 GB, for the 170 instructions of `tcp_segment`) |
@@ -873,12 +874,12 @@ go; `rt_cmp32` pushes; `rt_st32` could write its own return address);
 the generated code is shown to call them so (`ptr_ok`: a wide operand
 is in the literal pool, in a shared slot or in a temporary's slot).
 Proved from their items: `rt_bound`, `rt_not16`, `rt_not32`
-(`rt_not32_ok`, `Z80Not`), `rt_shr8`, the routines on the accumulator (`rt_ld32`, `rt_st32`, `rt_acc_a`,
+(`rt_not32_ok`, `Z80Not`), `rt_shr8`, `rt_shr32` (`rt_shr32_ok`, `Z80ShrW`), the routines on the accumulator (`rt_ld32`, `rt_st32`, `rt_acc_a`,
 `rt_acc_hl`, `rt_add32`, `rt_sub32`, `rt_or32`, `rt_cmp32`) and the five
 effect routines of the test harness — every routine the functions of
 the stack's image for the harness call (`stackH_ok` takes none).  Not
 proved, tested only (`rt-check`): multiplication, division, the other
-shifts, `rt_neg16`, `and`/`xor` on the accumulator, the eight-byte
+shifts (`rt_shl32`, the eight-byte ones), `rt_neg16`, `and`/`xor` on the accumulator, the eight-byte
 routines.  The board's routines (the ring filled by the interrupt
 routine) need interrupts in the machine of the proofs, which it does
 not have — `WSteps` runs instructions only.
@@ -956,18 +957,19 @@ store, their images are unchanged).  These are instruction theorems:
 no theorem is about an image of the Ethernet builds.  Covered as well
 (instruction theorems only): `ext` to one byte from four (`ext14_ok`)
 and `not` of four bytes of an operand that is not a constant (`notW_ok`,
-by `rt_not32`) — with them `regress_wide_store` is covered whole and
-`crc32` but for its shifts of four bytes by a constant (evaluated outside
-the proofs, not a `#guard`); no theorem is about the images of these
-programs.  **Not covered:**
+by `rt_not32`), the right shift of four bytes by a constant `1..31`
+(`shiftR4_ok`, by `rt_shr32`) — with them `regress_wide_store` is covered
+whole (evaluated outside the proofs) and `crc32` is covered whole
+(`Z80Cover`, `#guard`: 34 instructions, none left); no theorem is about
+the images of these programs.  **Not covered:**
 shifts by a variable, `zero`, `not` of a constant and `neg` on four
 bytes, values of eight bytes, the
 MMIO effects and `input.frame`, an address through a pointer
 (by-reference parameters).  Of the runtime: multiplication, division,
-the shifts but `rt_shr8`, `rt_neg16`, `and`/`xor` and the eight-byte
+the shifts but `rt_shr8` and `rt_shr32`, `rt_neg16`, `and`/`xor` and the eight-byte
 routines on the accumulator, the MMIO routines, and everything of the
 board's runtime (its effects, start-up, the interrupt routine and the
-ring) — proved are `rt_bound`, `rt_not16`, `rt_not32`, `rt_shr8`, the routines on
+ring) — proved are `rt_bound`, `rt_not16`, `rt_not32`, `rt_shr8`, `rt_shr32`, the routines on
 four bytes of the accumulator the stack calls, the harness's five effect
 routines, `rt_zero`, and the harness's start-up and loop for the
 loopback image.

@@ -654,7 +654,7 @@ theorem rt_sub32_ok (ok : Z.OK) (hsz : Z.a.bytes.size < 65536) {k : Nat}
 theorem ret_z_step (ok : Z.OK) {k : Nat} (hk : Z.items[k]? = some (.ins ⟨.ret, [.z]⟩)) {s : Cpu} (M : Mach Z s)
     (hat : At Z.addrs k s) :
     ∃ s', Steps s s' ∧ s'.mem = s.mem ∧ s'.halted = s.halted ∧ s'.ramStart = s.ramStart ∧ s'.a = s.a ∧
-      s'.b = s.b ∧ s'.hl = s.hl ∧
+      s'.b = s.b ∧ s'.c = s.c ∧ s'.hl = s.hl ∧
       (if s.flag FZ = true then s'.pc = s.rd16 s.sp ∧ s'.sp = s.sp + 2 else At Z.addrs (k + 1) s' ∧ s'.sp = s.sp) := by
   obtain ⟨ad, had, hpcad⟩ := hat
   obtain ⟨c4, hc4⟩ : ∃ c4 : Cpu, c4 = (if (op1 s).cond 1 then (retTo (op1 s)).tick 11 else (op1 s).tick 5) :=
@@ -663,7 +663,8 @@ theorem ret_z_step (ok : Z.OK) {k : Nat} (hk : Z.items[k]? = some (.ins ⟨.ret,
   have hcond : (op1 s).cond 1 = s.flag FZ := cond_op1 s 1
   by_cases hz : s.flag FZ = true
   · rw [hcond, hz, if_pos rfl] at hc4
-    refine ⟨c4, Steps.one hst (by rw [hc4]; simp only [retTo, zsim]), ?_, ?_, ?_, ?_, ?_, ?_, ?_⟩
+    refine ⟨c4, Steps.one hst (by rw [hc4]; simp only [retTo, zsim]), ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_⟩
+    · rw [hc4]; simp only [retTo, zsim]
     · rw [hc4]; simp only [retTo, zsim]
     · rw [hc4]; simp only [retTo, zsim]
     · rw [hc4]; simp only [retTo, zsim]
@@ -682,7 +683,8 @@ theorem ret_z_step (ok : Z.OK) {k : Nat} (hk : Z.items[k]? = some (.ins ⟨.ret,
       have : Item.encode (.ins ⟨.ret, [.z]⟩) (Z.a.env ad) = .ok [0xC8] := rfl
       rw [this] at hbs
       exact (Except.ok.inj hbs).symm
-    refine ⟨c4, Steps.one hst (by rw [hc4]; simp only [zsim]), ?_, ?_, ?_, ?_, ?_, ?_, ?_⟩
+    refine ⟨c4, Steps.one hst (by rw [hc4]; simp only [zsim]), ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_⟩
+    · rw [hc4]; simp only [zsim]
     · rw [hc4]; simp only [zsim]
     · rw [hc4]; simp only [zsim]
     · rw [hc4]; simp only [zsim]
@@ -782,7 +784,7 @@ theorem rt_shr8_ok (ok : Z.OK) (hsz : Z.a.bytes.size < 65536) {k : Nat} (hhas : 
   obtain ⟨st2, at3, M2, hS2⟩ := does_raw ok does_dec_b (hhas.get 2 rfl) M1 at2
   obtain ⟨hb, ha, hhl, hfz⟩ := incdec_b s
   have hS02 : Sys s (decB (incB s)) := hS1.trans hS2
-  obtain ⟨c3, st3, hm3, hh3, hr3, ha3, hb3, hhl3, hcase⟩ := ret_z_step ok (hhas.get 3 rfl) M2 at3
+  obtain ⟨c3, st3, hm3, hh3, hr3, ha3, hb3, _, hhl3, hcase⟩ := ret_z_step ok (hhas.get 3 rfl) M2 at3
   rw [hfz] at hcase
   by_cases hz : s.b = 0
   · have hz' : (s.b == 0) = true := by simpa using hz

@@ -153,6 +153,7 @@ theorem loopH_setting :
       accA := acc _ _ _ (by rw [calls_eq]; decide)
       accHL := acc _ _ _ (by rw [calls_eq]; decide)
       not32 := acc _ _ _ (by rw [calls_eq]; decide)
+      shr32 := acc _ _ _ (by rw [calls_eq]; decide)
       eff := fun e he => by
         cases e with
         | inputNext => exact harness_input ok H hsize (has_of h4) _ (Or.inl rfl)

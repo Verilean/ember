@@ -117,6 +117,8 @@ import Ember.Proof.Z80Note
 import Ember.Proof.Z80Wide
 import Ember.Proof.Z80Bytes
 import Ember.Proof.Z80Not
+import Ember.Proof.Z80ShrW
+import Ember.Proof.Z80Cover
 import Ember.Proof.Z80HarnessW
 import Ember.Proof.Z80ImageParts
 import Ember.Proof.Z80GenChunks
@@ -330,6 +332,8 @@ The Z80 back end (M7, begun) — `Ember.Z80.IR.Sem` is the semantics of its IR:
   prints, not the image as built by default;
 
 * `Z80Not`: `rt_not32` proved from its items (`rt_not32_ok`);
+* `Z80ShrW`: `rt_shr32` proved from its items (`rt_shr32_ok`);
+* `Z80Cover`: what the instruction theorems cover of `crc32` (all of it, `#guard`);
 * `Z80Note`, `Z80Wide`, `Z80Bytes`: the harness's `rt_note`, and the routines on the accumulator, `rt_shr8`,
   proved from their items;
 * `Z80HarnessW`, `Z80ImageParts`, `Z80GenChunks`, `Z80GenOut`, `Z80AsmChunks`, `Z80StackIR`, `Z80StackHItems`,

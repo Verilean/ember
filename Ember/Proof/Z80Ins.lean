@@ -40,6 +40,11 @@ def isConst16 : Opd → Bool
   | .const k => k == 16
   | _ => false
 
+/-- A shift count `rt_shr32` takes: a constant in `1..31`. -/
+def isShrK : Opd → Bool
+  | .const k => 0 < k && k < 32
+  | _ => false
+
 /-- The instructions the proofs cover so far. -/
 def Covered : IR.Instr → Bool
   | .mov n _ _ | .bin _ n _ _ _ | .cmp _ n _ _ _ | .br _ n _ _ _ => size12 n || n == 4
@@ -47,7 +52,7 @@ def Covered : IR.Instr → Bool
   | .neg n _ _ => size12 n
   | .ext n _ m _ => (n == 1 && m == 2) || (n == 2 && m == 1) || (n == 4 && m == 2) || (n == 4 && m == 1) ||
       (n == 2 && m == 4) || (n == 1 && m == 4)
-  | .shift _ n _ _ _ amt => (size12 n && isConst amt) || (n == 4 && isConst16 amt)
+  | .shift l n _ _ _ amt => (size12 n && isConst amt) || (n == 4 && isConst16 amt) || (n == 4 && !l && isShrK amt)
   | .lea _ p => addrCov p
   | .load n _ p | .store n p _ => (size12 n || n == 4) && addrCov p
   | .jmp _ | .label _ | .trap => true
@@ -233,14 +238,15 @@ theorem ins0_ok (ok : Z.OK) (hT : FnLay Z E) (F : GFinal Z base sF) (hrt : RtOK 
     rw [step_call]
     exact fun w hw res hcal => h hxF hN fr ist tmps s R hat w hw res hcal
   | shift left n d a m amt =>
-    have hc' : ((size12 n && isConst amt) || (n == 4 && isConst16 amt)) = true := hc
+    have hc' : ((size12 n && isConst amt) || (n == 4 && isConst16 amt) || (n == 4 && !left && isShrK amt)) = true :=
+      hc
     cases amt with
-    | slot sl => simp [isConst, isConst16] at hc'
-    | tmp t => simp [isConst, isConst16] at hc'
+    | slot sl => simp [isConst, isConst16, isShrK] at hc'
+    | tmp t => simp [isConst, isConst16, isShrK] at hc'
     | const k =>
-      have hnk : n = 1 ∨ n = 2 ∨ (n = 4 ∧ k = 16) := by
-        simpa [size12, isConst, isConst16, or_assoc] using hc'
-      rcases hnk with rfl | rfl | ⟨rfl, rfl⟩
+      have hnk : n = 1 ∨ n = 2 ∨ (n = 4 ∧ k = 16) ∨ (n = 4 ∧ left = false ∧ 0 < k ∧ k < 32) := by
+        simpa [size12, isConst, isConst16, isShrK, or_assoc, and_assoc] using hc'
+      rcases hnk with rfl | rfl | ⟨rfl, rfl⟩ | ⟨rfl, rfl, hk0, hk⟩
       · refine wpg_mono (shift1_ok (dt := dt) ok hT F hrt hdep left d a m k s0) ?_
         intro _ s1 ⟨hx, h⟩
         exact ⟨hx, fun hxF hN => h hxF (hN k rfl)⟩
@@ -250,6 +256,14 @@ theorem ins0_ok (ok : Z.OK) (hT : FnLay Z E) (F : GFinal Z base sF) (hrt : RtOK 
       · refine wpg_mono (shift4_ok (dt := dt) ok hT F hrt hdep left d a m s0) ?_
         intro _ s1 ⟨hx, h⟩
         exact ⟨hx, fun hxF hN => h hxF (hN 16 rfl)⟩
+      · by_cases h16 : k = 16
+        · subst h16
+          refine wpg_mono (shift4_ok (dt := dt) ok hT F hrt hdep false d a m s0) ?_
+          intro _ s1 ⟨hx, h⟩
+          exact ⟨hx, fun hxF hN => h hxF (hN 16 rfl)⟩
+        · refine wpg_mono (shiftR4_ok (dt := dt) ok hT F hrt hdep d a m k hk0 hk h16 s0) ?_
+          intro _ s1 ⟨hx, h⟩
+          exact ⟨hx, fun hxF hN => h hxF (hN k rfl)⟩
   | ext n d m src =>
     have hnm : (n = 1 ∧ m = 2) ∨ (n = 2 ∧ m = 1) ∨ (n = 4 ∧ m = 2) ∨ (n = 4 ∧ m = 1) ∨ (n = 2 ∧ m = 4) ∨
         (n = 1 ∧ m = 4) := by

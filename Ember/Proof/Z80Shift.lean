@@ -692,6 +692,63 @@ theorem shift4_ok (ok : Z.OK) (hT : FnLay Z E) (F : GFinal Z base sF) (hrt : RtO
     rw [h32] at this
     omega
 
+
+/-- **A four-byte right shift by a constant** other than 16: `ld b,k` and `call rt_shr32`
+(`RtOK.shr32`). -/
+theorem shiftR4_ok (ok : Z.OK) (hT : FnLay Z E) (F : GFinal Z base sF) (hrt : RtOK Z)
+    (hdep : Z.rtK + 2 ≤ Z.depth E.fn.name) (d : Dst) (a : Opd) (m k : Nat) (hk0 : 0 < k) (hk : k < 32)
+    (hk16 : k ≠ 16) (s0 : GS) :
+    wpg (genInstr (.shift false 4 d a m (.const k))) E
+      (InsPost Z E base sF dt (dtAfter dt d) (.shift false 4 d a m (.const k))
+        ((RdW Z E dt 4 a ∧ k < 2 ^ (8 * m)) ∧ Wr Z E 4 d) s0) s0 := by
+  have hge : ¬ (k ≥ 8 * 4) := by omega
+  have h0 : (k == 0) = false := by simp; omega
+  have h16 : (k == 16) = false := by simp; omega
+  simp only [genInstr, genShift, store, Codegen.load, bits, hge, if_false, h0, h16,
+    show ((4 : Nat) == 1) = false from rfl, show ((4 : Nat) == 2) = false from rfl, beq_self_eq_true,
+    Bool.and_false, Bool.false_eq_true, wpg_bind]
+  have hname : toString "rt_" ++ toString "shr" ++ toString (8 * 4) = "rt_shr32" := rfl
+  simp only [hname]
+  refine wpg_mono (loadAcc_ok (dt := dt) ok hT F (by omega) hrt.wide hdep a s0) ?_
+  intro _ s1 ⟨hx1, hacc1, hl⟩
+  simp only [wpg_ins, wpg_call, killAll, wpg_setRegs]
+  refine wpg_mono (storeAcc_ok (dt := dt) ok hT F (by omega) hrt.wide hdep d _) ?_
+  intro _ s2 ⟨hx2, hs⟩
+  refine ⟨hx1.trans (((GExt.push _ _).trans (GExt.push _ _)).trans ((GExt.regs _ _).trans hx2)),
+    fun hxF ⟨⟨hrd, hkm⟩, hwr⟩ fr ist tmps s R hat => ?_⟩
+  have hxc : GExt
+      { s1 with out := (s1.out.push (.ins ⟨.ld, [.b, n8 k]⟩)).push (.ins ⟨.call, [.imm (.sym "rt_shr32")]⟩) } sF :=
+    (GExt.regs _ {}).trans (hx2.trans hxF)
+  obtain ⟨s', st1, at1, R1⟩ := hl (((GExt.push _ _).trans (GExt.push _ _)).trans hxc) fr ist tmps s hrd R hat
+  have hv := R1.racc 4 a hacc1 (Rd.own_w hrd)
+  -- ld b,k
+  obtain ⟨st2, at2, _⟩ := run_reg ok F (s0 := s1)
+    (s1 := { s1 with out := s1.out.push (.ins ⟨.ld, [.b, n8 k]⟩) }) ((GExt.push _ _).trans hxc) rfl
+    R1.mach at1 (ldB k s') (fun _ _ => rfl) rfl ((does_ld_b k).sys s') ((does_ld_b k).io s')
+  have R2 := R1.keep ((does_ld_b k).sys s') (by simp only [ldB, zsim]) (by simp only [ldB, zsim])
+  -- call rt_shr32
+  obtain ⟨c1, s'', cs, st3, at3, hrel, hfree, hsp', hh', hrs', hsz'⟩ := acc_call ok F
+    (s0 := { s1 with out := s1.out.push (.ins ⟨.ld, [.b, n8 k]⟩) }) hxc rfl hrt.shr32 hdep R2 at2
+    (fun _ _ => trivial)
+  have hroom := R2.room
+  have hstk := ok.stack
+  have hacr := ok.accRam
+  have hacs := ok.accStack
+  have hspv : (ldB k s').sp.toNat = fr.sp.toNat := by rw [R2.sp]
+  have hc1 : IR.Sem.rd c1.mem Z.acc 4 = IR.Sem.rd s'.mem Z.acc 4 := by
+    rw [rd_congr _ _ _ _ (by omega) (fun x h1 h2 => cs.mem x (by omega)), ((does_ld_b k).sys s').1]
+  have R3 : Rel Z E fr dt {} ist tmps s'' :=
+    R2.acc_free ok hT hfree hsz' hrs' hh' hsp' (fun o ho => by cases ho) (fun o ho => by cases ho)
+      (fun sl h => by cases h) (fun sl h => by cases h) (fun k o h => by cases h) (fun k sl h => by cases h)
+      (fun k o h => by cases h)
+  obtain ⟨s3, st4, at4, R4⟩ := hs hxF fr ist tmps s'' (shiftVal false 4 (IR.Sem.opd Z.c ist tmps 4 a) k) hwr R3 at3
+    (by
+      rw [hrel, hc1, hv, cs.b, ldB_b k (by omega), shiftVal, if_neg hge]
+      show _ = IR.Sem.opd Z.c ist tmps 4 a >>> k
+      rw [Nat.shiftRight_eq_div_pow])
+  have hkk : IR.Sem.opd Z.c ist tmps m (.const k) = k := Nat.mod_eq_of_lt hkm
+  simp only [IR.Sem.step, hkk]
+  exact ⟨s3, ((st1.trans st2).trans st3).trans st4, at4, R4⟩
 end
 
 end Ember.Proof.Z80Gen
