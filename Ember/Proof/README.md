@@ -959,7 +959,9 @@ no theorem is about an image of the Ethernet builds.  Covered as well
 and `not` of four bytes of an operand that is not a constant (`notW_ok`,
 by `rt_not32`), the right shift of four bytes by a constant `1..31`
 (`shiftR4_ok`, by `rt_shr32`) — with them `regress_wide_store` is covered
-whole (evaluated outside the proofs) and `crc32` is covered whole
+whole (`Tests/Ember/Z80Cover.lean`, `#guard`: 30 instructions, none left;
+in `Tests` because the program is, and built by `tools/ember/ci.sh`)
+and `crc32` is covered whole
 (`Z80Cover`, `#guard`: 34 instructions, none left); no theorem is about
 the images of these programs.  **Not covered:**
 shifts by a variable, `zero`, `not` of a constant and `neg` on four

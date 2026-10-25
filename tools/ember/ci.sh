@@ -9,6 +9,7 @@ cd "$(dirname "$0")/../.."
 job=${1:-all}
 
 lake build
+lake build Tests.Ember.Z80Cover   # coverage #guard of a program in Tests (Ember does not import Tests)
 lake build ember-host ember-diff ember-pcap ember-replay ember-fixtures ember-gen \
            ember-emit ember-fuzz ember-lockstep ember-z80
 
@@ -31,7 +32,7 @@ case $job in
   z80)
     tools/ember/z80-test.sh ;;
   proofs)
-    lake build Ember.Proof ;;
+    lake build Ember.Proof Tests.Ember.Z80Cover ;;
   size)
     python3 tools/ember/size-report.py ;;
   *)
