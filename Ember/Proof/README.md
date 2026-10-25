@@ -985,10 +985,15 @@ the harness are written out (`Z80Crc32IR`, `Z80Crc32HItems`; `#guard`s
 that they are the lowering's and `build`'s), and `crc32H_ok`
 (`Z80Crc32H`) says every function of that image does what
 `IR.Sem.callF` does, the routines it calls proved from their items
-(`rt_and32` and `rt_xor32` in `Z80AndXor`) — the functions only: not
-start-up, reset, the loop, the Ember semantics or `Ember.Z80.Machine`.
-The image has no `rt_trap`; `ImgIn.labels` (default `["rt_trap"]`) is
-empty for it.  **Not covered:**
+(`rt_and32` and `rt_xor32` in `Z80AndXor`); from reset
+(`Z80Crc32HRun`: start-up with the copy of `crc`'s initial value from
+the ROM, and the harness's loop) `crc32H_halts` — IR calls of `main`
+that end with the input used up: the machine halts with their world —
+with `Moves` proved (`update` keeps the input's position); the IR has no
+instruction that can trap, so no call of `main` traps (`main_no_trap`),
+and there is no trap theorem.  The image has no `rt_trap`;
+`ImgIn.labels` (default `["rt_trap"]`) is empty for it.  These are
+about the IR's runs: not the Ember semantics, not `Ember.Z80.Machine`.  **Not covered:**
 shifts by a variable, `zero`, `not` of a constant and `neg` on four
 bytes, values of eight bytes, the
 MMIO effects and `input.frame`, an address through a pointer
