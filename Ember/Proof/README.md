@@ -992,8 +992,15 @@ that end with the input used up: the machine halts with their world —
 with `Moves` proved (`update` keeps the input's position); the IR has no
 instruction that can trap, so no call of `main` traps (`main_no_trap`),
 and there is no trap theorem.  The image has no `rt_trap`;
-`ImgIn.labels` (default `["rt_trap"]`) is empty for it.  These are
-about the IR's runs: not the Ember semantics, not `Ember.Z80.Machine`.  **Not covered:**
+`ImgIn.labels` (default `["rt_trap"]`) is empty for it.  Composed with
+the lowering and carried to `Ember.Z80.Machine` (`Z80Crc32HSpec`:
+`crc32H_harness_halts`): when `j` calls of `main` end in the Ember
+semantics with the input used up, the machine as the tests build it
+halts after `i ≤ j` of them, standing for their world; and from a state
+the calls reach, the next call does not trap in `Lang.Sem`
+(`crc32_lang_no_trap` — not that it ends).  Taken: `Crc32Src p`, of the
+checked `crc32` `#guard`s (evaluation: the checker is `partial`).  Not
+the trace `runHarness` prints, not the image as built by default.  **Not covered:**
 shifts by a variable, `zero`, `not` of a constant and `neg` on four
 bytes, values of eight bytes, the
 MMIO effects and `input.frame`, an address through a pointer

@@ -189,6 +189,7 @@ import Ember.Proof.Z80Crc32HItems
 import Ember.Proof.Z80AndXor
 import Ember.Proof.Z80Crc32H
 import Ember.Proof.Z80Crc32HRun
+import Ember.Proof.Z80Crc32HSpec
 
 /-!
 # Ember.Proof — proofs (plan M5): about the reference stack (P1), and that Ember code refines it (P2)
@@ -367,7 +368,13 @@ The Z80 back end (M7, begun) — `Ember.Z80.IR.Sem` is the semantics of its IR:
   the ROM, `copy_ok`) and the harness's loop: `crc32H_halts` (IR calls of `main` that end with the input used
   up: the machine halts with their world), `moves` proved (`update` keeps the input's position,
   `update_keep`), and `main_no_trap` (no instruction of the IR can trap, so no call of `main` traps; there is
-  no trap theorem on the image).  About the IR's runs: not the Ember semantics, not `Ember.Z80.Machine`;
+  no trap theorem on the image);
+* `Z80Crc32HSpec`: composed with the lowering (`lower_iter`) and carried to `Ember.Z80.Machine` (`step_sim`):
+  `crc32H_spec_halt`, `crc32H_harness_halts` (calls of `main` that end in `Lang.Sem` with the input used up:
+  the machine halts after `i ≤ j` of them, standing for their world), and `crc32_lang_no_trap` (from a
+  state the calls reach, the next call does not trap in `Lang.Sem` — not that it ends).  Taken:
+  `Crc32Src p` — of the checked `crc32` its parts are `#guard`s (`Z80Crc32IR`, `Z80Crc32HItems`),
+  evaluation, not proof.  Not the trace `runHarness` prints, not the image as built by default;
 
 * `Z80Not`: `rt_not32` proved from its items (`rt_not32_ok`);
 * `Z80ShrW`: `rt_shr32` proved from its items (`rt_shr32_ok`);
