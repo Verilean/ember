@@ -17,6 +17,9 @@ open Ember
 
 structure DiffOpts where
   observable : Bool := true
+  /-- With `observable`: compare the `drop` lines too (the reasons are
+  named alike in every implementation). -/
+  drops      : Bool := false
   context    : Nat := 3
   firstOnly  : Bool := false
   all        : Bool := false
@@ -104,7 +107,12 @@ def normalize (link : String) (mask : List String) (l : Line) : Line :=
 
 def diff (a b : Trace) (o : DiffOpts := {}) : DiffResult := Id.run do
   let mask := o.mask ++ a.header.mask ++ b.header.mask
-  let sel (t : Trace) := (if o.observable then t.observable else t.lines).map (normalize t.header.link mask)
+  let isDrop (l : Line) := match l.ev with
+    | .drop _ => true
+    | _ => false
+  let sel (t : Trace) :=
+    (if o.observable && o.drops then t.lines.filter fun l => l.ev.isObservable || isDrop l
+     else if o.observable then t.observable else t.lines).map (normalize t.header.link mask)
   let xs := sel a
   let ys := sel b
   let link := a.header.link

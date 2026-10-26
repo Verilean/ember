@@ -1,0 +1,122 @@
+import Ember.Z80.Machine
+import Ember.Trace.Text
+import Ember.Trace.Diff
+
+/-!
+# Ember.Z80.Target — an Ember image on the Z80 machine, driven by a trace
+
+The host side of plan M4z: inputs go in through the ACIA (`rx` chunks)
+and the tick device, and what comes back is cut into trace events with
+the lines the runtime writes on the debug port (`tx N` after each frame,
+`drop reason=…`, `note …`).  A step is over when the machine is idle:
+halted, with every byte delivered and no interrupt pending.
+-/
+
+namespace Ember.Z80.Target
+open Ember Ember.Trace
+
+/-- Events since the last call: debug lines in order, each `tx N` taking
+the next `N` transmitted bytes. -/
+def collect (m : Machine) : Except String (Machine × List Event) := do
+  let (txb, m) := m.takeTx
+  let (dbg, m) := m.takeDbg
+  let mut evs : List Event := []
+  let mut pos := 0
+  for line in dbg.splitOn "\n" do
+    if line.isEmpty then continue
+    if line.startsWith "tx " then
+      let some n := (line.drop 3).toString.toNat? | throw s!"bad debug line: {line}"
+      if pos + n > txb.size then throw s!"`{line}` but only {txb.size - pos} bytes were transmitted"
+      evs := evs ++ [.tx (txb.extract pos (pos + n))]
+      pos := pos + n
+    else if line.startsWith "drop reason=" then evs := evs ++ [.drop (line.drop 12).toString]
+    else if line.startsWith "note " then evs := evs ++ [.note (line.drop 5).toString]
+    else throw s!"unexpected debug line: {line}"
+  if pos != txb.size then throw s!"{txb.size - pos} bytes transmitted outside any frame"
+  return (m, evs)
+
+/-- Run to idle and collect; an error when the image stops for good. -/
+def settle (m : Machine) (maxSteps : Nat) : Except String (Machine × List Event) := do
+  let (m, done) := m.runIdle maxSteps
+  let (m', evs) ← collect m
+  if !done then throw s!"not idle after {maxSteps} machine steps (pc={m.cpu.pc})"
+  -- the board writes `note trap` or `note trap (<where>)` on its debug port (`Trace.trapNote`), and a
+  -- program's note as `note <name> <value>`: a note named `trap`, or `trap counter`, is not a trap
+  if evs.any (fun e => match e with | .note t => isTrapNote t | _ => false) then
+    throw s!"trap: {evs.filterMap fun e => match e with | .note t => some t | _ => none}"
+  if m.dead then throw s!"the CPU halted with nothing able to wake it (pc={m.cpu.pc}, iff1={m.cpu.iff1})"
+  return (m', evs)
+
+/-- Reset and run the start-up code until the image waits for input. -/
+def boot (m : Machine) (maxSteps : Nat := 2000000) : Except String Machine := do
+  let (m, _) ← settle m maxSteps
+  return m
+
+def feed (m : Machine) (i : Input) (maxSteps : Nat := 50000000) : Except String (Machine × List Event) :=
+  match i with
+  | .rx b => settle (m.send b) maxSteps
+  | .tick => settle m.tick maxSteps
+
+structure Result where
+  trace : Trace
+  error : Option String := none
+  machine : Machine
+
+/-- Replay inputs on a booted machine: the target's trace. -/
+def replay (m : Machine) (h : Header) (inputs : Array Input) : Result := Id.run do
+  let mut m := m
+  let mut lines : Array Line := #[]
+  for i in [0:inputs.size] do
+    let inp := inputs[i]!
+    lines := lines.push ⟨i, match inp with | .rx b => .rx b | .tick => .tick⟩
+    match feed m inp with
+    | .ok (m', evs) =>
+      m := m'
+      for e in evs do lines := lines.push ⟨i, e⟩
+    | .error e =>
+      return { trace := { header := h, lines := lines.push ⟨i, .note (trapNote e)⟩ }, error := some e, machine := m }
+  return { trace := { header := h, lines }, machine := m }
+
+/-! ## The test harness (`runtime/z80/harness.c`) -/
+
+/-- Step until the CPU halts, at most `fuel` steps: the halted machine,
+or the machine still running when the steps ran out.  (A recursion on
+the steps, so that proofs can follow it.) -/
+def runToHalt : Nat → Machine → Except Machine Machine
+  | fuel, m =>
+    if m.cpu.halted then .ok m
+    else match fuel with
+      | 0 => .error m
+      | f + 1 => runToHalt f m.step
+
+/-- The line the harness writes of an event it recorded (a trap: none,
+it is noted after the last input). -/
+def eventLine (dropNames noteNames : Array String) : HEvent → Option Event
+  | .tx b => some (.tx b)
+  | .drop c => some (.drop (dropNames.getD c.toNat s!"code-{c.toNat}"))
+  | .note c v => some (.note s!"{noteNames.getD c.toNat s!"note-{c.toNat}"} {v}")
+  | .trap => none
+
+/-- The line of an input. -/
+def inputEvent : Input → Event
+  | .rx b => .rx b
+  | .tick => .tick
+
+/-- The lines of input `i`: the input, then the events recorded for it, in order. -/
+def inputLines (inputs : Array Input) (events : List (Nat × HEvent)) (dropNames noteNames : Array String)
+    (i : Nat) : List Line :=
+  ⟨i, inputEvent inputs[i]!⟩ ::
+    events.filterMap fun (j, e) => if j == i then (eventLine dropNames noteNames e).map (⟨i, ·⟩) else none
+
+/-- Run program `k` of a harness image on the inputs, as the interpreter's
+`runMachine` and the host harness do; the trace they would write. -/
+def runHarness (m : Machine) (k : Nat) (h : Header) (inputs : Array Input)
+    (dropNames noteNames : Array String) (maxSteps : Nat := 200000000) : Except String Trace := do
+  let m ← match runToHalt maxSteps { m with harness := true, inputs := inputs, program := UInt8.ofNat k } with
+    | .ok m => pure m
+    | .error m => throw s!"still running after {maxSteps} instructions (pc={m.cpu.pc})"
+  let lines := (List.range inputs.size).flatMap (inputLines inputs m.events.toList dropNames noteNames)
+  let trapped := m.events.any fun (j, e) => j < inputs.size && e matches .trap
+  return { header := h, lines := (lines ++ if trapped then [(⟨m.cur, .note "trap (z80)"⟩ : Line)] else []).toArray }
+
+end Ember.Z80.Target

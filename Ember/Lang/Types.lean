@@ -460,7 +460,7 @@ def check (p : Prog) : Except Err Prog := do
     | .int w => unless g.init.length ≤ 1 && g.init.all (fits · w) do topErr s!"initialiser of global {g.name}"
     | .bool => unless g.init.all (· ≤ 1) do topErr s!"initialiser of global {g.name}"
     | .arr (.int w) n => unless g.init.length ≤ n && g.init.all (fits · w) do topErr s!"initialiser of global {g.name}"
-    | .arr .bool n => unless g.init.length ≤ n do topErr s!"initialiser of global {g.name}"
+    | .arr .bool n => unless g.init.length ≤ n && g.init.all (· ≤ 1) do topErr s!"initialiser of global {g.name}"
     | .arr t _ => topErr s!"global {g.name}: arrays of {t} are not supported"
     | .record r =>
       unless (p.struct? r).isSome do topErr s!"global {g.name}: unknown record type '{r}'"

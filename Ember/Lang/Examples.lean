@@ -279,6 +279,32 @@ def prog : Prog := { structs := [Pair], globals := [p, tab, flag, LIMIT], fns :=
 
 end Constructs
 
+/-! ## Notes named like a trap
+
+A program for a board whose notes are named `trap` and `trap counter`,
+and that traps on one byte (`!`): the lines of its notes and the line of
+its trap are told apart by their form, not by a name
+(`Trace.isTrapNote`; `Tests.Ember.Z80Tests`, `tools/ember/z80-test.sh`). -/
+namespace TrapNote
+
+ember global tab : [u8; 4] := [1, 2, 3, 4]
+
+ember def main := do
+  let k : u16 ← input.next()
+  if k >= 0x0100 then
+    return
+  let b : u8 := (k : u8)
+  if b == 0x21 then
+    -- out of range: the trap
+    out.byte(tab[b])
+    return
+  trace.note(0, (b : u32))
+  trace.note(1, (b : u32) + 512)
+
+def prog : Prog := { globals := [tab], fns := [main], notes := ["trap", "trap counter"] }
+
+end TrapNote
+
 /-- Every example, by name (for `ember-emit` and the tests). -/
 def all : List (String × Prog) :=
   [("checksum", Checksum.prog), ("slip", Slip.prog), ("ring", Ring.prog), ("crc32", Crc32.prog),

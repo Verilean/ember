@@ -1,0 +1,1036 @@
+# Ember.Proof — proofs about the reference stack (M5.1 – M5.3), of the Ember code against it (M5.4 – M5.6) and of the emitted C (M5.8)
+
+Properties of `Ember.Spec` ("P1" in `docs/Ember-design.md` §4), stated
+over the Spec's own definitions.  Two things in the Spec changed
+because of the proofs: the tick in the middle of a frame (a defect, see
+"One input item" below), and the body of the per-byte loop of
+`Spec.input`, which got names (`slipByte`, `byteInput`) and is otherwise
+as it was.  `lake build Ember.Proof` checks everything (it is also part of the
+default `lake build`).  There is no `sorry`, no `axiom`, no
+`native_decide` and no `bv_decide` in this directory.
+
+Every statement was first run on random inputs (the plan's rule); what
+turned out false as first written is listed under "Hypotheses that are
+needed".
+
+The second part (P2: the stack written in Ember computes what the Spec
+specifies) is at the end of this file: "Refinement".
+
+## Files
+
+| File | Contents | Plan |
+|---|---|---|
+| `Bytes.lean` | `Ember.Bytes`: `get`/`set`/`get16`/`set16` across `ofList`, `++`; bytes of a word joined give the word | — |
+| `Checksum.lean` | `add` is a commutative monoid; `sum` as a fold over words; order independence; filling in a checksum; RFC 1624 | M5.1 |
+| `Icmp.lean` | the echo reply, patched with the RFC 1624 update, verifies | M5.1 |
+| `Slip.lean` | `encode` and the decoder state machine; decode ∘ encode | M5.2 |
+| `Headers.lean` | IPv4, UDP, TCP: parse ∘ emit | M5.2 |
+| `Tcp.lean` | `wp` for `TcpM`; `input` as its steps; the invariant `Inv`; delivery; acceptance and window | M5.3 |
+| `Stack.lean` | the control block changes only in `runTcp`; induction over `Spec.step` | M5.3 |
+| `Symex.lean` | symbolic execution over `Ember.Lang.Sem`: one equation per statement form, calls through the callee's theorem, lemmas that keep `u8`/`u16`/`u32` values in the image of `toUInt64`, the packet buffer as a value | M5.4 |
+| `Refine.lean` | functions of `Ember.Net` refine functions of `Ember.Spec`: checksums, 16-bit fields | M5.5 |
+| `RefineSlip.lean` | 32-bit fields; `slip_store`, `slip_send`; the SLIP loopback program (`Ember.Net.Loop`) against `Slip.Dec.feed` and `Slip.encode` | M5.5, and M5.6 for the loopback |
+| `RefineIp.lean` | `ip_send` transmits `Spec.Ipv4.packet` | M5.5 |
+| `RefineIcmp.lean` | `icmp_input` against `Icmp.reply` and `sendIp` | M5.5 |
+| `RefineUdp.lean` | `udp_input` against `Udp.parse`, `Udp.emit` and the echo service | M5.5 |
+| `RefineIpInput.lean` | `ip_input` against `Ipv4.validate` and the dispatch of `Spec.ipInput`; the loop that skips IP options | M5.5 |
+| `RefineRx.lean` | `slip_rx`, the stack's receive path per byte, against `Slip.Dec.feed` followed by `Spec.ipInput` | M5.6 (in part) |
+| `RefineTcp.lean` | TCP: the records `t` and `sg` as structures; `tcb_reset`, `cap`, `wnd`, `seg_len`; `tcp_emit` sends `Spec.Tcp.emit` | M5.5 |
+| `TcpAttr.lean`, `RefineTcpSt.lean` | the TCP state as one value (`TW`, `tcpSt`); the simp set `tcpsym` that runs TCP code | M5.5 |
+| `RefineTcpOut.lean` | `send_seg`, `send_syn_ack`, `send_reset`, `rexmit`, `output`, `acceptable` as Lean functions on `TW` | M5.5 (raw layer) |
+| `RefineTcpIn.lean` | `listen_input`, `ack_input`, `tcp_segment` | M5.5 (raw layer) |
+| `RefineTcpParse.lean` | `parse_mss`, `tcp_input` | M5.5 (raw layer) |
+| `RefineTcpTick.lean` | `rto`, `tcp_tick` | M5.5 (raw layer) |
+| `TcpSim.lean` | the transcribed TCP functions against `Ember.Spec.Tcp`: the relations, one correspondence per function, `tcp_segment` = `Tcp.input`, `tcp_tick` = `Tcp.tick` | M5.5 (second layer) |
+| `TcpSimParse.lean` | `parse_mss` = `Tcp.parseMss`, the header checks = `Tcp.parse`; `tcp_input_sim`, `tcp_tick_sim`; the two layers joined: `tcp_input_refines`, `tcp_tick_refines` | M5.5 |
+| `TcpRx.lean` | TCP inside `ip_input` (`ip_input_tcp`); what `Spec.runTcp` does (`runTcp_keep`); a frame through `ip_input` = a frame through `Spec.ipInput`, every protocol (`frame_refines`) | M5.6 |
+| `NetStep.lean` | the invariant `NetInv` between the stack's globals and the Spec's stack state; one received byte (`slip_rx_step`), one tick between frames (`tick_step`) | M5.6 |
+| `TcpBound.lean` | the tick counters of the Spec's control block stay within their limits (`Tcp.Bnd`, `reach_bnd`) | M5.3, for M5.6 |
+| `Main.lean` | `main`: its code case by case; the invariant `MainInv`; one call = one input item of the Spec (`main_step`); boot (`boot_call`, `boot_inv`) | M5.6 |
+| `Driver.lean` | `Spec.input` item by item (`input_items`); the input oracle (`next_spec`); `j` calls of `main` (`main_iter`); from the initial state, against `Spec.step` input by input (`main_run`, `main_run_all`) | M5.6 |
+| `CSem.lean` | the C semantics `Ember.C.Sem`: values survive new variables, statements as the beginning of a block, `CExpr.same` | M5.8 |
+| `CTypes.lean` | `cval`, `HasTy`, `WT`; type soundness of `evalE`; closed expressions | M5.8 |
+| `CArith.lean` | the operators on natural numbers | M5.8 |
+| `CExpr.lean` | the emitter's monad (`wpc`), `ERel`, fragments, every operator, places; `expr_ok` | M5.8 (expressions) |
+| `CFuel.lean`, `CVoid.lean` | the C semantics again: more fuel changes nothing (`mono1`), statement lists without counting fuel (`Exec`), `(void)x;` changes nothing (`Exec.void`) | M5.8 |
+| `CPlace.lean` | a place as a variable and a path (`lpath`); `evalE` and `update` along the path (`evalE_lpath`, `update_lpath`); `setPath_cval` | M5.8 |
+| `LangFrame.lean` | `Lang.Sem` only: a statement that does not write `x` leaves it alone (`keeps`); statements that return on every path do not end normally (`returns_all`) | M5.8 |
+| `CRel.lean` | names (`Hyg`), the compiled unit (`Unit`), the relation statements keep (`LRel`, `GRel`, `SRel`, `Same`), `assign_sim` | M5.8 |
+| `CStmt.lean` | well-typed statements (`WTS`, `WTB`, `FnOK`, `ProgOK`), what a statement's code does (`Sim`, `SPost`), the cases: declaration, assignment, `break`, `return`, `if`, `loop`, `for` | M5.8 (statements) |
+| `CCall.lean` | arguments (`exprs_ok`), the result of a call (`store_ok`), the effects (`eff_sim`), calls (`call_sim`, `call_ok`) | M5.8 (statements) |
+| `CSim.lean` | `stmt_ok`, `block_ok`: every statement, by recursion on it | M5.8 (statements) |
+| `CFn.lean` | `fn_sim`: a compiled function, for any fuel | M5.8 (functions) |
+| `CProgram.lean` | `compile_unit`, `init_rel`, `entry_sim`, `iter_sim`: the unit, the initial state, the entry function again and again; `hygU_of_prefix` | M5.8 (programs) |
+| `CCheck.lean` | the checker `progOkB` and `progOkB_sound` | M5.8 |
+| `CNet.lean` | `stack_c`: the emitted C of the SLIP build against the Spec; the `#guard`s that the builds of the stack are covered | M5.6 + M5.8 |
+| `CDrop.lean` | `drop_sim`, `stack_c_dropped`: the SLIP build's C without its bounds checks (`C.dropUnit`) against the Spec | M5.9 (first part) |
+| `Z80Frame.lean` | `validate_sound`: a frame layout the validator accepts keeps frames apart from globals and from the frames of reachable functions | M7.2 |
+| `IRFuel.lean`, `IRMem.lean` | the IR semantics again: more fuel changes nothing (`mono1`); a function's run without counting fuel (`Reach`, `Ends`); `rd` and `wr` | M7.1 |
+| `IRTypes.lean`, `IRRel.lean`, `IRPlace.lean` | well-typed expressions (`WT`); a value as bytes at an address (`Holds`); what a layout must give (`LayOK`); the relation statements keep (`LRel`, `GRel`, `SRel`); a place as an address (`PlaceAt`) | M7.1 |
+| `IRWp.lean`, `IRArith.lean` | a weakest-precondition calculus for the lowering monad (`wp`, `Ext`, `Final`); the IR's operators as the Ember operators | M7.1 |
+| `IRExpr.lean`, `IRJump.lean` | `place_ok`, `expr_ok`, `exprTo_ok`; conditions as jumps (`condJump_ok`) | M7.1 (expressions) |
+| `IRStmt.lean`, `IRCall.lean`, `IRBlock.lean` | well-typed statements (`WTS`, `FnOK`, `ProgOK`); assignment, declaration, `break`, `return`; arguments, calls, effects and where results go; blocks, `if`, `loop`, `for` | M7.1 (statements) |
+| `IRSim.lean` | `stmt_ok`, `block_ok`, `fn_sim`: every statement, and a lowered function for any fuel | M7.1 (functions) |
+| `IRProgram.lean`, `IRInit.lean`, `IRCheck.lean` | the program as lowered (`lowered_of_raw`), the layout check (`layOk_sound`), the initial memory (`init_rel`), the entry function again and again (`iter_sim`, `iter_trap`); the checker `progOkB` and `progOkB_sound` | M7.1 (programs) |
+| `IRPass.lean`, `IRLower.lean` | the passes: a simulation between two bodies (`sim_exec`), dropping instructions (`del_sim`), `cleanup`, `dropChecks` (`drop_sim`), `tidy_ref`; `IR.lower` as a whole (`lower_iter`, `lower_trap`) and the checker `irOkB` | M7.1 (passes) |
+| `IRNet.lean` | `stack_ir`: the IR of the SLIP build against the Spec; the `#guard`s that the builds of the stack are covered | M5.6 + M7.1 |
+| `Z80Encode.lean` | `step_encode`: the CPU model on the bytes of an encoded instruction does what `Asm.exec` (`Ember/Z80/AsmSem.lean`) says the instruction does | M7.4 |
+| `Z80Asm.lean` | `assemble_ok`: the assembler puts every item's encoding at its address; labels resolve to the addresses of their items | M7.4 |
+
+## Theorems
+
+Names are relative to `Ember.Spec`.
+
+### M5.1 — checksum algebra
+
+| Theorem | Statement | File |
+|---|---|---|
+| `Checksum.toNat_add` | `add a b` is `a + b`, minus 0xFFFF when it carries out of 16 bits | `Checksum.lean` |
+| `Checksum.add_comm`, `add_assoc`, `add_zero`, `zero_add` | one's-complement addition is a commutative monoid with unit `0` | `Checksum.lean` |
+| `Checksum.add_not_self`, `add_ffff`, `add_eq_zero_iff` | `a + ~a = 0xFFFF`; `0xFFFF` is neutral for every `a ≠ 0`; a sum is `0` only if both words are | `Checksum.lean` |
+| `Checksum.sum_eq_foldl` | `sum b off len init` is the left fold of `add` over `words b off len` (big-endian pairs, an odd last byte padded with zero) — this is the proof about the `while` loop | `Checksum.lean` |
+| `Checksum.foldl_add_perm`, `sum_perm` | **order independence**: ranges whose word lists are permutations of each other have the same sum | `Checksum.lean` |
+| `Checksum.sum_append`, `sum_append_comm` | the sum over `a ++ b` continues the sum over `a` (even `a.size`); two blocks of whole words may be swapped | `Checksum.lean` |
+| `Checksum.sum_init`, `sum_congr`, `sum_eq_zero_iff` | the start value is one more word; the sum sees only the bytes of the range; it is `0` only for all-zero data and start value | `Checksum.lean` |
+| `Checksum.sum_set16_of_zero` | writing `v` into a zero word of the range adds `v` to the sum | `Checksum.lean` |
+| `Checksum.sum_set16_checksum`, `verifies_set16_checksum` | a range whose zeroed checksum field is filled with `checksum` sums to `0xFFFF`, so it `verifies` | `Checksum.lean` |
+| `Checksum.sum_set16_checksum_nonzero` | the same when a computed `0` is sent as `0xFFFF` (UDP) | `Checksum.lean` |
+| `Checksum.incremental_eq_checksum` | **RFC 1624, exactly**: after the `k`-th word changes to `m'`, `incremental` on the old checksum is the recomputed checksum, except that it is `0` where recomputation gives `0xFFFF` (new range sums to `0`) | `Checksum.lean` |
+| `Checksum.incremental_eq_recompute` | **RFC 1624 = recomputation** when the new range does not sum to `0` | `Checksum.lean` |
+| `Checksum.incremental_eq_recompute_of_ne_zero` | in particular whenever the new word is not `0` | `Checksum.lean` |
+| `Checksum.verifies_incremental` | the update keeps a verifying sum verifying (addition modulo 0xFFFF) | `Icmp.lean` |
+| `Icmp.reply_verifies` | if `Icmp.reply msg = .ok r` then `r` verifies — the Spec's one use of `incremental` | `Icmp.lean` |
+
+### M5.2 — round trips
+
+| Theorem | Statement | File |
+|---|---|---|
+| `Slip.toList_encode` | `encode p` is `END`, the escaped bytes of `p`, `END` | `Slip.lean` |
+| `Slip.decodeAll_eq_foldl` | `decodeAll` folds the byte-at-a-time `Dec.feed` over the stream (`feedStep`) | `Slip.lean` |
+| `Slip.feed_encode` | feeding `encode p` to the decoder **in any state** flushes that state with the leading `END`, delivers exactly `p` and leaves the initial state (`0 < p.size ≤ maxLen`) | `Slip.lean` |
+| `Slip.decodeAll_encode` | **decode ∘ encode**: `decodeAll (encode p) maxLen = [p]` for `0 < p.size ≤ maxLen` | `Slip.lean` |
+| `Slip.decodeAll_encode_eq` | complete: `[p]` if `0 < p.size ≤ maxLen`, else `[]` (`decodeAll_encode_empty`, `decodeAll_encode_oversize`) | `Slip.lean` |
+| `Slip.decodeAll_encode_stream` | a concatenation of encoded frames decodes to the frames, in order | `Slip.lean` |
+| `Ipv4.validate_ok` | `validate` accepts a packet with a 20-byte header that passes each check, with these fields | `Headers.lean` |
+| `Ipv4.sum_header` | the header `header` builds sums to `0xFFFF` | `Headers.lean` |
+| `Ipv4.validate_packet` (`validate_header_append` for any TTL ≠ 0) | **IPv4 parse ∘ emit**: `validate (packet proto id src dst payload) ourIp = .ok ({ihl := 20, totalLen := 20 + payload.size, id, ttl := 64, proto, src, dst}, payload)` if `20 + payload.size ≤ 65535` and `dst` is `ourIp` or broadcast | `Headers.lean` |
+| `Udp.parse_emit` | **UDP parse ∘ emit**: `parse src dst (emit src dst sport dport data) = .ok {sport, dport, data}` if `8 + data.size ≤ 65535` | `Headers.lean` |
+| `Tcp.parseMss_20`, `parseMss_24` | no options: no MSS; the option `emit` writes is read back | `Headers.lean` |
+| `Tcp.parse_emit` | **TCP parse ∘ emit**: `parse src dst (emit src dst s) = .ok s` if `s.flags &&& 0x3F = s.flags` (all eight fields, including the MSS option and the data) | `Headers.lean` |
+
+### M5.3 — TCP invariants
+
+`Tcp.Inv t` is:
+
+```
+t.peerMss ≤ 65535
+t.pending.size ≤ t.cap                         -- the echo buffer never overflows
+t.sent ≤ t.pending.size
+dist t.sndNxt t.sndUna = t.sent + ctl t.st     -- ctl = 1 in SYN-RCVD, FIN-WAIT-1, CLOSING, LAST-ACK
+0 < t.pending.size → st ∈ {ESTABLISHED, CLOSE-WAIT, LAST-ACK}
+st ∈ {SYN-RCVD, ESTABLISHED} → closeReq = false ∧ finSent = false
+```
+
+| Theorem | Statement | File |
+|---|---|---|
+| `Tcp.input_eq` | `Tcp.input` equals its numbered steps (`connStep`, `ackStep`, `dataStep`, `finStep`) composed by continuation; by `rfl` | `Tcp.lean` |
+| `Tcp.input_inv`, `Tcp.tick_inv` | `Inv` survives any segment and any tick | `Tcp.lean` |
+| `Tcp.Inv.seqGe` | **`snd.una ≤ snd.nxt`**: `seqGe t.sndNxt t.sndUna = true` | `Tcp.lean` |
+| `Tcp.Inv.flight_le` | `snd.nxt − snd.una ≤ cap + 1` | `Tcp.lean` |
+| `Tcp.input_pending` | **delivery**: outside SYN-RCVD and ESTABLISHED a segment adds nothing to the echo buffer (afterwards it is a suffix of what it was) | `Tcp.lean` |
+| `Tcp.input_pending_synRcvd` | in SYN-RCVD the same unless the segment's ACK completes the handshake | `Tcp.lean` |
+| `Tcp.input_delivery` | the two together: bytes are added only from ESTABLISHED, or from SYN-RCVD with `s.ack = snd.nxt` | `Tcp.lean` |
+| `Tcp.dataStep_pending` | the one step that appends (`dataStep`) does so only when the state is ESTABLISHED at that point | `Tcp.lean` |
+| `Tcp.tick_pending` | a tick adds nothing | `Tcp.lean` |
+| `Tcp.input_not_acceptable` | **acceptance**: with a connection open, a segment for another port or tuple, or one that is not `acceptable`, changes nothing in the control block except `idle` and `lastWnd` | `Tcp.lean` |
+| `Tcp.input_window` | **window**: under `Inv`, with a connection open, the connection is closed or `rcv.nxt` advances by at most `wnd + min (ack − snd.una) sent + (1 if FIN)` | `Tcp.lean` |
+| `runTcp_pres`, `txFrame_pres`, `sendIp_pres`, … | the stack's control block changes only where `runTcp` runs a TCP action | `Stack.lean` |
+| `step_preserves` | **induction step**: a property of the control block kept by `Tcp.input` and `Tcp.tick` is kept by `Spec.step` | `Stack.lean` |
+| `reach_preserves` | **induction**: such a property, true of `{}`, holds in `reach cfg inputs` (the state after the inputs, from `State.init cfg`) | `Stack.lean` |
+| `step_inv`, `reach_inv` | `Inv` for `Spec.step` and for every reachable state | `Stack.lean` |
+| `reach_seqGe`, `reach_holds`, `reach_pending_le` | in every reachable state: `snd.una ≤ snd.nxt`; data in the buffer only in ESTABLISHED, CLOSE-WAIT, LAST-ACK; the buffer within its capacity | `Stack.lean` |
+
+## Hypotheses that are needed
+
+Found by running the first form of each statement on random inputs.
+
+* **RFC 1624 ≠ recomputation on all-zero data.**  One's complement has
+  two zeros.  For four zero bytes, "changing" word 0 from 0 to 0:
+  `incremental (checksum z 0 4) 0 0 = 0x0000`, `checksum z 0 4 = 0xFFFF`.
+  The update never produces a sum of `0`; recomputation does when every
+  word and the start value are `0`.  Hence `incremental_eq_checksum`
+  (unconditional, with the case distinction) and
+  `incremental_eq_recompute` (hypothesis: the new range does not sum to
+  `0`).  `Tests/Ember/SpecTests.lean` already compares up to ±0.
+* **Accepted data is not bounded by the window as it was announced.**
+  `input` computes the window for trimming after it has processed the
+  segment's ACK, which frees buffer space.  With the buffer full
+  (`pending = sent = 256 = cap`, window 0), a segment at `rcv.nxt` that
+  acknowledges 100 bytes and carries 300 has 100 of them accepted.  The
+  bound that holds is `input_window`: window + bytes acknowledged by the
+  same segment (+ 1 for FIN, which is taken even at a zero window).
+  RFC 9293 describes the trimming in its first step, before the ACK is
+  processed; a peer that respects the window never sees the difference,
+  and the buffer bound (`Inv.pendingCap`) holds either way.
+* **"No data outside ESTABLISHED/CLOSE-WAIT"**, as it holds here: bytes
+  enter the buffer only in ESTABLISHED (never in CLOSE-WAIT — the peer
+  has sent its FIN), where SYN-RCVD counts when the same segment
+  completes the handshake; the buffer *holds* bytes only in ESTABLISHED,
+  CLOSE-WAIT and LAST-ACK (unacknowledged echo data stays there until it
+  is acknowledged).  In FIN-WAIT-1/2 data is acknowledged and discarded.
+* **Length fields.**  `Ipv4.packet` and `Udp.emit` write
+  `UInt16.ofNat` of the length: with a 65536-byte payload
+  `Ipv4.validate (Ipv4.packet …)` succeeds with an *empty* payload, with
+  65516 bytes it fails (`bad-length`).  Hence `20 + payload.size ≤ 65535`
+  and `8 + data.size ≤ 65535`.  Inside the stack lengths are bounded by
+  the MTU (as long as that is below 65536).  TCP needs no such
+  hypothesis.
+* **TCP flags.**  `parse` keeps six flag bits; `emit` writes all eight.
+* **SLIP.**  An empty frame is ignored and a frame longer than `maxLen`
+  is dropped, so decode ∘ encode is the identity only for
+  `0 < p.size ≤ maxLen` (`decodeAll_encode_eq` has all three cases).
+
+Observations about the Spec made on the way (none is a defect):
+CLOSE-WAIT is never the state between two inputs, because the echo
+application closes at once and `output` sends the FIN in the same step
+(the invariant still allows it); and the idle close relies on `finSent`
+being false in ESTABLISHED, which is why `Inv` carries its last clause.
+
+## Axioms
+
+`#print axioms` is pinned with `#guard_msgs` at the end of each file.
+All headline theorems depend on exactly
+
+```
+propext, Classical.choice, Quot.sound
+```
+
+(`Tcp.Inv.seqGe` on `propext, Quot.sound` only).  These come from core
+lemmas, `omega` and `simp`; `Classical.choice` also enters through
+`Lean.Loop.forIn_eq_of_monadTail`, core's unfolding lemma for `while`
+loops, used once (`Checksum.sum_eq_foldl`).  `Lean.ofReduceBool` does not
+occur.
+
+## Not proven
+
+* emit ∘ parse (the other direction); it is false as an equality of
+  bytes (options, padding, reserved bits, the two zeros of the checksum).
+* Parsers on packets the Spec's own emitters do not produce: IPv4
+  options, TCP options other than the one MSS option, link padding.
+* SLIP on arbitrary byte streams (resynchronisation after garbage is
+  covered only as far as `feed_encode`: any decoder state, then one
+  encoded frame).
+* ICMP, ARP, DHCP and Ethernet round trips; only `Icmp.reply_verifies`.
+* TCP beyond the invariants above: that every byte is echoed, in order
+  (the closed-loop generator of `Spec/Gen.lean` tests it); retransmission
+  and timer behaviour; the closing handshake; anything about `rcv.nxt`
+  relative to the peer's `snd.nxt`.
+* The delivery and window theorems are per segment (`Tcp.input`), not
+  lifted to `Spec.step`, where one input may carry several frames; only
+  state invariants are lifted (`step_preserves`).
+* `reach` is the state `Spec.run` threads through its loop, by
+  definition of both; no theorem connects it to the `Trace` that `run`
+  returns.
+* P2 beyond what "Refinement" below lists; P3: the emitted C is proved
+  ("The emitted C" below); of the Z80 back end the translation to its
+  IR and the encoder are ("The IR of the Z80 back end", "The encoder"
+  below), the code generator in part ("The code generator" below).
+
+## How the TCP proofs are organised
+
+`Tcp.input` in `do` notation has early returns and three conditionals
+followed by more code; unfolded naively its tail appears 18 times.
+`Tcp.lean` therefore defines the numbered steps of its doc comment as
+functions taking their continuation, proves `input` equal to their
+composition by `rfl` (this is what `do` notation produces anyway), and
+proves each property once per step:
+
+```
+wp m Q c  :=  Q (m.run c).1 (m.run c).2
+ackStep_inv :  (∀ c, Inv c.tcb → wp k (… Inv …) c) → Inv c.tcb → … → wp (ackStep src s t k) (… Inv …) c
+```
+
+`wp_simp [defs]` runs straight-line code symbolically, `inv_leaf`
+proves `Inv` of the resulting record field by field, and `seq_omega`
+sends sequence-number arithmetic (`UInt32`, modulo 2³²) to `omega`.
+
+## Refinement (M5.4, M5.5, M5.6)
+
+### What a statement says
+
+```
+theorem csum_refines (p : Prog) (hc : p.fn? "csum" = some csum) … (st : St) (b : ByteArray)
+    (hb : st.globals.lookup "buf" = some (bufVal b)) (o n ini : UInt16)
+    (hr : o.toNat + n.toNat ≤ b.size) (hsz : b.size ≤ 65536) (d : Nat) :
+    Sem.call (d + n.toNat / 2 + 60) p st "csum" [u16 o, u16 n, u16 ini]
+      = .ok (some (u16 (Spec.Checksum.sum b o.toNat n.toNat ini))) st
+```
+
+In any program `p` that contains these functions, from any state whose
+`buf` holds the bytes of `b`, with enough fuel, calling `csum` returns
+the Spec's sum and leaves the state unchanged.  Three things stand
+between such a theorem and "the C on the target computes the checksum",
+and none of them is proved:
+
+1. **`Sem` is not the interpreter.**  `Ember.Lang.Sem` is a second,
+   total definition of the semantics (the interpreter has `partial`
+   loops the kernel cannot unfold).  The two are *tested* against each
+   other: random programs, the examples, and every build of the stack on
+   the corpus (`Tests/Ember/LangTests.lean`, "semantics").
+2. **The AST is the checker's output at build time.**  `csum` is
+   `checked_fn% Net.prog, "csum"`: the type checker (also `partial`) runs
+   during elaboration and its result is inserted as a literal; a `#guard`
+   next to it re-runs the check and compares.  The theorem is about that
+   literal.
+3. **The translation to C** is proved (M5.8, "The emitted C" below) for
+   programs without by-reference parameters, against the C semantics of
+   `Ember/C/Sem.lean` — which is itself a definition, tested against gcc
+   and SDCC through the emitted programs, not derived from the C
+   standard.  Of the translation to Z80, the step to the IR is proved
+   (M7.1) and so is the encoder (M7.4); the code generator and the
+   passes on the assembly are proved for the SLIP build's images for the
+   test harness (`StackH`, `StackD`) on the Lean model, given `StackSrc`
+   (M7.3, "The code generator" below), and tested for other programs.
+
+### Theorems
+
+| Theorem | Statement |
+|---|---|
+| `add16_refines` | `add16(a, b)` returns `Spec.Checksum.add a b` (one's-complement addition) |
+| `verifies_refines` | `verifies(s)` returns `Spec.Checksum.verifies s` |
+| `csum_update_refines` | `csum_update(hc, old, new)` returns `Spec.Checksum.incremental hc old new` — RFC 1624, which `Checksum.incremental_eq_recompute` relates to recomputing |
+| `pseudo_refines` | `pseudo(src, dst, proto, n)` returns `Spec.Checksum.pseudo src dst proto n` |
+| `get16_refines` | `get16(o)` returns `Bytes.get16 b o` when `o + 1` is inside the buffer |
+| `csum_refines` | `csum(o, n, init)` returns `Spec.Checksum.sum b o n init` when `[o, o+n)` is inside the buffer — by induction over the loop (`csum_loop`), each iteration through `get16_refines` and `add16_refines` |
+| `set16_refines` | `set16(o, v)` leaves the state with `buf` holding `Bytes.set16 b o v` (`withBuf`), when `o + 1` is inside the buffer — the first theorem about a function that changes state |
+
+| `get32_refines`, `set32_refines` | 32-bit fields, big-endian (`Bytes.get32`, `Bytes.set32`), through `get16`/`set16` |
+| `slip_store_refines` | on globals that hold a decoder state `d` (`SlipRel`: `len` bytes of `buf` are `d.buf`, `esc`, `over`), `slip_store(c)` leaves globals that hold `Slip.Dec.store d c mtu`; no event, no other global changes |
+| `slip_send_refines` | `slip_send(n)` transmits `Slip.encode` of the first `n` bytes of `buf` as one frame (a loop of `out.byte`, by induction; then `out.end`) and changes nothing else |
+| `loop_rx_refines` | `loop_rx(c)` of the loopback is `Slip.Dec.feed d c mtu`: next decoder state in the globals, and in the trace what the step yields — nothing, `drop oversize-frame`, or `tx` of the frame encoded |
+| `loop_main_refines` | **one call of the loopback's `main` is one step of the decoder**: it reads one input item (`World.next`); a byte steps the decoder as above, a tick or the end of the input changes nothing |
+| `loop_initial` | the loopback's initial globals hold the decoder's initial state |
+| `ip_send_spec`, `ipHeader_extract`, `ip_send_refines` | `ip_send(proto, dst, n)` writes the 20-byte header in front of the payload at `buf[20, 20+n)`, takes the next identification and transmits the SLIP encoding of **`Spec.Ipv4.packet proto id ourIp dst payload`** — the header bytes and the header checksum are the Spec's, byte for byte |
+| `icmp_input_refines` | **`icmp_input` is `Spec.Icmp.reply` followed by `Spec.sendIp`**: the drop line the Spec gives (`short-icmp`, `bad-icmp-checksum`, `unsupported-icmp-type`), or the Spec's reply — built in place, checksum updated by RFC 1624 — in the Spec's packet (`icmp_reply_bytes`) |
+| `udp_input_refines` | **`udp_input` is `Spec.Udp.parse` and the echo service**: the Spec's drop line (`short-udp`, `bad-udp-length`, `bad-udp-checksum`, `udp-port-closed`), or for port 7 `Spec.Udp.emit` with the ports swapped in the Spec's packet (`udp_reply_bytes`: the three fields overwritten in place give the datagram `emit` assembles) |
+| `validate_eq`, `squeeze_spec`, `sq_loop` | `Spec.Ipv4.validate` as a chain of cases; moving the payload up over IP options (a loop, by induction) puts the bytes the Spec slices out at offset 20 |
+| `ip_input_refines` | **`ip_input` is `Spec.Ipv4.validate` and the dispatch of `Spec.ipInput`**, for a packet that is not TCP: the drop line of the first of the eight checks that fails (`short-packet` … `not-for-us`), or `broadcast`, the ICMP handling, the UDP handling, `unsupported-protocol` — on the payload the Spec hands on |
+| `ipInput_obs` | `ipSpec` — the `drop`/`tx` lines and the next identification, as a function of the packet — is what the Spec's own `ipInput` (a state monad) produces on a SLIP link, `pkt` diagnostics apart |
+| `slip_rx_refines` | **one byte through the stack's receive path is one byte through the Spec's**: `slip_rx(c)` takes globals that hold the decoder state `d` and identification `id` (`RxInv`) to globals that hold `(d.feed c).1` and the Spec's next identification, and appends to the trace exactly the Spec's lines for `(d.feed c).2` — nothing, `drop oversize-frame`, or `ipSpec` of the completed frame |
+| `rx_initial` | the stack's initial globals satisfy `RxInv` with the empty decoder and identification 1 |
+| `loop_safe` | **the loopback never traps**: from a state that holds a decoder state, any number of calls of `main` on any input run to the end with `mtu + 70` units of fuel each — no index out of range — and the invariant holds after |
+
+All depend on `propext`, `Classical.choice`, `Quot.sound` only.
+
+With `Slip.decodeAll_encode` (M5.2) the loopback theorems say what the
+target's link test checks by running: a frame fed in encoded comes back
+encoded.
+
+`World.normalize` (skipping exhausted input chunks) was `partial` in the
+interpreter; it is now a total function, so that `World.next` — shared
+by the interpreter and `Sem` — can be reasoned about (`next_eq`: reading
+an item moves the read position and nothing else).
+
+### How the proofs go
+
+`simp only` with the equations of `Symex.lean` steps through the checked
+AST one statement at a time.  A call is not unfolded: `execS_call_val`
+turns the callee's theorem into an equation for the call statement
+(`execS_add16`, `execS_get16`), so each function is verified once.  Fuel
+is written `n + k` — what the caller has left plus what the function
+needs — and the loop lemma takes `k + 31 + d` for `k` iterations.
+
+A long function (`ip_send`: 16 statements, `udp_input`: 30) is executed
+by one `simp only` with a fact per call statement, each for the state and
+variables it will meet; an `if` is opened only where its condition is
+known (`execS_ite_true`/`_false`), or has a fact of its own.  The
+equality of the bytes written with the Spec's packet is a separate, pure
+lemma each time.
+
+State changes: `setG st x v` is the state with global `x` set;
+`assign_var` and `lookup_setG_self`/`_ne` let `simp` carry a chain of
+assignments.  Output: `pushOut st bytes` appends to the frame being
+built, `txOut st frame` is the state after `out.end`.  A function whose
+result state depends on the case (`slip_store`) has two theorems: one
+with the state written out (`slip_store_spec`), one against the Spec
+through the relation (`slip_store_refines`).
+
+### TCP: the raw layer
+
+The TCP code is proved in two layers, which `tcp_input_refines` and
+`tcp_tick_refines` join into statements about the code (below).
+
+**Raw layer (done).**  The six globals the TCP code works on and the
+trace are one value `w : TW`; `tcpSt st w` is the state with them set.
+For every function `f` of `Ember/Net/Tcp.lean` there is a Lean function
+`fW` on `TW` that is the code transcribed — the same tests in the same
+order, on the same machine integers — and a theorem
+
+```
+call … (tcpSt st w) "f" args = .ok result (tcpSt st (fW w …))
+```
+
+| Ember function | Lean function | Theorem |
+|---|---|---|
+| `tcb_reset`, `cap`, `wnd`, `seg_len` | `RawTcb.reset`, `RawTcb.cap`, `RawTcb.wnd`, `RawSeg.len` | `tcb_reset_refines`, `cap_refines`, `wnd_refines`, `seg_len_refines` |
+| `tcp_emit` | `emitW` — and the segment is **`Spec.Tcp.emit`** in `Spec.Ipv4.packet` (`tcpSegBuf_extract`) | `tcp_emit_refines`, `tcp_emit_tw` |
+| `send_seg`, `send_syn_ack`, `send_reset` | `sendSegW`, `resetW` | `send_seg_tw`, `send_syn_ack_tw`, `send_reset_tw` |
+| `rexmit`, `output`, `acceptable` | `rexmitW`, `outputW`, `accW` | `rexmit_tw`, `output_tw`, `acceptable_tw` |
+| `listen_input`, `ack_input` | `listenW`, `ackW` (with `shiftIn`: acknowledged bytes leave the echo buffer) | `listen_input_tw`, `ack_input_tw` |
+| `tcp_segment` | `segW` (`segAckW`, `segDataW` with `cpIn`, `segFinW`, `segTailW`) | `tcp_segment_tw` |
+| `parse_mss`, `tcp_input` | `parseMssW` (`mssIter`), `tcpInputW` | `parse_mss_tw`, `tcp_input_tw` |
+| `rto`, `tcp_tick` | `rtoIter`, `tickW` | `rto_refines`, `tcp_tick_tw` |
+
+The theorems have hypotheses about sizes (`TWok`: the packet buffer
+holds a maximal segment, the echo buffer has 256 bytes) and about the
+connection record where a loop or a send needs them (`sent ≤ pend_len ≤
+256`, the data to send fits the buffer, `SegTailOk`); they are what the
+invariant of the second layer has to supply.  Under them **no TCP
+function traps**: every index is in range and the fuel given suffices.
+
+### TCP: against the Spec
+
+**Second layer (done, `TcpSim.lean`, `TcpSimParse.lean`).**  This is
+mathematics about two Lean functions; the Ember semantics is not
+involved.
+
+* `TcbRel r pd T`: the connection record `r` (machine integers) and the
+  echo buffer `pd` (a fixed 256-byte array) hold the Spec's control
+  block `T` (naturals, `pending : ByteArray`): every field equal, the
+  buffer starts with `T.pending`, and `sent ≤ |pending| ≤ cap`,
+  `ourMss ≤ 256`.
+* `SegRel s b S`: the segment record holds the Spec's parsed segment
+  `S`, whose data lies in the packet buffer `b`.
+* `Sim ourIp w c ev0 id0`: `TcbRel`, the same `iss`, and the trace of
+  the step so far, **filtered to transmissions and drops** (`keep`), is
+  `ev0`, then the segments the Spec queued in `c.out` — each as
+  `Spec.runTcp` will transmit it, SLIP-encoded in `Spec.Ipv4.packet`
+  with the identification counting up from `id0` — then the drops in
+  `c.diag`.
+
+| Theorem | Statement |
+|---|---|
+| `acc_rel` | `acceptable` is `Spec.Tcp.acceptable` (RFC 9293's four cases) |
+| `emit_sim`, `sendSeg_sim`, `sendSynAck_sim`, `sendReset_sim`, `rexmit_sim` | the sends are the Spec's `send`, `sendSeg`, `sendSynAck`, `sendReset`, `rexmit`: same segment bytes, same state |
+| `output_wp` | `output` is `Spec.Tcp.output`: new echo data, FIN, ACK or window update, the retransmission timer |
+| `listen_wp` | `listen_input` is `Spec.Tcp.listenInput` |
+| `ack_wp`, `ack_rel` | `ack_input` is `Spec.Tcp.ackInput`; the loop that moves the echo buffer down leaves `pending.extract acked size` |
+| `data_rel`, `fin_wp`, `tail_wp` | the data stage appends the same bytes (`dataStep`), the FIN stage is `finStep`, then `output` |
+| `segment_wp` | **`tcp_segment` is `Spec.Tcp.input`** (via `Tcp.input_eq`, its steps) |
+| `parseMss_iter`, `mss_rel` | the Spec's option loop (a `for` with `break`/`continue`) is an iteration; `parse_mss` (16-bit indices into the packet buffer) computes it |
+| `parse_rel` | the header checks of `tcp_input` are `Spec.Tcp.parse`: same rejections with the same reason; otherwise `SegRel` |
+| `tcp_input_sim` | **`tcp_input` is `Spec.Tcp.parse` then `Spec.Tcp.input`**: if the Spec rejects with `r`, `tcpInputW w = dropW w r`; otherwise `Sim (tcpInputW w) ((Tcp.input src S).run c).2` |
+| `rto_spec` | `rto` is `Spec.rto` (the doubling loop, capped) for up to 16 retries |
+| `tick_wp`, `tcp_tick_sim` | **`tcp_tick` is `Spec.Tcp.tick`**: `Sim (tickW w) (Tcp.tick.run c).2` |
+
+Each is stated with `Spec.Tcp.wp` (M5.3), so that they compose along the
+Spec's `do` blocks.  Hypotheses of the two results: `Sim` before the
+step with no drop yet in `c.diag`; for a segment, that it lies in the
+packet buffer (`20 + n ≤ b.size < 65536`); for the tick, the Spec's
+invariant `Tcp.Inv c.tcb` (proven preserved, M5.3 — it is what makes the
+stack's order of tests, FIN-WAIT-2 before the retransmission timer,
+agree with the Spec's opposite order) and that the idle and retry
+counters are below 255.
+
+What the second layer does **not** say:
+
+* the Spec's `tcb` lines and its note (`connection reset by peer`, which
+  the stack words differently) are not compared — only transmissions and
+  drops;
+* the bound on the counters (they stay below 60 and 9) is assumed, not
+  proven;
+* anything about TCP inside the receive path: these are theorems about
+  the calls `tcp_input(src, dst, n)` and `tcp_tick()`, not yet about
+  `ip_input` or `slip_rx` reaching them.
+
+**The layers joined (`TcpSimParse.lean`).**  The raw layer's size
+hypotheses (`TWok`, `SegTailOk`, `sent ≤ pend_len ≤ 256`) follow from
+`TcbRel` and a packet buffer of at least 296 bytes (`TcbRel.raw`,
+`segTailOk_of`, `segAck_ok_rel`, `parsed_rel`).  Hence, about the code as
+the Ember semantics runs it:
+
+| Theorem | Statement |
+|---|---|
+| `tcp_input_refines` | from `tcpSt st w` with `Sim ourIp w c ev0 id0`, the segment in `buf[20, 20+n)`: `Sem.call … "tcp_input" [src, dst, n]` **does not trap** and ends in `tcpSt st w'`; if `Spec.Tcp.parse` rejects with `r` then `w' = dropW w r`; otherwise `Sim ourIp w' ((Spec.Tcp.input src S).run c).2 ev0 id0` |
+| `tcp_tick_refines` | likewise `Sem.call … "tcp_tick" []` ends in `tcpSt st w'` with `Sim ourIp w' (Spec.Tcp.tick.run c).2 ev0 id0` (under `Tcp.Inv c.tcb` and the counters below 255) |
+
+Since the conclusion is `Sim` again, the statements chain over a
+sequence of segments and ticks (the invariant `Tcp.Inv` is preserved by
+`Tcp.input_inv` and `Tcp.tick_inv`).
+
+### One input item, TCP included (`TcpRx.lean`, `NetStep.lean`)
+
+`NetInv st s w mtu ourIp N` relates the stack's globals `st` to the
+Spec's stack state `s`: the TCP globals hold `w` (`TcpHolds`), the
+control block, `iss` and the IP identification agree with `s`
+(`StRel`: `TcbRel`, …), the receiver's globals hold the Spec's SLIP
+decoder `s.slip` (`RxInv`), the constants have their values.
+
+| Theorem | Statement |
+|---|---|
+| `ip_input_refines_tcp` (`RefineIpInput.lean`) | `ip_input` with the protocol-6 branch: whatever the call `tcp_input(src, dst, n)` does on the segment at offset 20 |
+| `ip_input_tcp` | … which is `Spec.Tcp.parse` and `Spec.Tcp.input` (`tcp_input_refines`) |
+| `runTcp_keep` | `Spec.runTcp act` on a SLIP link: the control block and `iss` of the action's result; the queued segments as IPv4 packets with consecutive identifications, then the action's drops |
+| `frame_refines` | **a frame through `ip_input` is a frame through `Spec.ipInput`**, ICMP, UDP and TCP: no trap; `StRel` before and after; the two traces get the same transmissions and drops |
+| `slip_rx_gen` (`RefineRx.lean`) | `slip_rx(c)` with the handling of a complete frame as a parameter |
+| `slip_rx_step` | **one received byte**: from `NetInv`, `slip_rx(c)` does not trap and ends in `NetInv` against the Spec's state after the same byte (`byteM c`, the body of the loop of `Spec.input (.rx …)`); same transmissions and drops |
+| `tick_step` | **one tick, between two frames**: `tcp_tick()` likewise against `Spec.tickInput` (under `Tcp.Inv`, counters below 255, and no frame half received) |
+
+Compared are the transmissions and drops (`keep`); the Spec's `pkt`,
+`tcb` and note lines are not.
+
+**A defect found by this proof, and its fix.**  `tick_step` needs "no
+frame half received" because without it the statement is false: the
+stack builds what a tick sends (retransmission, idle-close FIN, give-up
+RST) in the one packet buffer, which also holds the frame being
+received.  As first written, `main` called `tcp_tick()` whenever a tick
+arrived, so a tick that sent in the middle of a frame destroyed that
+frame and the stack differed from the Spec; no fixture or generated
+session had a tick inside a frame.  Now a tick in the middle of a frame
+waits for the end of that frame, in the stack (`main`, `tick_due`) and
+in the Spec (`Spec.tickArrives`, `tickDue`); a second tick while one
+waits gives the frame up, so that a stray byte cannot stop the timers.
+`tcp_tick()` is therefore only called with `len = 0`, which is the
+hypothesis of `tick_step`.  Tests: `corpus/timer/midframe-tick-*.trace`
+and the `-midtick` variant of every generated lockstep session.
+
+### `main`, and `main` again and again (`TcpBound.lean`, `Main.lean`, `Driver.lean`)
+
+`MainInv st s w …` is `NetInv`, plus: the stack has booted, its
+`tick_due` is the Spec's `tickDue`, and the Spec's control block
+satisfies `Tcp.Inv` and `Tcp.Bnd` (`idle < 60`, `retries ≤ 8`).
+
+| Theorem | Statement |
+|---|---|
+| `Spec.Tcp.input_bnd`, `tick_bnd`, `Spec.reach_bnd` | segment arrival and the tick keep `Bnd`; it holds in every reachable state (this is where `tick_step`'s "counters below 255" comes from) |
+| `main_none`, `main_tick_now`, `main_tick_defer`, `main_tick_giveup`, `main_byte`, `main_byte_tick` | the code of `main` in each case, with what `slip_rx` and `tcp_tick` do as hypotheses |
+| `main_step` | **one call of `main`**: from `MainInv` it does not trap, reads one item `k` (`input.next`) and ends in `MainInv` against the Spec after `itemM k` — nothing, `Spec.tickArrives`, or `Spec.byteInput c`; the same transmissions and drops.  In particular `tcp_tick()` is only ever called with no frame half received |
+| `boot_call`, `boot_inv` | the first call from `Sem.initial Net.prog inputs` is a call from the state after `tcb_reset(); booted := true`, which satisfies `MainInv` against `Spec.State.init` |
+| `input_items` | `Spec.input i` on a SLIP link is `itemM` over the items of `i` (one for a tick, one per byte of a chunk) |
+| `next_spec` | `input.next` hands out the first item not yet read, with the number of its input, and `0xFFFF` when there is none (empty chunks are skipped) |
+| `main_iter` | **`j` calls of `main`** from `MainInv`: none traps; `MainInv` against the Spec after the next `j` items; the kept lines (transmissions and drops), each with the number of its input, are the same |
+| `runTagged_later` | the Spec over the items of the inputs is `Spec.step` over the inputs: same state, the kept lines of each step |
+| `main_run`, `main_run_all` | **from the initial state**: any number of calls of `main` does not trap; once every item is read, the state satisfies `MainInv` against `Spec.reach {} inputs`, and the kept lines of the stack's trace are, input by input, those of `Spec.step` (`specKept`) |
+
+So for every input sequence the stack in Ember — as the semantics
+`Ember.Lang.Sem` runs it, for the SLIP configuration `{}` (10.0.0.1, MTU
+296, no DHCP) — never traps and transmits and drops exactly what
+`Ember.Spec` does, at the same inputs.
+
+What these statements are about, precisely:
+
+* `mainIter fuel p j st` is `j` calls of `main` in a row.  `Sem.run`
+  (and `Lang.runMachine`) make those calls in a `while` loop, until the
+  input is used up and three more calls read nothing; that loop is
+  `partial` in Lean's core and no theorem is about it, nor about how
+  `Sem.run` prints the events as `Trace` lines.
+* The program is any `p` with the functions of the checked stack
+  (`TcpAll p`, `TcpReasons p`, `p.fn? "main" = some main_fn`); that the
+  type checker's output for `Net.prog` is such a `p` is checked by
+  `#guard`s (evaluation), function by function, not by a theorem.
+* The fuel per call is `n + 4716` for any `n`: enough for the longest
+  path (a full frame through TCP, then a tick).
+
+### The emitted C (M5.8)
+
+`Ember/C/Sem.lean` (M5.7) gives the C subset a meaning — and none to
+what C leaves undefined or would compute in a signed type.  The proofs
+relate it to `Ember.Lang.Sem` through the emitter `Ember/C/Compile.lean`
+itself (total functions; `wpc` is a weakest-precondition calculus for
+its monad): every theorem is about the code that emitter produces.
+
+**The result** (`CNet.lean`):
+
+| Theorem (`CSim`) | Statement |
+|---|---|
+| **`stack_c`** | for the checked SLIP build and options without a name prefix, any profile with `int` of 16 bits or more: the emitted C, called again and again from its initial state as `Ember.C.Sem.run` calls it, ends every call normally — no `ember_trap`, nothing undefined — and once the input is read, the kept lines of its trace (transmissions and drops, each with the number of its input) are `specKept`: those of `Spec.step`, input by input.  M5.6 (`main_run_all`) and M5.8 (`iter_sim`) together |
+| **`iter_sim`**, `iter_trap` (`CProgram.lean`) | for any program the checker accepts: if `j` calls of the entry function end in `Lang.Sem`, they end under `C.Sem`, in a related state (the same world — input position, events, frame, MMIO — and every global holding its value); and if the next call traps, the C traps, with the same events |
+| `entry_sim`, `init_rel`, `compile_unit` | one call of the entry function; the initial states are related (every initialiser); what `C.compile` produces has the records, tables and functions of the program |
+| **`fn_sim`** (`CFn.lean`) | a compiled function, called with the C values of its arguments from related globals: the result of `Lang.Sem` for its body, with any fuel — the same result value, globals and world related again, the C stack as it was — or a trap when it traps |
+| **`stmt_ok`**, `block_ok` (`CSim.lean`) | for a well-typed statement: the code `C.stmt` emits does, from related states, what `Lang.Sem.execS` does with it — ends the same way (normally, `break`, `return` with the same value) in related states, or ends in `ember_trap` when it traps.  Every construct: declarations (zeroed arrays and records too), assignments to variables, fields and elements, `if`, `for`, `loop`, `break`, `return`, the nine effects, calls, and the destination of a result, which is evaluated after the call |
+| `store_ok` (`CCall.lean`) | `assignResult`: `l = f(…)` directly when nothing in `l` can change in the call and no check is needed, otherwise through a temporary with the checks after it; either way what `Lang.Sem.storeResult` does |
+| `eff_sim` | each function of the runtime interface, as `C.Sem.effect` defines it, does to the world what the effect of `Lang.Sem` does |
+| `assign_sim` (`CRel.lean`) | `Lang.Sem.assign` on a typed scalar place is `C.Sem.write` at the location of its lvalue: the states are related again |
+| **`expr_ok`**, `place_ok` (`CExpr.lean`) | for a well-typed scalar expression `e`: the statements `C.expr e` emits run from related states, declare temporaries only, and the emitted expression has the C value of `evalE e` — or they end in `ember_trap` when `evalE e` has no value; a place's lvalue designates its variable's storage at its path |
+| `binC_ok`, `unC_ok`, `castC_ok`, `condC_ok` | every operator, as emitted (operation in `unsigned` or `uintN_t` and truncating cast; the guards of `/`, `%`, `<<`, `>>`; comparisons folded by `-Wtype-limits` reasoning; the SDCC division helpers), has the value of the Ember operator |
+| `evalE_hasTy` (`CTypes.lean`) | a well-typed expression evaluates, in a state whose variables have their types, to a value of its type |
+| `progOkB_sound` (`CCheck.lean`) | a program the checker `progOkB` accepts satisfies what the theorems assume (`ProgOK`, `GlobalOK`, an entry function without parameters) |
+| `hygU_of_prefix` | without a name prefix, the emitter's names do not collide (globals `g_…`, locals `v_…`, temporaries `t<k>`, functions `e_…`, `entry`, the runtime's `ember_…`) |
+| `Sem.mono1`, `Sem.Exec.void` (`CFuel.lean`, `CVoid.lean`) | a run of the C semantics that ends, ends the same way with more fuel; the `(void)x;` statements the emitter adds for `-Wunused` change nothing |
+| `keeps`, `returns_all` (`LangFrame.lean`) | in `Lang.Sem`: a `for` body that does not write the counter leaves it alone; a body that returns on every path does not fall off its end |
+
+How it is put together:
+
+* **The relation** (`SRel`): the Ember locals and the C locals are the
+  same list position by position, apart from the emitter's temporaries,
+  which only C has (`LRel`); every global holds the C value of its value;
+  the worlds are equal (`GRel`).  A statement leaves the scope it ran in
+  with the same names and the same values in the temporaries (`Same`),
+  which is what a loop needs of its bounds.
+* **Fuel**: both semantics count fuel, differently.  The theorems say:
+  if the Ember side ends with `k` units, there is an amount with which
+  the C side ends the same way; more never hurts (`mono1`).
+* **The induction**: `stmt_ok` is by recursion on the statement, for
+  every fuel up to `N`, given that calls are right with less than `N`
+  (`FnSim`); `fn_sim` closes that by induction on `N`.
+* **What a program must satisfy** (`WTS`, checked by `progOkB`): the
+  typing the emitter relies on, over its own `Env.tyOf`; arrays below
+  65 536 elements; `loop` bounds below 2³²; a `for` body that does not
+  assign its counter; `break` only in loops; a result on every path of a
+  function that has one; parameters that are scalars passed by value.
+  The checker is run on the checked builds of the stack — SLIP,
+  loopback, Ethernet, Ethernet with DHCP — for the three profiles
+  (`#guard`s in `CNet.lean`): all are accepted.
+
+Three things changed in the emitter for the proofs, none in its output
+(the golden C is byte-identical): `assignResult` compiles the
+destination again after the call's temporary instead of moving the
+emitted checks; `compileFn` and `compile` are built from named functions
+(`paramC`, `fnEnv`, `globalC`, `entryFn`) instead of loops.  In
+`Ember/C/Sem.lean`, locations got decidable equality (the test that
+`l` in `l = f()` names the same storage after the call is now `=`).
+
+**Not covered:**
+
+* **by-reference parameters.**  `Lang.Sem` copies an array or record in
+  and out, the C passes a pointer; that the two agree needs the type
+  checker's no-aliasing rules as a theorem.  The relation has no
+  pointers, and `progOkB` rejects such a program.  The stack has no
+  by-reference parameter; the examples that have one
+  (`Ember/Lang/Examples.lean`) are covered by tests only;
+* **options with a name prefix** in `stack_c` (the fuzzer's programs,
+  several per C file): `iter_sim` takes the absence of collisions as a
+  hypothesis (`HygU`), proved for the empty prefix;
+* **the C semantics itself** is a definition (M5.7), and the printer
+  `Ember/C/Print.lean` from the C AST to text is trusted: that gcc and
+  SDCC give the printed text the meaning `Ember.C.Sem` gives the AST is
+  what the differential tests check, not a theorem (CompCert's Clight
+  semantics would be the next step for the first part);
+* the `while` of the drivers (`C.Sem.run`, `Lang.Sem.run`): the theorems
+  are about the calls those loops make, as for M5.6.
+
+### Bounds checks taken out (M5.9, first part)
+
+The emitter checks an index it cannot show in range by its form
+(`indexSafe`: a literal, or a `u8` into 256 elements or more) with
+`if (t >= n) { ember_trap("…"); }` before the access — 17 checks in the
+SLIP build.  `C.dropUnit` (`Ember/C/DropChecks.lean`) takes those
+statements out of a unit and changes nothing else.
+
+| Theorem (`CDrop.lean`) | Statement |
+|---|---|
+| **`drop_sim`** | under `Ember.C.Sem`, for any unit and fuel: a statement, a list, a block, a call or a `for` that ends normally (`Res.ok`) ends the same way — same state, variables and way out — in the unit without checks.  A check that does not trap does nothing (`check_ok`); expressions have no effect |
+| `cIter_drop`, `initial_drop` | the calls of the entry function as `C.Sem.run` makes them, from the same initial state |
+| **`stack_c_dropped`** | what `stack_c` says, of the SLIP build's C **without any bounds check**: called again and again from its initial state under the C semantics, every call ends normally — no trap, nothing undefined (so no index out of range) — and the kept lines are `specKept`.  The range facts are those of the refinement proofs (M5.6 `main_run_all`: no call of `main` traps, every index in range), carried by M5.8; nothing is taken but what `stack_c` takes |
+
+`#guard`: on every profile the SLIP build's unit has 17 checks and none
+is left after `dropUnit`.  `compile` is unchanged (golden C
+byte-identical); the C without checks is a separate output
+(`ember-emit net --dropped`, `Tests/Ember/golden/net.dropped.*.c`), for
+the SLIP build only — the tools refuse every other program, since
+`drop_sim` says nothing of a run that traps: there the check is what
+makes an index out of range a trap and not undefined behaviour (the
+`Guard` programs: with checks they trap, without them the C semantics
+has no meaning for the run).
+
+**Not covered:** dropping one check from a range lemma about its index
+in a program without a whole-program no-trap theorem (the Ethernet
+builds, the examples); the own Z80 back end's checks (`IR.dropChecks`,
+a static fact on the straight path, not a proof).
+
+### The IR of the Z80 back end (M7.1, M7.2)
+
+`Ember/Z80/IRSem.lean` is the IR's semantics as total functions: one
+instruction is one `step`, a function runs on fuel, memory is 64 KB of
+bytes at the addresses a `Layout` gives.  The proofs relate it to
+`Ember.Lang.Sem` through the lowering `Ember/Z80/IR.lean` itself.
+
+**The result** (`IRNet.lean`):
+
+| Theorem (`IRSim`) | Statement |
+|---|---|
+| **`stack_ir`** | for the checked SLIP build, the IR `IR.lower` returns for it and a layout the checker `irOkB` accepts: called again and again from its initial memory as `IR.Sem.run` calls it, the IR ends every call normally — no trap — and once the input is read, the kept lines of its trace are `specKept`.  M5.6 (`main_run_all`) and M7.1 (`lower_iter`) together |
+| **`lower_iter`**, `lower_trap` (`IRLower.lean`) | for any program `progOkB` accepts and any layout `irOkB` accepts: from the initial state, if `j` calls of the entry function end in `Lang.Sem`, they end in the IR `IR.lower` returns, with the same world; and if the next call traps, the IR traps, with the same events |
+| **`tidy_ref`** (`IRPass.lean`) | a call in the program with every body tidied (`cleanup`, then `dropChecks`) ends as in the program as lowered, in the same state |
+| `sim_exec`, `del_sim`, `drop_sim` | a relation between the points of two bodies that every step keeps makes the second end as the first; dropping instructions a mask selects is one when what is dropped does nothing where it is (a label nothing jumps to, a jump to the next instruction, what follows a `ret`, `jmp` or `trap`); dropping an index check is one when the facts `dropChecks` collects hold (`facts_step`) |
+| **`iter_sim`**, `iter_trap`, `entry_sim` (`IRProgram.lean`) | the same for the program as lowered (`lowerRaw`), from related states |
+| `init_rel` (`IRInit.lean`) | the memory `initMem` builds holds every global's initial value |
+| **`fn_sim`** (`IRSim.lean`) | a lowered function, its arguments in its frame: the result of `Lang.Sem` for its body, with any fuel — the same result, globals and world related again, memory outside its frames as it was — or a trap when it traps |
+| **`stmt_ok`**, `block_ok` | for a well-typed statement: the code the lowering emits does, from related states, what `Lang.Sem.execS` does — goes on, jumps to the end of the loop for `break`, returns the value, or traps.  Every construct, as for the C |
+| **`expr_ok`**, `place_ok`, `condJump_ok` (`IRExpr.lean`, `IRJump.lean`) | a well-typed scalar expression: the code leaves its value in the operand returned, or traps when it has none; a place is the address of its storage; a condition jumps or falls through as its value says, `&&` and `||` early only where nothing is skipped that could trap |
+| `layOk_sound`, `progOkB_sound`, `slotsOkB_sound` | what the checkers accept satisfies what the theorems assume |
+| `validate_sound` (`Z80Frame.lean`, M7.2) | a layout the frame validator accepts keeps every frame apart from the globals and from the frames of the functions it reaches |
+
+How it is put together:
+
+* **The relation** (`SRel`): every Ember local is at its offset in the
+  function's frame, every global at its address, as the bytes of its
+  value (`Holds`); the worlds are equal.  Frames are static, so what a
+  callee may write is what its frame and those it reaches cover
+  (`KeepOut`), and the layout keeps those apart from the caller's
+  (`LayOK`, from `validate_sound`).
+* **Translation validation, twice**: the lowering checks that no label
+  is defined twice (`lowerFnChecked`; it never is, the proofs take it
+  from the check), and the layout is checked rather than the allocator
+  proved.
+* **The passes** are proved for any body: `cleanup` needs the labels to
+  be unique; `dropChecks` needs a slot the body compares in a branch
+  and a slot it writes to be apart in memory unless their offsets
+  overlap (`SlotsOK`, checked by `slotsOkB` on the program and layout).
+* The checkers are run on the checked builds of the stack — SLIP,
+  loopback, Ethernet, Ethernet with DHCP — with the layout
+  `IR.Sem.run` computes (`#guard`s in `IRNet.lean`): all are accepted.
+
+The proofs found one defect in the lowering, now fixed with a test
+(`regress_strict_and`): `a && b` skipped `b` when `b` was an element at
+a constant index that is not a literal and out of range, where the
+interpreter traps.  For the proofs the lowering was rewritten with
+named functions (identical IR for every build of the stack, the
+examples and 400 random programs), `cleanup` and `dropChecks` as
+recursive functions on lists, and slots and operands got decidable
+equality.
+
+An index has a `bound` besides its check (`Index.bound`): what the
+lowering knows the index to be below, kept when `dropChecks` drops the
+check.  `IR.Sem` gives a program no meaning (`bad`) where an index is
+not below its bound; the theorems show the lowered program never gets
+there.  Code generation does not look at it — it is there for the proof
+of the code generator, which needs every access to stay in its array.
+
+**Not covered:**
+
+* **by-reference parameters** (as for the C: `progOkB` rejects them);
+* **`inlineCalls`** (off by default; `lower_iter` is about `IR.lower`
+  without it);
+* **the IR semantics against the interpreter**: `IR.Sem` and the
+  `partial` interpreter `Ember/Z80/IRInterp.lean` are tested against
+  each other, not proved equal;
+* **from the IR on**: see "The code generator" below (M7.3: done for
+  the SLIP build's images for the test harness, not for every program).
+
+### The encoder (M7.4)
+
+The CPU model `Ember/Z80/Cpu.lean` has no decoder apart from its
+interpreter: `step` reads bytes and acts.  `Ember/Z80/AsmSem.lean`
+gives every instruction of `Asm.Instr` a meaning by its mnemonic and
+operands (`exec`), written with the model's own helpers (`alu`,
+`setReg`, `push`, …), and the theorems connect the three:
+
+| Theorem (`Z80Enc`) | Statement |
+|---|---|
+| **`step_encode`** (`Z80Encode.lean`) | if `Asm.encode i env = .ok bs`, the bytes `bs` are in memory at the program counter and the CPU is not halted, then `Cpu.step` gives the state `Asm.exec env i` gives — every register, flag, memory, T-states and `R`.  For every form the assembler accepts that has no `IX`/`IY` operand (the back end and its runtime use none): 8- and 16-bit loads, the accumulator operations, `inc`/`dec`, rotates and shifts, `bit`/`res`/`set`, jumps, calls and returns with every condition, `rst`, `push`/`pop`, exchanges, I/O, the interrupt modes, the block instructions |
+| **`assemble_ok`** (`Z80Asm.lean`) | in what `Asm.assemble` returns: the first item is at the origin, every item at the address after the encoding of the one before; the bytes at an item's address are its encoding with the labels resolved (`Assembled.env`); a label resolves to the address of its item |
+
+How: with the mnemonic and operands fixed the encoder computes to
+bytes, the model's decoding of those bytes computes, and both sides are
+equal by `rfl`; an immediate operand is the only part that does not
+compute, and three lemmas give its bytes.  For the proofs the `ED` and
+`CB` pages of the model were split into the fetch of the opcode and the
+rest (`edOp`, `cbOp`), and `assemble` was rewritten as two recursive
+functions (`place`, `emit`) with the same output; `emit` checks that an
+item has the size the first pass gave it, so "sizes do not depend on
+label values" is checked on every program rather than proved.
+
+**Not covered:** the forms with `IX` and `IY` (`exec` is `none` for
+them); the block instructions are covered but their meaning is the
+model's own `execBlock`; `Asm.relax` (it runs before `assemble`, which
+is what the theorem is about); the text parser of the runtime's
+assembly.
+
+### The code generator (M7.3)
+
+**Scope.**  M7.3 is done for the SLIP build of the stack with the test
+harness's runtime, on the Lean model of the machine (`Ember.Z80.Machine`,
+not hardware): the image without the passes on the assembly (`StackH`)
+and the image as `build` makes it by default (`StackD`), loaded and
+stepped as the tests do, for any input — they halt having transmitted
+and dropped what `Spec.step` does (`stackH_halts`, `stackD_halts`), the
+trace printed is the Spec's with no trap (`stackH_trace`,
+`stackD_trace`, `…_no_trap`, `…_trace_lines`), and the `tcb` observer's
+lines, when it gives them, are the Spec's control block after each item
+(`stackH_tcb_obs`, `stackD_tcb_obs`; soundness only — that the observer
+always gives lines is not proved).  Taken of the program: `StackSrc`
+(it is the checked SLIP build); that the written-out IR, items and
+bytes are those of `IR.lower` and `build` is `#guard`.  Not in M7.3: the
+back end for every IR program, the board's runtime, start-up and
+interrupts, the routines and operations the stack does not use, real
+hardware.
+
+`Ember/Z80/Codegen.lean` turns a function of the IR into assembly
+items, one instruction at a time, remembering what `A`, `HL` and the
+accumulator hold.  The proofs (`Z80Gen`, `Z80Run.lean` … `Z80FnGen.lean`)
+are about the generator as it is, through a weakest-precondition
+calculus for its monad (`wpg`), over an assembled image (`ZCtx`: the
+items, their addresses by `assemble_ok`, the IR program and its layout).
+
+`Rel Z E fr dt regs ist tmps s` — a CPU state `s` and an IR state agree:
+the image is in ROM, the shared bytes are equal, a temporary with a slot
+has its value there once assigned (`dt`), the registers hold what the
+tracker `regs` says, the stack pointer and the stack above it are as the
+function found them (`fr`), and nothing outside the function's
+footprint (`ZCtx.wr`) has changed.
+
+| Theorem | Statement |
+|---|---|
+| `loadA_ok`, `loadHL_ok`, `storeA_ok`, `storeHL_ok` | an operand into `A`/`HL`, and those to a destination — a store the generator leaves out included |
+| `mov1_ok` … `cmp_ok`, `br_ok`, `jmp_ok`, `label_ok`, `ret_ok`, `trap_ok`, `call_ok` | the code of each instruction, for values of one and two bytes |
+| `genAddr_ok`, `lea_ok`, `load1_ok`, `load2_ok`, `store1_ok`, `store2_ok` | an address into `HL` — static root, an index of one or two bytes checked in line or by `rt_bound` and scaled by a power of two — and memory through it; a failed check gets to `rt_trap`, as the IR's instruction traps |
+| `shift1_ok`, `shift2_ok`, `shift4_ok`, `shiftR4_ok` | shifts by a constant: repeated `add`, `srl`/`rr`, a byte moved, or the runtime's routine; `shiftR4_ok`: four bytes right by a constant `1..31` other than 16, by `rt_shr32` |
+| `loadAcc_ok`, `storeAcc_ok`, `movW_ok`, `binW_ok`, `flagsW_ok`, `notW_ok`, `ext42_ok`, `ext14_ok`, … (`Z80Acc.lean`, `Z80AccOps.lean`, `Z80ExtW.lean`) | values of four bytes: the operand into the runtime's accumulator (a constant from the literal pool), the operation by a routine of the runtime, the accumulator stored; `notW_ok`: `not` of four bytes, of an operand that is not a constant, by `rt_not32`; `ext14_ok`: the low byte of four bytes, from the accumulator or from memory |
+| `load4_ok` (`Z80MemW.lean`) | a `load` of four bytes through an address: the address into `HL` (`genAddr_ok`, its index check), the four bytes into the accumulator by `rt_ld32`, stored as the IR's `load` stores them (in the Ethernet builds) |
+| `store4_ok`, `genAddr_acc`, `st4_tail` (`Z80StoreW.lean`) | a `store` of four bytes through an address: the value into the accumulator (`loadAcc_ok`), the address into `HL` (`genAddr_ok`; the accumulator still holds the value — the states agree after `genAddr`, `rt_bound` included, with the tracker's claim, which `genAddr_acc` shows unchanged), `rt_st32` (`RtW.st`) writes it as the IR's `store` does |
+| `eff_ok` (`Z80Eff.lean`) | an effect's code calls the effect's routine with its argument in `A` (a note's value in the accumulator): afterwards the machine stands for the world `IR.Sem.effect` gives (`out.byte`, `out.end`, `drop`, `note`, `input.next`, `ring.pop`) |
+| **`ins_ok`** (`Z80Ins.lean`) | for a covered instruction and whatever `IR.Sem.step` says it does: the code reaches the next item with the states agreeing after it; or the label's item; or calls the function and stores its result; or returns (`RetSt`); or reaches `rt_trap` — in the machine around the CPU, which stands for the IR's world before and after (`MAfter`).  An instruction without effects is proved to do no I/O whatever the bus would answer (`Steps`, `After`) and lifted (`After.lift`) |
+| `genBody_ok`, `Chain.fns` (`Z80Fn.lean`) | the generator's states before and after every instruction of a body, each with the promise of `ins_ok` |
+| **`exec_ok`**, **`fn_ok`** | from an instruction of a body with the states agreeing — and so from a function's entry (`Entry`) — the code has the `Outcome` of `IR.Sem.exec`/`callF`: it returns with the result in `A`/`HL`, the shared bytes as the IR left them and only the footprint written, or it is at `rt_trap`; by induction on the fuel, the functions called included |
+| `genFn_ok` (`Z80FnGen.lean`) | the run of `genFnCode` whose items are in the image gives what `fn_ok` needs of a function (`FnGen`) |
+| **`prog_ok`** (`Z80Prog.lean`) | in an image that holds the items `Codegen.genProg` gives (at any offset), given `RtOK` and `FnStatic` of every function in the environment its second pass ran in (`progEnvs`: the temporaries with a slot, the stores left out): every function with code, entered as `Entry` says, has the outcome of `IR.Sem.callF` |
+| `shapeB_sound` (`Z80Shape.lean`) | a checker for the part of `FnStatic` that is about a body alone (covered instructions, the last one does not go on, labels unique); `#guard`: it accepts every function of the SLIP build and of the loopback program |
+| `plan_ok`, **`fnStaticB_sound`** (`Z80Plan.lean`, `Z80Check.lean`) | a `Plan` gives what `ZCtx` has as predicates as data (intervals of shared bytes, of bytes a function may write, the slots it uses); `okB` decides what `ZCtx.OK` asks of it and `fnStaticB` decides `FnStatic` of a function in its environment — given that the image has the plan's labels and wide constants (`Labels`, `Lits`) |
+| `#guard boardCheck` (`Z80PlanOf.lean`, `Z80BoardPlan.lean`) | the plan `mkPlan` makes of a build for the board passes `okB` and `fnStaticB` of every function: the SLIP build (35 functions) and the loopback program — evaluated at build time, not by the kernel |
+| **`loop_static`**, `loop_ok` (`Z80LoopIR.lean`, `Z80Loop.lean`) | the loopback program, by the kernel: the environments of its four functions, `okB` and `fnStaticB` of its plan, the labels in the generated items — on its IR written out as a term (that the term is what `IR.lower` returns, and the layout what `build` computes, are `#guard`s) |
+| **`loop_image_ok`** (`Z80LoopItems.lean`, `Z80LoopImage.lean`) | the loopback image for the board without the passes on the assembly (`build (passes := false)`, its 351 items written out; `#guard`): the kernel assembles it, finds the symbols of the areas, the generated items, `rt_trap`, and no instruction naming `rt_acc` — so every function of it does what the IR's function does, given `RtOK` and a machine that an instruction without I/O leaves alone |
+| `rt_bound_ok`, `harness_input`, `harness_out_byte`, `harness_out_end`, `harness_drop` (`Z80Rt.lean`) | routines of the runtime, from their items in an image: `rt_bound` returns when `HL < BC` with `A`, `DE`, `HL` kept and is at `rt_trap` when not; the effects of the test harness (`Runtime.harness`: ports of the model, no interrupts) do to the harness's machine (`Harness`) what `IR.Sem.effect` does to the world.  None uses the stack |
+| `ImgIn.ok` (`Z80Image.lean`) | the statement of `loop_image_ok` for any image: one check (`ImgIn.check`, run by the kernel on a term) gives `ZCtx.OK` and, with `RtOK`, the functions |
+| **`loopH_ok`** (`Z80LoopHItems.lean`, `Z80LoopH.lean`) | the loopback image for the test harness, without the passes on the assembly: every function does what the IR's does **with nothing taken of the runtime** — the four routines it calls are proved, it calls no other, and the plan has `rtK = 0` (a function needs two bytes of stack per call below it) |
+| `boot_ok`, `rt_zero_ok`, `ldir_zero` (`Z80Boot.lean`) | the runtime's start-up, from its items: from reset (`di`, `ld sp,0`, `rt_init`) to the head of the loop with the RAM in use cleared — `rt_zero`, an induction over `ldir` |
+| `loop_iter`, `loop_run`, **`loopH_run`**, `loopH_run_halt` (`Z80LoopH.lean`) | the harness's loop, from its items: from its head, with the input used up the loop is left and the CPU stops (`di; halt`); else the entry is called as `IR.Sem.callF` says and the CPU is back at the head.  The loop's count of idle calls is zero at the head — a call with input remaining moves the position in the input (`Moves`), which the loop asks of the machine (port `0xD9`) — so the loop is left only with the input used up.  From reset, against `irIter`; with no input left the machine has stopped |
+| **`loopH_spec`**, **`loopH_spec_halt`** (`Z80LoopHSpec.lean`, `Z80World.lean`) | the same against the **Ember semantics**: `loop_main_refines`/`loop_safe` (M5.5: the loopback never traps, and takes an item of input in every call) and `lower_iter` (M7.1) composed with `loopH_run`.  From reset, for any input: `j` calls of `main` end in the Ember semantics and the machine holds their world at the head of the loop, or it stopped after `i ≤ j` calls with the world of those and no input left; and — the input being finite (`rem_next`: a call leaves one item less) — **the machine does stop, with the world of the calls that used the input up**.  `LoopSrc p`: what is taken of the Ember program (it is the checked loopback program, lowered to `Loop.ir`, accepted by the checkers of M7.1 for this layout) — each computable part a `#guard` |
+| `step_sim`, **`loopH_halts`** (`Z80Machine.lean`) | **the machine the tests run**: in harness mode, with nothing on the serial line and no interrupt pending, one `Ember.Z80.Machine.step` is one step of the proofs' machine and the relation `Sim` (input position, latch, mark, frame, events — a drop by the name of its reason, a note by its name with its value, which the harness is given on port `0xDA` before the code — and the trap: a write to `0xD7`, which the proofs' machine records in the world, `World.trapped`, against `trapIn` of the harness's events) is kept, for every port.  So of `Machine.step` from the machine built as the tests build it (the image `assemble` gives, loaded at 0 by `Cpu.load`, RAM from `0x8000`, harness mode, any input): after some number of steps the CPU is halted and the machine stands for the world the Ember semantics has when the input is used up.  For this `Machine.normalize` became a recursion (it was a `while`) and `Cpu.load` a fold |
+| **`wideH_ok`**, **`wideH_halts`**, **`wideH_traps`**, `moves` (`Z80WideIR.lean`, `Z80WideHItems.lean`, `Z80WideH.lean`; the program `Ember/Z80/Wide.lean`) | **a small program on four-byte values through addresses** (`store` of a constant from the literal pool, of a sum the accumulator holds, `load`, an index check that traps when the input byte is 4 or more), its image for the test harness without the passes, by the same route as `loopH_ok`/`loopH_run`: the routines it calls (`rt_input`, `rt_ld32`, `rt_st32`, `rt_add32`, `rt_acc_hl`, `rt_bound`, `rt_out_byte`, `rt_out_end`) proved from their items, `rtK = 2`.  From reset, for any input: when `j` calls of `main` end in `IR.Sem` and leave no input, the machine halted after `i ≤ j` of them holding their world (`wideH_halts`); when a call with input remaining traps in `IR.Sem`, the machine reaches at the label `rt_trap` (whose items are `out (0xD7),a; di; halt; jr rt_trap_l`: on a machine without maskable interrupts it halts there, but this theorem stops at the label and claims nothing of those instructions) holding the world of the trap (`wideH_traps`).  `Moves` is proved, not taken: `main` begins with `input.next`, no other instruction of it takes input or calls, and none is a label at 0, so a call that ends keeps the world's place but for that first step (`exec_keep`, `main_call`; it keeps reading byte by byte, `framed = false`).  The two inputs of the test — indices in range, then one out of range — are `#guard`s on `IR.Sem` (two calls end and leave no input, transmitting `78 79 70` and `78 7a 70`; the second call of the other traps), and `ownExamples` runs them through the interpreter, the IR, `IR.Sem` and the generated code with and without the passes.  These are at the IR's level; composed with the Ember semantics and carried to `Ember.Z80.Machine` in the next row (`Z80WideHSpec`).  Not the trace `runHarness` prints, not the image as built by default |
+| **`wideH_spec_halt`**, **`wideH_harness_halts`**, **`wideH_spec_trap`**, **`wideH_harness_trap`**, **`wideH_harness_trap_halt`**, `trap_tail` (`Z80WideHSpec.lean`) | the image of `Ember.Z80.Wide` against the **Ember semantics** (`lower_iter`, `lower_trap`, M7.1; `WideSrc p`: what is taken of the program, its computable parts a `#guard`) and on **`Ember.Z80.Machine` as the tests build it** (`harnessMachine`, `step_sim`/`run_sim_of`).  **Halting**: when `j` calls of `main` end in `Lang.Sem` (`callN k p "main" j` from `Lang.Sem.initial p inputs` is `some st'`) and leave no input, after some number of `Machine.step`s the CPU is halted and the machine stands (`Sim`: input position, frame, events recorded) for the world of `i ≤ j` of those calls.  **Trap**: when `j` calls end and the next, with input remaining, traps in `Lang.Sem`, the CPU gets to the label `rt_trap` (`Trapped`) with the machine standing for the world of the trap — or it halted earlier, the input used up.  On from the label, **`wideH_harness_trap_halt`** (`trap_tail`): `out (0xD7),a; di; halt` run as their items say — the CPU halted with `iff1 = false`, the harness's events with a trap (`trapIn`), the world with `trapped := true`.  For this `Trapped` (`Z80Ret`) and the trap branch of `RtBound` (`Z80Mul`) carry the image in ROM (`Img`), given by their producers (`trap_ok`, `rt_bound_ok`, the index checks of `Z80Addr`), which had it; the harness has no maskable interrupt (no serial input, no tick), and that the CPU stays halted is not stated.  That the calls end or trap is the hypothesis, not a theorem about all inputs: for the test's two inputs it is a `#guard` on `Lang.Sem` (indices in range: two calls end, no input left, frames `78 79 70`, `78 7a 70`; one out of range: the second call traps).  Not the trace `runHarness` prints, not the image as built by default |
+| `harness_note` (`Z80Note.lean`) | the harness's `rt_note` from its items (`#guard`: they are the piece of `Runtime.harness`): the four bytes of the accumulator go to port `0xDA`, then `A` to `0xD6`, memory as it was — and a machine that takes these writes as the note of that code and value (`Harness.wrNote`; the loopback's `hdev` does, and so does `Ember.Z80.Machine`, by `step_sim`) has done the IR's `note` effect, value included.  The loopback program has no note: this is for the SLIP image, not yet connected |
+| `rt_ld32_ok`, `rt_st32_ok` (`Z80Wide.lean`) | `rt_ld32` and `rt_st32` from their items (`#guard`: they are the pieces of `Runtime.pieces`), as `RtW` takes them: with the four bytes at `HL` apart from the accumulator and the stack (`HLApart`), the accumulator's four bytes are those at `HL`, or those at `HL` (in RAM) the accumulator's, and no other byte changes; no stack is used.  On `ldir_copy`: `ldir` copies `BC` bytes when no byte it reads is one it writes.  Not yet used by a theorem of an image (the SLIP image is not connected) |
+| `rt_acc_hl_ok`, `rt_acc_a_ok` (`Z80Wide.lean`) | `rt_acc_hl` and `rt_acc_a` from their items (`#guard`: the piece of `Runtime.pieces`): the accumulator's eight bytes are `HL`, or `A`, zero-extended; no other byte changes, no stack is used.  Not yet used by a theorem of an image |
+| `djnz_step`, `byte_loop`, `rt_or32_ok` (`Z80Bytes.lean`) | `djnz` to a label of the image; the loop `ld a,(de); op (hl); ld (de),a; inc hl; inc de; djnz` run `B` times is `runB` on memory, for any ALU operation, the flags going from one byte to the next; and `rt_or32` from its items (`#guard`: the piece of `Runtime.pieces`), with `HLApart`: the accumulator's four bytes are or-ed with those at `HL`, no other byte changes, no stack is used.  Not yet used by a theorem of an image |
+| `rt_add32_ok`, `rt_sub32_ok` (`Z80Bytes.lean`) | `rt_add32` and `rt_sub32` from their items (`#guard`: the pieces of `Runtime.pieces`), with `HLApart`: after `or a` clears the carry, `adc`/`sbc` through the four bytes leave the sum, or the difference, modulo 2³² (`runB_add`, `runB_sub`: the carry, or borrow, of each byte goes into the next — `adc_val`, `adc_c`, `sbc_val`, `sbc_c`); no other byte changes, no stack is used.  Not yet used by a theorem of an image |
+| `rt_shr8_ok` (`Z80Bytes.lean`) | `rt_shr8` from its items (`#guard`: the piece of `Runtime.pieces`): `A` is shifted right by `B` — at once when `B` is zero (`inc b; dec b; ret z`), else `B` times `srl a` — with `HL` and memory as they were; no stack is used.  Not yet used by a theorem of an image |
+| `rt_shr32_ok` (`Z80ShrW.lean`) | `rt_shr32` from its items (`#guard`: the piece of `Runtime.pieces`), with `2 ≤ rtK`: the accumulator's four bytes shifted right by `B` — at once when `B` is zero, else `B` rounds, each with `BC` kept on the stack, of `dec hl; rr (hl); djnz` over the bytes from the top down after `or a` clears the carry; nothing else written but the two bytes of the free stack.  Used by `shiftR4_ok`, by no theorem of an image |
+| `rt_cmp32_ok` (`Z80Bytes.lean`) | `rt_cmp32` from its items (`#guard`: the piece of `Runtime.pieces`), with `HLApart` and `2 ≤ rtK`: `Z` when the accumulator's four bytes are those at `HL`, `C` when they are less (`cmpB_spec`: the borrow through the bytes, the differences or-ed into `C`; `inc c; dec c` keeps the carry).  It keeps `AF` on the stack while it or-s a byte into `C` — the two bytes below the stack pointer, which is why the bytes at `HL` are to be out of the stack and the runtime to have two bytes of it — and writes nothing else.  Not yet used by a theorem of an image; the plans so far have `rtK = 0` (loopback harness, no wide routine) or a placeholder (board) |
+| `litB_sound`, `ImgIn.ok` (`Z80Image.lean`) | the literal pool of an image, checked: for every wide constant of the program the label of its literal is in the image below the RAM and the bytes the assembler put there are the constant's (`litB`, computed on the assembled bytes) — so `LitOK`, which the theorems about wide operands take.  `ImgIn.check` asks it of every literal (it used to ask that there be none) |
+| `Gens.prog`, `ImgIn.plan_parts`, `ImgIn.ok_partsOn` (`Z80ImageParts.lean`) | an image checked in parts: `pass1B`/`pass2B` run one pass of the generator on one function and compare what it gives with what is written (`FnPart`); chained along the program (`Gens`) they give `progEnvs` and `genProg` of it; with `okB` of the plan, `fnStaticB` of each function and what `PartsOn` asks of the image the items assemble to (each a theorem of its own), the conclusion of `ImgIn.ok`; and the plan of the image is that of the environments checked so (`plan_parts`), so no check needs the kernel to run the generator over the program.  (The kernel cannot run the generator over the stack in one evaluation: it keeps the generator's states as unevaluated terms — over 40 GB, stopped.  A function at a time it can: at most about 11 GB, for the 170 instructions of `tcp_segment`) |
+| `genFn_of`, `pass1B_of`, `pass2B_of`, `sharedBytes_eq`, `fnStaticB_of` (`Z80GenChunks.lean`); `place_step`, `emit_step`, `assemble_of` (`Z80AsmChunks.lean`) | the kernel's work cut so that it holds little at once: a pass of the generator from its stretches (the state of the generator at each cut written out; `genBody_append`), `pass1B`/`pass2B` from what the pass gives (no rewriting of `genFn` in the goal, which made the kernel run it again), `sharedBytes` from the frames of its layout (it keeps the layout in a `let` the kernel computes again for every byte asked about); `fnStaticB` of a long function with its instructions checked a stretch at a time; the assembler's two passes a stretch of items at a time (the address and labels a stretch ends with, then the rest) |
+| `outFree_genBody`, `body_step_out`, `genFn_of_out`, `slices_toList`, `pass2B_of'` (`Z80GenOut.lean`) | the generator never reads the items it has generated (`OutFree`: run from a state, it gives what it gives from the same state with no items, its items after those of the state — for every part of the generator, `genInstr` and `genBody` included); so each stretch of a pass is checked from the state before it with no items, and the states at the cuts hold the items of the stretch before them only: the kernel compares a stretch's items, not all those before it; the function's items, those of the stretches in turn (`slices_toList`) |
+| `gens_ok`, `assemble_items`, `img_ok` (`Z80StackIR.lean`, `Z80StackHItems.lean`, `Z80StackHGen.lean` with a module a function `Z80StackHGen/F_<name>.lean` and `Z80StackHGen/Shared.lean`, `Z80StackHAsm.lean`, `Z80StackHPlan.lean`; written by `ember-z80 proof-files`, `Ember/Tools/ProofGen.lean`) | the SLIP build of the stack for the test harness, without the passes on the assembly: its IR (1073 instructions, 35 functions) and the 2924 items of its image written out (`#guard`: they are what `IR.lower` and `build` give, and the layout is `build`'s); by the kernel, 70 passes of the generator (a function a module — a pass a module for the nine functions of more than 40 instructions, which are checked 20 instructions at a time — the modules one after the other), `okB`, 35 `fnStaticB`, the assembly (once, twelve stretches of 250 items: `assemble_items`, the image `asm` written out, which the other checks take), the labels, the six literals of the pool, the symbols, the generated items in place: the setting of the proofs holds of the image (`ZCtx.OK`, with `rtK = 2`) and, given `RtOK`, every function does what the IR's does |
+| **`stackH_ok`** (`Z80StackH.lean`, `Z80HarnessW.lean`) | the image of the stack for the test harness: every function, entered as `Entry` says, returns as `IR.Sem.callF` does with the machine of the harness standing for the world it leaves, or reaches `rt_trap` — **with nothing taken of the runtime**: the fifteen routines its functions call (`calls_eq`: `rt_ld32`, `rt_st32`, `rt_acc_a`, `rt_acc_hl`, `rt_add32`, `rt_sub32`, `rt_or32`, `rt_cmp32`, `rt_shr8`, `rt_not16`, `rt_input`, `rt_out_byte`, `rt_out_end`, `rt_drop`, `rt_note`) are the proved ones, found in the image at their places (`rtCheck`, by the kernel).  Of the functions; from reset see `stackH_run` |
+| `boot_zeroed`, `copy_ok` (`Z80Boot.lean`, `Z80BootInit.lean`) | start-up in two parts: from reset to the return of `rt_zero` inside `rt_init` (the RAM in use zero, memory below the stack as it was, the return address of `rt_init` in place) — `boot_ok` is this and a `ret`; and one copy of an initial value, `ld hl,src; ld de,dst; ld bc,n; ldir`: the bytes at the source are at the destination, nothing else changes |
+| `loop_iter`, `loop_run` (`Z80HarnessLoop.lean`) | the harness's loop that calls the entry, for any image (`LoopNeed`: where the loop is, its count of idle calls, the entry); the loopback image's `loop_iter`/`loop_run` are now these |
+| **`stackH_run`**, `stackH_run_halt` (`Z80StackHRun.lean`) | the image of the stack for the harness **from reset**: start-up — the RAM cleared, **the initial values of `iss` and `ip_id` copied from the ROM** (the bytes there are computed on the assembled image; the IR's initial memory in RAM is those two values and zero, `st0_ram`) — then the loop: for any number of calls of `main` that end in the IR's semantics from its initial state, the machine of the harness is at the head of the loop with the world they leave, or it left the loop and stopped with the input used up.  Taken here: `Moves` (a call of `main` with input remaining moves the position in the input) and that the IR's calls end — both discharged in `stackH_spec_halt` |
+| **`stackH_spec_halt`** (`Z80StackHSpec.lean`) | the image of the stack for the harness **against the Spec**, from reset, for any input: the machine of the harness stops (`di; halt`) holding the world of some number of calls of `main` in the Ember semantics that leave no input, and the kept lines of that world — transmissions and drops, each with the number of its input — are those of `Spec.step`, input by input.  Composes `stackH_run_halt` with `main_step`/`main_run_all` (M5.6: a call never traps, reads one item; so `Moves`, `good_step`) and `lower_iter` (M7.1).  **Taken:** `StackSrc p` — that `p` is the checked SLIP build (`TcpAll`, `TcpReasons`, `main_fn`), lowered to `Stack.ir`, accepted by `progOkB`/`irOkB` with this layout; the parts that can be computed are a `#guard` on `Net.prog.check` |
+| **`stackH_halts`** (`Z80StackHMachine.lean`; `run_sim_of` in `Z80Machine.lean`) | the same **on the machine the tests run**: the image `assemble` makes of `StackH.items`, loaded into `Ember.Z80.Machine` as the tests load it (`harnessMachine`) and stepped by `Machine.step`, for any input: after some number of steps the CPU is halted and the machine stands for a world (`Sim`) with no input left whose transmissions and drops are those of `Spec.step`.  Not in it (see `stackH_trace`): the notes and `tcb` lines (the comparison keeps transmissions and drops), the image as built by default (see `stackD_halts`, `stackD_trace`, `stackD_trace_lines`), a board |
+| **`stackH_trace`** (`Z80StackHTrace.lean`; `Target.runToHalt`, `Target.inputLines` in `Ember/Z80/Target.lean`) | **the trace the tests print**: the same image loaded as `Tools.Z80.machineOf` loads it (`loaded`; `#guard`: `build` without the passes gives these bytes at 0) and run by `Target.runHarness` with the program's names of drops and notes, for any header and input: from some number of steps on (`maxSteps`) the run does not fail, its transmissions and drops — each with the number of its input, in order — are those of `Spec.run` (`keptLines`), and its input lines are the inputs.  `runHarness` steps by a recursion on the steps (`runToHalt`) and prints by list functions, so that the proof follows it (the trace it prints is the one it printed before; `lake test` compares it).  Not in it: the notes and the line a trap would add (see `stackH_trace_lines`, `stackH_no_trap`), the image as built by default (see `stackD_halts`, `stackD_trace`, `stackD_trace_lines`), a board |
+| **`stackH_trace_lines`** (`Z80StackHTrace.lean`; `inputLines_evs`) | **the whole trace**, notes included: as `stackH_trace` runs it, the trace is, for each input in turn, its line, then that input's events in the world the Ember semantics leaves when the input is used up (`main` called until then, `mainIter`) — transmissions, drops and notes by the program's names — and nothing else (no line saying a trap was recorded).  So the image prints what the Ember semantics does, notes included (the notes are the program's, not the Spec's: "connection-reset-by-peer 0" against the Spec's "connection reset by peer", which the comparison with the Spec does not keep).  Not in it: `tcb` lines, the image as built by default (see `stackD_halts`, `stackD_trace`, `stackD_trace_lines`), a board |
+| **`stackH_no_trap`** (`Z80StackHTrace.lean`; `SemTrapped.lean`, `trapIn` and `Sim.trapped` in `Z80Machine.lean`, `hdev` in `Z80HarnessW.lean`) | **no trap is recorded**: on the machine the tests run, for any input, the CPU halts a first time, and then no event the harness recorded is a trap (`HEvent.trap`, a write to port `0xD7`); further steps leave it halted with the same events.  The proofs' machine records a write to `0xD7` in the world (`World.trapped`, a field of its own: no note, no `tcb` line), `Sim` ties it to the harness's events, and the Ember semantics never sets it (`exec_trapped`, `call_trapped`: normally or in a trap of the language); the world at the halt is the Ember semantics', so no trap was recorded.  Checked on small machines (`Z80SimCheck`, `#guard`): the two machines side by side on no input, a tick, an empty chunk, bytes and a tick, with notes (one of value `0xFFFFFFFF`) and a write to `0xD7` — the relation holds after every step, and fails with the device as it was before (a write to `0xD7` ignored).  `runHarness` prints a trap line only when it was recorded at an input (none with no input) |
+| **`tcb_checkpoint`** (`TcbCheckpoint.lean`), **`stackH_tcb_ir`**, **`stackH_tcb_ram`** (`Z80StackHTcb.lean`) | **the state the Spec's `tcb` lines describe, where the program holds it, after every input item**: the Spec writes a `tcb` line (`logTcb`, the text `Tcb.describe`) at the end of some TCP actions; the Ember program writes none.  The observation point is between two items, after a call of `main`: the global `t` (the connection record, 35 bytes at `0x8009`) and `pend` (the echo buffer, 256 bytes at `0x802C`) hold the Spec's control block after the same items (`TcbRel`) — in the Ember semantics (`tcb_checkpoint`, from `MainInv`), in the IR's memory (`stackH_tcb_ir`; `lower_iter_mem`: `lower_iter` with the globals in memory, `GRel`), and in the RAM of the machine the tests run when it is at the head of its loop (`stackH_tcb_ram`: the two are shared bytes of the plan, `AtLoop.mem`), for every `j`, or the machine stopped before with the input used up.  The fields and their order: `RawTcb.describe` writes of the record what `Tcb.describe` writes of the control block — state by name, `snd.una`, `snd.nxt`, `rcv.nxt`, pending length, `sent`, retransmission timer/retries (`TcbRel.describe_eq`).  Not in it: the lines — the program writes no `tcb` line, and the state after an item is the state of the last line the item wrote, not of every line (`Spec.byteInput`: a byte that ends a frame logs, then a tick that waited for the end of the frame logs again; a tick that gives up a frame runs `tickInput` twice); items are bytes and ticks, not inputs; the image as built by default (its observer's lines: `stackD_tcb_obs`), a board |
+| **`stackH_tcb_obs`** (`Z80StackHTcbObs.lean`; the observer `Ember/Z80/TcbObs.lean`, `ember-z80 tcb-obs`) | **the lines of the `tcb` observer of the RAM**: an observation mode apart from `Target.runHarness` (its trace and the size gate unchanged): the machine runs as the harness runs it, and at every head of the loop (`rt_main`, the stack empty, not halted) but the first the observer writes a line — at the number of the input whose item the call read, the text `Tcb.describe` would write of the record `t` (`describeAt`), one per item, in order; it fails unless it saw one head more than there are items, or when the steps run out.  The addresses come from the image as built (`addrsOf`: refused unless the program's `t` is the record `Tcb` of `Ember.Net`, and unless the image has `rt_main`; `#guard addrsAgree`: 32777 and the `rt_main` of the assembled items).  `stackH_tcb_obs`: for the image without the passes, for any input, from some number of steps on, **when the observer gives lines they are the Spec's control block after the first `j + 1` items** (`chk_chain`: the heads of the loop after each call of `main`, by `loop_iter`; `filter_range_eq`: the heads the observer saw are those).  Sound, not total: that it gives lines (that `main` does not pass `rt_main` with the stack empty) is not proved, the observer checks the count.  It runs as `scan` (one step at a time, only the lines kept; `scan_eq`, `run_eq`: what `obsList`, which the proof reads, gives).  Not the Spec's `tcb` lines: those are written inside an item, two for some (a byte that ends a frame, then a tick that waited for it), and the last of them is not always the state after the item (a tick that waited and counted the timer down) — `Z80Tests` keeps both cases, and a frame given up by a second tick |
+| **`passes_halt`**, **`stackD_halts`** (`Z80PassSim.lean` … `Z80PassMaster.lean`, `Z80PassStack.lean`; `Z80PassAbs*.lean`) | **the image as built by default** (`StackD`: `retThreading`, `sweep`, `peephole`, `packHigh`, `relax` over the items) against the image without the passes (`StackH`), run side by side in the harness's devices: a relation at matched items (`Sync`), proved for every kind of segment the match pairs; a certificate of meeting points made by `ember-passcert` outside the proofs and checked by the kernel (`certD_ok`), and what is known of `StackH`'s registers there (`absD_ok`, checked by the kernel) — so when `StackH`'s run halts, so does `StackD`'s with the same devices.  `stackD_halts`: loaded and run as the tests do, for any input, it halts having transmitted and dropped what `Spec.step` does; taken: `StackSrc` only.  That `StackD`'s items and bytes are `build`'s by default: `#guard` |
+| **`stackD_trace`**, **`stackD_no_trap`**, **`stackD_trace_lines`** (`Z80PassStackTrace.lean`) | what `stackH_trace`, `stackH_no_trap`, `stackH_trace_lines` say, of `StackD` (`#guard isLoadedD`: these are the bytes `build` gives by default) |
+| **`stackD_tcb_obs`** (`Z80PassMeet.lean`, `Z80PassStackTcb.lean`) | what `stackH_tcb_obs` says, of `StackD`: every segment has `StackD`'s stack not empty strictly inside it (`NZ`), so every head of `StackH`'s loop is a meeting point with no frames, at `rt_main`'s row, where `StackD` is at the head of its loop with the same RAM and world (`#guard addrsAgreeD`).  Soundness only, as for `StackH`: that the observer gives lines is not proved |
+
+**Checked, not proved** (translation validation, on every function
+generated): `jumpsOk` — what the generator assumes the registers hold
+after a label is what they held at every jump to it and at the fall
+into it (the generator records both; `arrive`).
+
+**The machine.**  `ZCtx` has a machine around the CPU: a state `W`,
+what its bus answers a read with (`bus`), what a read or a write does to
+it (`dev`), and `wrel` — the machine's state stands for the IR's world
+(the input still to come, the events so far).  Nothing is assumed of
+them but that an instruction without I/O leaves the machine as it is.
+
+**What the checks cost.**  The kernel's checks of the stack's image are
+cut so that a Lean process holds at most about 3.6 GB (measured building
+`Ember.Proof` from nothing in a pod limited to 8 GB: about 16 minutes,
+the largest process `Z80StackHAsm`; before the cuts one module took
+35 GB): no check runs the generator over the program (`plan_parts`), a
+pass over a long function goes a stretch at a time, each stretch checked
+by its own items — the generator never reads its output (`Z80GenOut`),
+so a stretch's theorem does not compare the items before it (for
+`tcp_segment` some 380, about 2.4 GB a theorem before) — `sharedBytes`
+is not recomputed byte by byte (`sharedBytes_eq`), the assembler runs
+once and a stretch of items at a time, and the checks on the assembled
+image and the plan are a theorem each (a stretch of 40 labels at a time,
+a literal of the pool at a time, the instructions of a long function a
+stretch of 20 at a time; the start-up's facts in four parts).  The
+image's proofs import the refinement proofs (`StackSrc`): a change of
+what a function of the stack does needs its refinement proof changed,
+then rebuilds the image's modules from `Z80StackIR` on.
+
+**Assumed for now:** `RtOK` — the specifications of the runtime's
+routines (`rt_mul8`, `rt_div8`, …, `rt_not16`, `rt_neg16`, `rt_not32`, the shifts,
+`rt_bound`, the routines on the accumulator `rt_ld32`, `rt_st32`,
+`rt_add32`, …, `rt_cmp32`, `rt_acc_a`, `rt_acc_hl`, and the routine of
+each covered effect: it returns having done to the machine what the
+effect does to the world).  Each is taken where the image calls the
+routine (`Uses`), and the accumulator's symbol where an instruction
+names it (`AccRef`): an image has the routines its code uses and no
+others, so the loopback image, without the wide routines and `rt_acc`,
+can meet them.  The routines on the four bytes at `HL` (`rt_ld32`,
+`rt_st32`, `rt_add32`, …, `rt_cmp32`) are taken with `HLApart`: those
+bytes do not wrap and none is a byte of the accumulator or of the
+stack.  Without it the specifications were not true of the routines
+(they go through the bytes in order, writing the accumulator as they
+go; `rt_cmp32` pushes; `rt_st32` could write its own return address);
+the generated code is shown to call them so (`ptr_ok`: a wide operand
+is in the literal pool, in a shared slot or in a temporary's slot).
+Proved from their items: `rt_bound`, `rt_not16`, `rt_not32`
+(`rt_not32_ok`, `Z80Not`), `rt_shr8`, `rt_shr32` (`rt_shr32_ok`, `Z80ShrW`), the routines on the accumulator (`rt_ld32`, `rt_st32`, `rt_acc_a`,
+`rt_acc_hl`, `rt_add32`, `rt_sub32`, `rt_or32`, `rt_cmp32`) and the five
+effect routines of the test harness — every routine the functions of
+the stack's image for the harness call (`stackH_ok` takes none).  Not
+proved, tested only (`rt-check`): multiplication, division, the other
+shifts (`rt_shl32`, the eight-byte ones), `rt_neg16`, the eight-byte
+routines (`rt_and32` and `rt_xor32` are proved since, `Z80AndXor`).  The board's routines (the ring filled by the interrupt
+routine) need interrupts in the machine of the proofs, which it does
+not have — `WSteps` runs instructions only.
+
+**Two changes to the generator the proofs asked for** (the images
+changed; the tests and the size gate pass):
+
+* *The temporaries have an area of their own* (`Codegen.tmpArea`).  The
+  relation takes the slots of temporaries to be apart from every byte
+  the IR sees (`FnLay.nodata`); the layout used to put them on top of
+  the frame, where the frame of a function that never runs at the same
+  time may lie.  +9 bytes of RAM in the SLIP build.
+* *A store to a byte another function's frame shares is made*
+  (`keepShared`, `sharedBytes`).  A store the generator leaves out
+  (the value is always at hand in a register) leaves the CPU's memory
+  unlike the IR's at that byte; where the byte is also a variable of
+  another function the relation cannot say so.  +91 bytes of code in
+  the SLIP build (15 functions had such stores).  And in its second pass
+  the generator now refuses to read the frame from memory where the
+  first pass saw no read (`noteRead`) — it never did; the proofs rely on
+  it.
+
+**Where this stands for the images.**  Of the loopback image without
+the passes on the assembly: for the test harness `loopH_ok` — nothing
+assumed of the program, the layout, the image or the runtime; for the
+board `loop_image_ok` — the same but for `RtOK`, and in a machine
+without interrupts, which is not the board's.  For the harness also from
+reset, through start-up and the loop that calls `main` (`loopH_run`).
+The machine there is the CPU model with the harness's ports written as
+a function of the world (`hbus`, `hdev`); `Ember.Z80.Machine` — the
+machine the tests run — steps as it does (`step_sim`), so the statement
+is also of `Machine.step` from the machine as the tests build it
+(`loopH_halts`: it processes all its input and stops).  What the tests add around it is not in that theorem:
+`Target.runHarness` (its loop until `halted`, the printing of the trace) — for the stack it is (`stackH_trace`).  Of the SLIP build of the stack, for the
+test harness and without the passes: `stackH_ok` — every function of
+the image does what the IR's does, nothing assumed of the program, the
+layout, the image or the runtime (the literal pool and the checks of
+the 1073 instructions are computed by the kernel, a function at a
+time).  From reset: start-up with the copy of the initial values and the
+harness's loop are proved from their items (`stackH_run`), composed
+with the Ember semantics and the Spec (`stackH_spec_halt`) and carried
+to `Machine.step` (`stackH_halts`): **the image of the stack, loaded
+and run as the tests do, processes all its input and stops, having
+transmitted and dropped what `Spec.step` does**, and the trace
+`Target.runHarness` prints of it has the transmissions and drops of
+`Spec.run`'s, input by input (`stackH_trace`) — for the harness, the
+image without the passes, and given `StackSrc` of the Ember program
+(its computable parts, and that the written-out IR and items are the
+lowering and the build, are `#guard`s).  For the board the checks of its layout
+pass (`#guard`, not the kernel) and its image is not connected.  Of the images as
+built by default (`build` runs `retThreading`, `sweep`, `peephole`,
+`packHigh` and `relax` over the items, 303 bytes of 7159 in the SLIP
+build) the stack's for the harness is proved (`StackD`: `stackD_halts`,
+`stackD_trace`, `stackD_no_trap`, `stackD_trace_lines`,
+`stackD_tcb_obs`, through `passes_halt`); for other programs the passes
+are tested (random programs, the loopback, the corpus; `ember-z80
+own-build --plain` is the image without them).  Not proved: for the board, start-up, the interrupt routine and the
+loop that calls `main`; interrupts in any image.  The stack: `Z.rtK` is what a
+routine of the runtime needs below its return address — 0 for the
+harness loopback (proved), 32 in the plans of the board builds
+(a placeholder: `Ember.Z80.StackBound` computes at most 4 for any
+routine of `Runtime.pieces`, not proved).
+
+**Covered** (`Covered`): all 1073 instructions of the SLIP build's IR,
+all 79 of the loopback program's, 1561 of the 1562 of each Ethernet
+build's (`Z80Shape`: `coverage`, `#guard`) — with `load4_ok`
+(`Z80MemW`) and `store4_ok` (`Z80StoreW`), memory of four bytes
+through an address (`arp_ip[i]` in `arp_update`): the address by
+`genAddr`, the bytes by `rt_ld32` or `rt_st32` (`RtW`; their `HLApart`
+from the bytes being shared bytes).  For the store the generator puts
+the value in the accumulator before the address (it used to save the
+address with `push hl` around `loadAcc`, which needed more stack than
+`FnStatic` grants; the SLIP build and the loopback program have no such
+store, their images are unchanged).  These are instruction theorems:
+no theorem is about an image of the Ethernet builds.  Covered as well
+(instruction theorems only): `ext` to one byte from four (`ext14_ok`)
+and `not` of four bytes of an operand that is not a constant (`notW_ok`,
+by `rt_not32`), the right shift of four bytes by a constant `1..31`
+(`shiftR4_ok`, by `rt_shr32`) — with them `regress_wide_store` is covered
+whole (`Tests/Ember/Z80Cover.lean`, `#guard`: 30 instructions, none left;
+in `Tests` because the program is, and built by `tools/ember/ci.sh`)
+and `crc32` is covered whole
+(`Z80Cover`, `#guard`: 34 instructions, none left).  For
+`regress_wide_store`, its IR and the items and layout of its image for the
+harness are written out (`Z80RegressWIR`, `Z80RegressWHItems`; that they
+are the lowering's and `build`'s are `#guard`s, the lowering's in
+`Tests/Ember/Z80RegressW.lean`), and `regressH_ok` (`Z80RegressWH`) says
+every function of that image does what `IR.Sem.callF` does or reaches
+`rt_trap`, the routines it calls proved from their items; from reset
+(`Z80RegressWHRun`: start-up with the copy of `wv`'s initial value from
+the ROM, `copy_ok`, and the harness's loop) `regressH_halts` — IR calls
+that end with the input used up: the machine halts with their world —
+and `regressH_traps` — a call that traps: the machine reaches the label
+`rt_trap` with the world of the trap — with `Moves` proved; and, composed
+with the lowering and carried to `Ember.Z80.Machine` (`Z80RegressWHSpec`:
+`regressH_harness_halts`, `regressH_harness_trap`,
+`regressH_harness_trap_halt`), the same against the Ember semantics of a
+program `p` with `RegressSrc p` — that the checked `Regress.p5` has it is
+`#guard`s in `Tests/Ember/Z80RegressW.lean` (evaluation: the checker is
+`partial`).  Not the trace `runHarness` prints, not the image as built by
+default.  For `crc32` the IR and the items and layout of its image for
+the harness are written out (`Z80Crc32IR`, `Z80Crc32HItems`; `#guard`s
+that they are the lowering's and `build`'s), and `crc32H_ok`
+(`Z80Crc32H`) says every function of that image does what
+`IR.Sem.callF` does, the routines it calls proved from their items
+(`rt_and32` and `rt_xor32` in `Z80AndXor`); from reset
+(`Z80Crc32HRun`: start-up with the copy of `crc`'s initial value from
+the ROM, and the harness's loop) `crc32H_halts` — IR calls of `main`
+that end with the input used up: the machine halts with their world —
+with `Moves` proved (`update` keeps the input's position); the IR has no
+instruction that can trap, so no call of `main` traps (`main_no_trap`),
+and there is no trap theorem.  The image has no `rt_trap`;
+`ImgIn.labels` (default `["rt_trap"]`) is empty for it.  Composed with
+the lowering and carried to `Ember.Z80.Machine` (`Z80Crc32HSpec`:
+`crc32H_harness_halts`): when `j` calls of `main` end in the Ember
+semantics with the input used up, the machine as the tests build it
+halts after `i ≤ j` of them, standing for their world; and from a state
+the calls reach, the next call does not trap in `Lang.Sem`
+(`crc32_lang_no_trap` — not that it ends).  Taken: `Crc32Src p`, of the
+checked `crc32` `#guard`s (evaluation: the checker is `partial`).  Not
+the trace `runHarness` prints, not the image as built by default.  **Not covered:**
+shifts by a variable, `zero`, `not` of a constant and `neg` on four
+bytes, values of eight bytes, the
+MMIO effects and `input.frame`, an address through a pointer
+(by-reference parameters).  Of the runtime: multiplication, division,
+the shifts but `rt_shr8` and `rt_shr32`, `rt_neg16` and the eight-byte
+routines on the accumulator, the MMIO routines, and everything of the
+board's runtime (its effects, start-up, the interrupt routine and the
+ring) — proved are `rt_bound`, `rt_not16`, `rt_not32`, `rt_shr8`, `rt_shr32`, `rt_and32`, `rt_xor32`, the routines on
+four bytes of the accumulator the stack calls, the harness's five effect
+routines, `rt_zero`, and the harness's start-up and loop for the
+loopback image.
+Of the images: the stack's for
+the board (its plan passes the
+checks, by `#guard`; its image is not connected), the board's loopback
+image beyond its functions, and every image as built by default but the
+stack's for the harness (`StackD`) — the passes on the assembly
+(`retThreading`, `sweep`, `peephole`, `packHigh`, `relax`) are proved
+for that image only, not in general.  Interrupts are not in the machine of the
+proofs.
+
+### Not proven
+
+* the driver loop of `Sem.run` and the printing of the `Trace` (above);
+  on the Spec's side `Spec.run` likewise — `Spec.reach` and `specKept`
+  are what its loop computes, by definition of `Spec.step`;
+* only the SLIP configuration: the Ethernet build (`Ember.Net.Eth`,
+  ARP, DHCP) has no refinement proofs;
+* lines other than transmissions and drops (`pkt`, `tcb`, notes) are
+  not compared;
+* the Z80 back end from the IR on, beyond the SLIP build's images for the test harness: M7.3 is proved for `StackH` and `StackD` on the Lean model, given `StackSrc` ("The code generator"), not for every IR program — other programs' images are tested; not proved: the board's runtime, start-up and interrupts, the routines and operations the stack does not use (multiplication, division, variable shifts, wide `not`/`neg`/`zero`, eight-byte values, MMIO, `input.frame`), real hardware, and that the `tcb` observer always gives lines; and what "The emitted C" and "The IR of the Z80 back end" above list as not covered;
+* that a function *traps* exactly when the Spec rejects: the theorems
+  are for states that satisfy their invariants, and show that from those
+  no call traps (the fuel given is enough and every index is in range).

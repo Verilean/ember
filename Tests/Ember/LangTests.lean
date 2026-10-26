@@ -7,6 +7,11 @@ import Ember.Spec.Slip
 import Ember.Tools.Cc
 import Ember.Tools.Emit
 import Ember.Tools.Fuzz
+import Ember.Tools.NetCheck
+import Ember.Tools.Lockstep
+import Ember.Lang.Sem
+import Ember.C.Sem
+import Ember.C.DropChecks
 import Tests.Ember.LangPrograms
 
 /-!
@@ -128,9 +133,10 @@ def profileTests : TestSeq :=
   test "u64 on rv32: uint64_t" (Profile.rv32.opType .w64 == "uint64_t") $
   test "u8 * u8 emitted with unsigned operands and a truncating cast" mulEmitted
 
-/-- Each regression: the drop comes before the trap in the interpreter. -/
+/-- Each of the trapping regressions (the first two): the drop comes
+before the trap in the interpreter. -/
 def regressionsKeepOrder : Bool :=
-  Regress.progs.all fun (_, p, ins) =>
+  (Regress.progs.take 2).all fun (_, p, ins) =>
     match p.run ins with
     | .ok r =>
       let kinds := r.trace.lines.toList.map (·.ev.kind)
@@ -162,6 +168,16 @@ def golden : IO Nat := do
         else if (← IO.FS.readFile path) != c then
           bad := bad + 1
           IO.println s!"FAIL golden {path}: emitted C changed (review, then lake exe ember-emit --golden)"
+      if Tools.Emit.dropped.contains name then
+        n := n + 1
+        let path := Tools.Emit.droppedPath name prof
+        match Tools.Emit.emitDroppedFor name p prof with
+        | .error e => bad := bad + 1; IO.println s!"FAIL golden {name} (dropped): {e}"
+        | .ok c =>
+          if !(← path.pathExists) then bad := bad + 1; IO.println s!"FAIL golden {path}: missing (lake exe ember-emit --golden)"
+          else if (← IO.FS.readFile path) != c then
+            bad := bad + 1
+            IO.println s!"FAIL golden {path}: emitted C changed (review, then lake exe ember-emit --golden)"
   IO.println s!"golden C: {n} files, {bad} failures"
   return bad
 
@@ -281,6 +297,10 @@ anything about the C: as with GCC's range warnings, no emitter can rule
 them out in general, so they are the only ones disabled. -/
 def sdccOptimiserNotes : Array String := #["--disable-warning", "110", "--disable-warning", "126"]
 
+/-- The register allocator's search, as `runtime/z80/Makefile` (validated
+for SDCC 4.6.0 #16555 only: see there). -/
+def sdccAllocs : Array String := #["--max-allocs-per-node", "10000"]
+
 /-- The Z80 profile's C compiles with SDCC, warnings as errors. -/
 def sdcc : IO Nat := do
   let ok ← try pure ((← IO.Process.output { cmd := "sdcc", args := #["--version"] }).exitCode == 0) catch _ => pure false
@@ -291,10 +311,16 @@ def sdcc : IO Nat := do
   let mut n := 0
   for (name, _) in ← Tools.Emit.registry do
     let f := Tools.Emit.goldenPath name .sdccZ80
-    let r ← IO.Process.output { cmd := "sdcc", args := #["-mz80", "--std-c99", "--Werror"] ++ sdccOptimiserNotes ++
+    let r ← IO.Process.output { cmd := "sdcc", args := #["-mz80", "--std-c99", "--Werror"] ++ sdccAllocs ++ sdccOptimiserNotes ++
       #["-Iruntime/common", "-c", f.toString, "-o", s!".lake/ember-sdcc-{name}.rel"] }
     n := n + 1
     if r.exitCode != 0 then bad := bad + 1; IO.println s!"FAIL sdcc {f}:\n{r.stderr}{r.stdout}"
+    if Tools.Emit.dropped.contains name then
+      let f := Tools.Emit.droppedPath name .sdccZ80
+      let r ← IO.Process.output { cmd := "sdcc", args := #["-mz80", "--std-c99", "--Werror"] ++ sdccAllocs ++ sdccOptimiserNotes ++
+        #["-Iruntime/common", "-c", f.toString, "-o", s!".lake/ember-sdcc-{name}-dropped.rel"] }
+      n := n + 1
+      if r.exitCode != 0 then bad := bad + 1; IO.println s!"FAIL sdcc {f}:\n{r.stderr}{r.stdout}"
   IO.println s!"sdcc -mz80 --Werror: {n} programs, {bad} failures"
   return bad
 
@@ -306,9 +332,202 @@ def fuzz (count : Nat) : IO Nat := do
   IO.println s!"fuzz: {count} random programs, -O0 and -O2 with UBSan/ASan: {if rc == 0 then "no divergence" else "DIVERGENCE"}"
   return if rc == 0 then 0 else 1
 
+/-- M5.4: the total semantics (`Ember.Lang.Sem`, the one proofs unfold)
+against the interpreter: random programs, the examples and regressions,
+and the stack — all its builds — on the corpus. -/
+def semantics (count : Nat) : IO Nat := do
+  let mut bad := 0
+  let mut runs := 0
+  let check (name : String) (p : Prog) (ins : Array Input) : IO Nat := do
+    match p.check with
+    | .error e => IO.println s!"FAIL sem {name}: {e}"; return 1
+    | .ok q =>
+      let it := (runMachine (Machine.init q ins) { impl := "interp" }).trace
+      let st := Sem.run q ins
+      if Tools.Fuzz.agree it st then return 0
+      IO.println s!"FAIL {name}: interpreter vs Sem\n{(diff it st { observable := false }).report}"
+      return 1
+  for i in [0:count] do
+    let (p, ins) := Gen.sample (90000 + i)
+    bad := bad + (← check s!"p{90000 + i}" p ins)
+    runs := runs + 1
+  for (n, p) in Examples.all do
+    let ins := if n == "constructs" then constructsInputs
+      else if n == "slip" then #[.rx ((randBytes 400).run' (Rng.ofSeed 3))]
+      else roundInputs (rounds 3 4 40)
+    bad := bad + (← check n p ins)
+    runs := runs + 1
+  for (n, p, ins) in (Regress.progs : List (String × Prog × Array Input)) do
+    bad := bad + (← check n p ins)
+    runs := runs + 1
+  for (n, p) in Guard.progs do
+    for ins in Guard.inputs do
+      bad := bad + (← check n p ins)
+      runs := runs + 1
+  let mut fixtures := 0
+  for d in ["Tests/Ember/corpus", "Tests/Ember/regress"] do
+    for f in ← Tools.Lockstep.traceFiles d do
+      let t ← Trace.readFile f
+      if Tools.NetCheck.implemented t.header then
+        bad := bad + (← check f.toString (Tools.NetCheck.progFor t.header) t.inputs)
+        fixtures := fixtures + 1
+  IO.println s!"semantics: {runs} runs of random programs and examples, the stack on {fixtures} fixtures: interpreter = Sem (the total semantics); {bad} failures"
+  return bad
+
+/-- M5.7: the emitted C under the C semantics of `Ember.C.Sem` against
+`Ember.Lang.Sem`, for every profile: the same trace, and never
+"undefined". -/
+def csemantics (count : Nat) : IO Nat := do
+  let mut bad := 0
+  let mut runs := 0
+  let check (name : String) (p : Prog) (ins : Array Input) : IO Nat := do
+    match p.check with
+    | .error e => IO.println s!"FAIL csem {name}: {e}"; return 1
+    | .ok q =>
+      let st := Sem.run q ins
+      let mut bad := 0
+      for prof in Profile.all do
+        let o : C.Opts := { profile := prof }
+        match C.compile q o with
+        | .error e => IO.println s!"FAIL csem {name} ({prof.name}): {e}"; bad := bad + 1
+        | .ok u =>
+          let cp := C.Sem.CProg.ofUnit u prof o.entryName q.dropReasons q.notes
+          let ct := C.Sem.run cp ins q.framed (fuel := 1000000)
+          let undef := ct.lines.any fun l => match l.ev with
+            | .note m => m.startsWith "undefined"
+            | _ => false
+          unless Tools.Fuzz.agree st ct && !undef do
+            IO.println s!"FAIL {name} ({prof.name}): Sem vs C semantics\n{(diff st ct { observable := false }).report}"
+            bad := bad + 1
+      return bad
+  for i in [0:count] do
+    let (p, ins) := Gen.sample (95000 + i)
+    bad := bad + (← check s!"p{95000 + i}" p ins)
+    runs := runs + 1
+  for (n, p) in Examples.all do
+    let ins := if n == "constructs" then constructsInputs
+      else if n == "slip" then #[.rx ((randBytes 400).run' (Rng.ofSeed 3))]
+      else roundInputs (rounds 3 4 40)
+    bad := bad + (← check n p ins)
+    runs := runs + 1
+  for (n, p, ins) in (Regress.progs : List (String × Prog × Array Input)) do
+    bad := bad + (← check n p ins)
+    runs := runs + 1
+  for (n, p) in Guard.progs do
+    for ins in Guard.inputs do
+      bad := bad + (← check n p ins)
+      runs := runs + 1
+  let mut fixtures := 0
+  for d in ["Tests/Ember/corpus", "Tests/Ember/regress"] do
+    for f in ← Tools.Lockstep.traceFiles d do
+      let t ← Trace.readFile f
+      if Tools.NetCheck.implemented t.header then
+        bad := bad + (← check f.toString (Tools.NetCheck.progFor t.header) t.inputs)
+        fixtures := fixtures + 1
+  -- self-test: a planted bug (the truncating cast of `+` dropped) must show
+  let mut caught := 0
+  let mut tried := 0
+  for i in [0:1000] do
+    if caught > 0 then break
+    tried := tried + 1
+    let (p, ins) := Gen.sample (1 + i)
+    if let .ok q := p.check then
+      let o : C.Opts := { profile := .host64, bugDropCast := true }
+      if let .ok u := C.compile q o then
+        let ct := C.Sem.run (C.Sem.CProg.ofUnit u .host64 o.entryName q.dropReasons q.notes) ins q.framed (fuel := 1000000)
+        unless Tools.Fuzz.agree (Sem.run q ins) ct do caught := caught + 1
+  if caught == 0 then
+    IO.println "FAIL C semantics: the planted bug (dropped cast) was not noticed"
+    bad := bad + 1
+  IO.println s!"C semantics: planted bug noticed after {tried} random programs"
+  IO.println s!"C semantics: {runs} runs of random programs and examples, the stack on {fixtures} fixtures, {Profile.all.length} profiles: Sem = the emitted C under Ember.C.Sem, nothing undefined; {bad} failures"
+  return bad
+
+/-- M5.9: the bounds checks taken out (`C.dropUnit`).  Of the SLIP build
+(`Ember.Proof.CDrop.stack_c_dropped`): its C without checks, under the C
+semantics, on every fixture of its configuration and every profile, has
+the trace of `Ember.Lang.Sem` and nothing undefined, and the checks
+taken out are all there were.  Where no proof says the run never traps
+the checks stay: the tools refuse every other program, and on the
+`Guard` programs (an index out of range for some input) the C with its
+checks traps where the interpreter does, while without them the C
+semantics has no meaning for the run (undefined) — which is why a check
+goes only where a proof covers it. -/
+def droppedTests : IO Nat := do
+  let mut bad := 0
+  let mut runs := 0
+  let undefIn (t : Trace) : Bool := t.lines.any fun l => match l.ev with
+    | .note m => m.startsWith "undefined"
+    | _ => false
+  -- the SLIP build: every check taken out, the same runs
+  match Net.prog.check with
+  | .error e => IO.println s!"FAIL dropped: {e}"; bad := bad + 1
+  | .ok q =>
+    for prof in Profile.all do
+      let o : C.Opts := { profile := prof }
+      match C.compile q o with
+      | .error e => IO.println s!"FAIL dropped ({prof.name}): {e}"; bad := bad + 1
+      | .ok u =>
+        let d := C.dropUnit u
+        unless C.checksUnit u > 0 && C.checksUnit d == 0 do
+          IO.println s!"FAIL dropped ({prof.name}): {C.checksUnit u} checks, {C.checksUnit d} left"
+          bad := bad + 1
+        let cp := C.Sem.CProg.ofUnit d prof o.entryName q.dropReasons q.notes
+        for dir in ["Tests/Ember/corpus", "Tests/Ember/regress"] do
+          for f in ← Tools.Lockstep.traceFiles dir do
+            let t ← Trace.readFile f
+            if Tools.NetCheck.buildIndex t.header == some 0 then
+              let ct := C.Sem.run cp t.inputs q.framed (fuel := 1000000)
+              runs := runs + 1
+              unless Tools.Fuzz.agree (Sem.run q t.inputs) ct && !undefIn ct do
+                IO.println s!"FAIL dropped {f} ({prof.name}): Sem vs the C without checks"
+                bad := bad + 1
+  -- every other program keeps its checks
+  for (name, p) in (← Tools.Emit.registry) ++ Tools.Emit.extra ++ Guard.progs do
+    if !Tools.Emit.dropped.contains name then
+      if let .ok _ := Tools.Emit.emitDroppedFor name p .host64 then
+        IO.println s!"FAIL dropped: {name} emitted without checks"
+        bad := bad + 1
+  -- the Guard programs: the checks are what make the out-of-range runs traps
+  let mut trapsKept := 0
+  let mut undefWithout := 0
+  for (name, p) in Guard.progs do
+    match p.check with
+    | .error e => IO.println s!"FAIL dropped {name}: {e}"; bad := bad + 1
+    | .ok q =>
+      let o : C.Opts := { profile := .host64 }
+      match C.compile q o with
+      | .error e => IO.println s!"FAIL dropped {name}: {e}"; bad := bad + 1
+      | .ok u =>
+        if C.checksUnit u == 0 then
+          IO.println s!"FAIL dropped {name}: no check emitted"
+          bad := bad + 1
+        for ins in Guard.inputs do
+          let st := Sem.run q ins
+          let ct := C.Sem.run (C.Sem.CProg.ofUnit u .host64 o.entryName q.dropReasons q.notes) ins q.framed
+            (fuel := 1000000)
+          let dt := C.Sem.run (C.Sem.CProg.ofUnit (C.dropUnit u) .host64 o.entryName q.dropReasons q.notes) ins
+            q.framed (fuel := 1000000)
+          runs := runs + 1
+          unless Tools.Fuzz.agree st ct && !undefIn ct do
+            IO.println s!"FAIL dropped {name}: Sem vs the C with checks"
+            bad := bad + 1
+          if Tools.Cc.trapped st then
+            trapsKept := trapsKept + 1
+            if undefIn dt then undefWithout := undefWithout + 1
+  -- out-of-range inputs exist, and each is undefined once its check is gone
+  unless trapsKept > 0 && undefWithout == trapsKept do
+    IO.println s!"FAIL dropped Guard: {trapsKept} trapping runs, {undefWithout} undefined without the checks"
+    bad := bad + 1
+  IO.println s!"bounds checks dropped (M5.9): the SLIP build without its checks on {runs} runs (fixtures × profiles, Guard) = Sem, nothing undefined; other programs refused; Guard: {trapsKept} trapping runs keep their trap, undefined without the check; {bad} failures"
+  return bad
+
 def main (fuzzCount : Nat := 1000) : IO UInt32 := do
   let mut bad := 0
+  bad := bad + (← semantics fuzzCount)
+  bad := bad + (← csemantics fuzzCount)
   bad := bad + (← golden)
+  bad := bad + (← droppedTests)
   bad := bad + (← referenceTests)
   bad := bad + (← differential)
   bad := bad + (← sdcc)

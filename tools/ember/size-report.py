@@ -8,38 +8,34 @@ Builds the emitted C of the stack (Tests/Ember/golden/net.<profile>.c,
 kept current by `lake test`):
 
 * host64 — `gcc -Os -c`, sizes per function and per global from `nm -S`;
-* sdcc-z80 — `sdcc -mz80 --opt-code-size`, linked with a stub runtime,
-  CODE and DATA totals from the map file (when SDCC is installed).
+* sdcc-z80 — the image of runtime/z80 without tracing (`sdcc -mz80
+  --opt-code-size`): ROM and RAM from the linker's area sizes, and the
+  T-states per ICMP echo on the Z80 model (`ember-z80 ping`);
+* esp32c3 — the bare-metal image of runtime/esp32c3 without tracing
+  (`riscv32-none-elf-gcc -Os`): code, read-only data and RAM of the whole
+  image (stack and runtime included, the 4 KB stack counted in the RAM),
+  and the instructions per ICMP echo in Espressif's QEMU with `-icount`
+  (when the cross compiler, esptool and that QEMU are installed).
 
+The same for the SLIP build's C without its bounds checks
+(`net.dropped.*.c`, M5.9: Ember.Proof.CDrop.stack_c_dropped), as the rows
+`*.dropped.*`: the gain is their difference from the rows of the C with
+its checks.
 Each metric must stay within ±3 % of the committed baseline, in either
 direction (as bench/gate in Sparkle): a change in cost is a reviewed
 diff of the baseline file.  Exit status 1 outside the tolerance.
 """
-import os, re, subprocess, sys, tempfile, shutil
+import importlib.util, os, re, subprocess, sys, tempfile, shutil
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 BASELINE = os.path.join(ROOT, "bench", "ember-size.baseline")
 TOL = 0.03
 
-STUB = r'''
-#include "ember_rt.h"
-uint16_t ember_input_next(void) { return 0xFFFFu; }
-uint16_t ember_ring_pop(void) { return 0xFFFFu; }
-void ember_out_byte(uint8_t b) { (void)b; }
-void ember_out_end(void) {}
-void ember_drop(uint8_t c) { (void)c; }
-void ember_note(uint8_t c, uint32_t v) { (void)c; (void)v; }
-uint32_t ember_mmio_read32(uint32_t a) { (void)a; return 0; }
-void ember_mmio_write32(uint32_t a, uint32_t v) { (void)a; (void)v; }
-void ember_trap(const char *w) { (void)w; for (;;) {} }
-void entry(void);
-int main(void) { for (;;) entry(); }
-'''
 
 
-def host64(tmp):
-    src = os.path.join(ROOT, "Tests/Ember/golden/net.host64.c")
-    obj = os.path.join(tmp, "net.o")
+def host64(tmp, prog="net"):
+    src = os.path.join(ROOT, f"Tests/Ember/golden/{prog}.host64.c")
+    obj = os.path.join(tmp, f"{prog}.o")
     subprocess.run(["gcc", "-std=c99", "-Os", "-ffunction-sections", "-fdata-sections",
                     "-I" + os.path.join(ROOT, "runtime/common"), "-c", src, "-o", obj], check=True)
     out = subprocess.run(["nm", "-S", "--size-sort", obj], check=True, capture_output=True, text=True).stdout
@@ -59,31 +55,112 @@ def host64(tmp):
     return code, ram, rodata
 
 
-def z80(tmp):
-    if shutil.which("sdcc") is None:
+def z80(tmp, prog="net", key="z80"):
+    """The image of runtime/z80 as a board would run it: no trace, traps
+    without their place (EMBER_TRACE=0, EMBER_TRAP_TERSE).  Code is
+    everything in ROM (start-up, interrupt routine, runtime, the stack,
+    SDCC's library routines, initialisers); RAM is the data without the
+    stack."""
+    if shutil.which("sdcc") is None or shutil.which("make") is None:
         return None
-    src = os.path.join(ROOT, "Tests/Ember/golden/net.sdcc-z80.c")
-    stub = os.path.join(tmp, "stub.c")
-    with open(stub, "w") as f:
-        f.write(STUB)
-    inc = "-I" + os.path.join(ROOT, "runtime/common")
-    flags = ["-mz80", "--std-c99", "--opt-code-size", "--disable-warning", "110", "--disable-warning", "126", inc]
-    subprocess.run(["sdcc"] + flags + ["-c", src, "-o", os.path.join(tmp, "net.rel")], check=True)
-    subprocess.run(["sdcc"] + flags + ["-c", stub, "-o", os.path.join(tmp, "stub.rel")], check=True)
-    subprocess.run(["sdcc", "-mz80", "--code-loc", "0x0100", "--data-loc", "0x8000",
-                    os.path.join(tmp, "stub.rel"), os.path.join(tmp, "net.rel"),
-                    "-o", os.path.join(tmp, "net.ihx")], check=True)
+    src = os.path.join(ROOT, f"Tests/Ember/golden/{prog}.sdcc-z80.c")
+    tmp = os.path.join(tmp, key)
+    os.makedirs(tmp, exist_ok=True)
+    subprocess.run(["make", "-s", "-f", os.path.join(ROOT, "runtime/z80/Makefile"), "OUT=" + tmp,
+                    "NAME=stack-quiet", "PROG=" + src, "DEFS=-DEMBER_TRACE=0 -DEMBER_TRAP_TERSE -DEMBER_NO_NAMES"], check=True)
+    # area sizes are the linker's l__AREA symbols (the map repeats its
+    # area header lines on every page: they must not be added up)
     sizes = {}
-    with open(os.path.join(tmp, "net.map")) as f:
+    with open(os.path.join(tmp, "stack-quiet.map")) as f:
         for line in f:
-            m = re.match(r"^(_\w+)\s+([0-9A-F]{8})\s+([0-9A-F]{8})\s*=\s*(\d+)\.\s*bytes", line)
+            m = re.match(r"^\s+([0-9A-F]{8})\s+l__(\w+)\s*$", line)
             if m:
-                sizes[m.group(1)] = sizes.get(m.group(1), 0) + int(m.group(4))
-    # the stack's own areas only: the stub is tiny, and the C library is
-    # pulled in by 32/64-bit arithmetic (counted, it is part of the cost)
-    code = sizes.get("_CODE", 0) + sizes.get("_HOME", 0) + sizes.get("_INITIALIZER", 0)
-    ram = sizes.get("_DATA", 0) + sizes.get("_INITIALIZED", 0)
-    return code, ram, sizes
+                sizes["_" + m.group(2)] = int(m.group(1), 16)
+    header = 0x100          # vectors and the jump to the start-up code
+    code = header + sum(sizes.get(a, 0) for a in ("_HOME", "_CODE", "_INITIALIZER", "_GSINIT", "_GSFINAL"))
+    ram = sizes.get("_DATA", 0) + sizes.get("_INITIALIZED", 0) + sizes.get("_BSS", 0)
+    funcs = {}
+    syms = []
+    with open(os.path.join(tmp, "stack-quiet.noi")) as f:
+        for line in f:
+            m = re.match(r"^DEF (_\w+) 0x([0-9A-F]+)$", line)
+            if m:
+                syms.append((int(m.group(2), 16), m.group(1)))
+    syms.sort()
+    end = 0x100 + sizes.get("_CODE", 0)
+    for (a, n), (b, _) in zip(syms, syms[1:] + [(end, "")]):
+        if 0x100 <= a < end:
+            funcs[n] = min(b, end) - a
+    m = {f"{key}.code": code, f"{key}.ram": ram}
+    exe = os.path.join(ROOT, ".lake/build/bin/ember-z80")
+    if os.path.exists(exe):
+        subprocess.run(["make", "-s", "-f", os.path.join(ROOT, "runtime/z80/Makefile"), "OUT=" + tmp,
+                        "NAME=stack-tx", "PROG=" + src, "DEFS=-DEMBER_TRACE=1 -DEMBER_TRAP_TERSE -DEMBER_NO_NAMES"], check=True)
+        out = subprocess.run([exe, "ping", os.path.join(tmp, "stack-tx.ihx")], check=True,
+                             capture_output=True, text=True).stdout
+        m[f"{key}.ping_tstates"] = int(re.search(r"(\d+) T-states", out).group(1))
+        # the stack is RAM too: its deepest point over the corpus
+        out = subprocess.run([exe, "stack", os.path.join(tmp, "stack-quiet.ihx"), os.path.join(ROOT, "Tests/Ember/corpus")],
+                             check=True, capture_output=True, text=True).stdout
+        m[f"{key}.stack"] = int(re.search(r"stack: (\d+) bytes", out).group(1))
+    return m, funcs, sizes
+
+
+def z80own(tmp):
+    """The stack compiled by the own Z80 back end (plan M6), no trace: code
+    with constants and runtime routines; static RAM (the runtime's cells and
+    its 256-byte receive ring, globals, frames, temporaries — not the stack);
+    the static bound on the stack and the deepest stack seen on the corpus
+    (both with the interrupt routine's share); T-states per ping."""
+    exe = os.path.join(ROOT, ".lake/build/bin/ember-z80")
+    if not os.path.exists(exe):
+        return None
+    run = lambda *a: subprocess.run([exe, *a], check=True, capture_output=True, text=True, cwd=ROOT).stdout
+    out = run("own-size", "net", "--trace", "0")
+    g = re.search(r"(\d+) bytes of code and constants, (\d+) bytes of RAM", out)
+    funcs = {mm.group(2): int(mm.group(1)) for mm in re.finditer(r"^\s+(\d+)\t(\S+)$", out, re.M)}
+    m = {"z80own.code": int(g.group(1)), "z80own.ram": int(g.group(2))}
+    # the static bound on the stack (start-up, the program, one interrupt); own-size fails
+    # when it exceeds the room above the static RAM
+    m["z80own.stack_bound"] = int(re.search(r"stack bound: (\d+) bytes", out).group(1))
+    run("own-build", "net", "--trace", "0", "--out", os.path.join(tmp, "own0"))
+    m["z80own.stack"] = int(re.search(r"stack: (\d+) bytes", run(
+        "stack", os.path.join(tmp, "own0/net-own.ihx"), os.path.join(ROOT, "Tests/Ember/corpus"))).group(1))
+    run("own-build", "net", "--trace", "1", "--out", os.path.join(tmp, "own1"))
+    m["z80own.ping_tstates"] = int(re.search(r"(\d+) T-states", run("ping", os.path.join(tmp, "own1/net-own.ihx"))).group(1))
+    return m, funcs
+
+
+def esp32c3(tmp, prog="net", key="esp32c3"):
+    """Sizes of the image a board runs (EMBER_TRACE=0) and instructions per ping."""
+    need = ["riscv32-none-elf-gcc", "esptool", "make"]
+    if any(shutil.which(t) is None for t in need):
+        return None
+    src = os.path.join(ROOT, f"Tests/Ember/golden/{prog}.rv32.c")
+    tmp = os.path.join(tmp, key)
+    os.makedirs(tmp, exist_ok=True)
+    mk = ["make", "-s", "-f", os.path.join(ROOT, "runtime/esp32c3/Makefile"), "OUT=" + tmp, "PROG=" + src]
+    subprocess.run(mk + ["NAME=stack-quiet", "DEFS=-DEMBER_TRACE=0"], check=True)
+    out = subprocess.run(["riscv32-none-elf-size", "-A", os.path.join(tmp, "stack-quiet.elf")],
+                         check=True, capture_output=True, text=True).stdout
+    sec = {m.group(1): int(m.group(2)) for m in re.finditer(r"^(\.\w+)\s+(\d+)", out, re.M)}
+    nm = subprocess.run(["riscv32-none-elf-nm", "-S", "--size-sort", os.path.join(tmp, "stack-quiet.elf")],
+                        check=True, capture_output=True, text=True).stdout
+    funcs = {}
+    for line in nm.splitlines():
+        parts = line.split()
+        if len(parts) == 4 and parts[2] in "Tt":
+            funcs[parts[3]] = int(parts[1], 16)
+    m = {f"{key}.code": sec.get(".text", 0),
+         f"{key}.rodata": sec.get(".rodata", 0),
+         f"{key}.ram": sec.get(".data", 0) + sec.get(".bss", 0) + sec.get(".stack", 0)}
+    if shutil.which("qemu-system-riscv32-esp") is not None:
+        subprocess.run(mk + ["NAME=stack-icount", "DEFS=-DEMBER_TICK_HOST=1 -DEMBER_ICOUNT=1 -DEMBER_TRACE=1"], check=True)
+        spec = importlib.util.spec_from_file_location("esp32", os.path.join(ROOT, "tools/ember/esp32.py"))
+        esp32 = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(esp32)
+        m[f"{key}.ping_instructions"] = esp32.measure_ping(images=tmp)[0]
+    return m, funcs
 
 
 def main():
@@ -104,35 +181,77 @@ def main():
             print(f"  {size:6d}  {name}")
         z = z80(tmp)
         if z is not None:
-            zc, zr, areas = z
-            metrics["z80.code"] = zc
-            metrics["z80.ram"] = zr
-            print("sdcc-z80 (--opt-code-size), areas:", ", ".join(f"{k}={v}" for k, v in sorted(areas.items())))
+            zm, zfuncs, areas = z
+            metrics.update(zm)
+            print("sdcc-z80 (--opt-code-size, no trace), areas:", ", ".join(f"{k}={v}" for k, v in sorted(areas.items()) if v))
+            print("sdcc-z80, per symbol (bytes of code; library routines included):")
+            for name, size in sorted(zfuncs.items(), key=lambda kv: -kv[1])[:25]:
+                print(f"  {size:6d}  {name}")
+            if "z80.ping_tstates" not in zm:
+                print("sdcc-z80: .lake/build/bin/ember-z80 not built, T-states per ping skipped")
         else:
-            print("sdcc-z80: sdcc not installed, skipped")
+            print("sdcc-z80: sdcc/make not installed, skipped")
+        o = z80own(tmp)
+        if o is not None:
+            om, ofuncs = o
+            metrics.update(om)
+            print("own Z80 back end (no trace), per function and runtime routine (bytes of code):")
+            for name, size in sorted(ofuncs.items(), key=lambda kv: -kv[1])[:25]:
+                print(f"  {size:6d}  {name}")
+        else:
+            print("own Z80 back end: .lake/build/bin/ember-z80 not built, skipped")
+        e = esp32c3(tmp)
+        if e is not None:
+            em, funcs = e
+            metrics.update(em)
+            print("esp32c3 (riscv32-none-elf-gcc -Os, no trace), per function (bytes of code):")
+            for name, size in sorted(funcs.items(), key=lambda kv: -kv[1])[:25]:
+                print(f"  {size:6d}  {name}")
+            if "esp32c3.ping_instructions" not in em:
+                print("esp32c3: qemu-system-riscv32-esp not installed, instructions per ping skipped")
+        else:
+            print("esp32c3: riscv32-none-elf-gcc/esptool/make not installed, skipped")
+        # M5.9: the SLIP build's C without its bounds checks (Tests/Ember/golden/net.dropped.*.c,
+        # `C.dropUnit`; Ember.Proof.CDrop.stack_c_dropped) — the gain is the difference
+        # from the rows above
+        dcode, dram, drodata = host64(tmp, "net.dropped")
+        metrics.update({"host64.dropped.code": sum(dcode.values()), "host64.dropped.rodata": sum(drodata.values())})
+        dz = z80(tmp, "net.dropped", "z80.dropped")
+        if dz is not None:
+            metrics.update(dz[0])
+        de = esp32c3(tmp, "net.dropped", "esp32c3.dropped")
+        if de is not None:
+            metrics.update(de[0])
         print("totals:")
         for k, v in metrics.items():
-            print(f"  {k:16s} {v}")
+            print(f"  {k:26s} {v}")
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
+    base = {}
+    if os.path.exists(BASELINE):
+        with open(BASELINE) as f:
+            for line in f:
+                if line.startswith("#") or not line.strip():
+                    continue
+                k, v = line.split()
+                base[k] = int(v)
     if update:
+        # a metric whose tool is missing here keeps its recorded value
+        merged = dict(base)
+        merged.update(metrics)
         with open(BASELINE, "w") as f:
             f.write("# Ember stack size baseline: tools/ember/size-report.py --update\n")
-            for k, v in metrics.items():
+            for k, v in merged.items():
                 f.write(f"{k} {v}\n")
         print(f"wrote {BASELINE}")
         return 0
-    if not os.path.exists(BASELINE):
+    if not base:
         print("no baseline; run with --update")
         return 1
-    base = {}
-    with open(BASELINE) as f:
-        for line in f:
-            if line.startswith("#") or not line.strip():
-                continue
-            k, v = line.split()
-            base[k] = int(v)
+    for k in base:
+        if k not in metrics:
+            print(f"gate {k:26s} not measured here (tool missing)")
     bad = 0
     for k, v in metrics.items():
         if k not in base:
@@ -143,7 +262,7 @@ def main():
         status = "ok" if abs(delta) <= TOL else "OUTSIDE ±3%"
         if status != "ok":
             bad += 1
-        print(f"gate {k:16s} {v:7d} vs {b:7d} ({delta:+.1%}) {status}")
+        print(f"gate {k:26s} {v:7d} vs {b:7d} ({delta:+.1%}) {status}")
     return 1 if bad else 0
 
 

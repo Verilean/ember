@@ -161,10 +161,183 @@ def p1 : Prog :=
 def p2 : Prog :=
   { globals := [ga, gw, g16], fns := [h0, call_then_trap], entry := "call_then_trap", dropReasons := ["d"] }
 
+ember global big : [u8; 300]
+ember global gi : u8
+
+ember def bump : u8 := do
+  gi := gi + 1
+  return 7
+
+/-- Found by `Ember.C.Sem` (M5.7): the destination's index needs no
+check (a `u8` into 300 elements), and the callee changes it.  C does not
+order the evaluation of `big[gi]` against the call in `big[gi] =
+bump();`, so the call's result goes through a temporary. -/
+ember def call_changes_index := do
+  let k : u16 ← input.next()
+  if k == 0xFFFF then
+    return
+  big[gi] ← bump()
+  out.byte(big[0])
+  out.byte(big[1])
+  out.end()
+
+def p3 : Prog :=
+  { globals := [big, gi], fns := [bump, call_changes_index], entry := "call_changes_index" }
+
+ember global g3 : [u8; 3]
+
+/-- Found proving the lowering to the Z80 back end's IR (M7.1): `&&` is
+strict, so an operand that traps must trap even when the other one
+decides.  The lowering jumped past an operand it took for one that
+cannot trap: an index that is constant but not a literal (here `1 + 2`,
+out of range). -/
+ember def strict_and := do
+  let k : u16 ← input.next()
+  if k == 0xFFFF then
+    return
+  if (k == 0) && (g3[(1 : u8) + 2] == 0) then
+    out.byte(1)
+  out.byte(2)
+  out.end()
+
+def p4 : Prog := { globals := [g3], fns := [strict_and], entry := "strict_and" }
+
+ember global wa : [u32; 4]
+ember global wv : u32 := 305419896
+
+/-- A `store` of four bytes through an address (M7.3, `store4_ok`): the
+own back end puts the value in the accumulator before the address (it
+saved the address with `push hl` around `loadAcc` before).  A value read
+from a global, one the accumulator holds already (the sum), a constant
+from the literal pool, and an index out of range for the second input. -/
+ember def wide_store := do
+  let k : u16 ← input.next()
+  if k == 0xFFFF then
+    return
+  let i : u8 := (k : u8) % 4
+  wa[i] := wv
+  wa[(i + 1) % 4] := wv + (k : u32)
+  wa[(i + 2) % 4] := 70000
+  out.byte((wa[i] : u8))
+  out.byte((wa[(i + 1) % 4] : u8))
+  out.byte((wa[(i + 2) % 4] : u8))
+  wa[(k : u8)] := wv
+  out.end()
+
+def p5 : Prog := { globals := [wa, wv], fns := [wide_store], entry := "wide_store" }
+
 def progs : List (String × Prog × Array Ember.Trace.Input) :=
   [("regress_trap_after_event", p1, #[.rx (ByteArray.mk #[0xf1])]),
-   ("regress_call_then_trap", p2, #[.rx (ByteArray.mk #[0x5c])])]
+   ("regress_call_then_trap", p2, #[.rx (ByteArray.mk #[0x5c])]),
+   ("regress_call_changes_index", p3, #[.rx (ByteArray.mk #[0x64])]),
+   ("regress_strict_and", p4, #[.rx (ByteArray.mk #[0x64])]),
+   ("regress_wide_store", p5, #[.rx (ByteArray.mk #[0x02, 0x07])])]
 
 end Regress
+
+/-! ## Index checks behind a comparison (plan M6.5)
+
+The own Z80 back end drops an index check that a comparison on the way
+already made (`Ember.Z80.IR.dropChecks`).  In each program the index is
+out of range for some input in a way the comparison does not exclude,
+so the check has to be there still: the interpreter traps, and so must
+the generated code. -/
+
+namespace Guard
+
+ember global ga : [u8; 8] := [1, 2, 3, 4, 5, 6, 7, 8]
+ember global gi : u8
+ember global gj : u16
+
+ember def bump := do
+  gi := gi + 9
+
+/-- The index changes between the comparison and the use. -/
+ember def changed := do
+  let k : u16 ← input.next()
+  if k == 0xFFFF then
+    return
+  gi := (k : u8)
+  if gi < 8 then
+    out.byte(ga[gi])
+    gi := gi + 5
+    out.byte(ga[gi])
+  out.end()
+
+/-- A call changes the index. -/
+ember def through_call := do
+  let k : u16 ← input.next()
+  if k == 0xFFFF then
+    return
+  gi := (k : u8)
+  if gi < 8 then
+    bump()
+    out.byte(ga[gi])
+  out.end()
+
+/-- The comparison is against a larger bound than the array has. -/
+ember def loose := do
+  let k : u16 ← input.next()
+  if k == 0xFFFF then
+    return
+  gi := (k : u8)
+  if gi < 9 then
+    out.byte(ga[gi])
+  out.end()
+
+/-- The comparison holds on one path only. -/
+ember def one_path := do
+  let k : u16 ← input.next()
+  if k == 0xFFFF then
+    return
+  gi := (k : u8)
+  if gi < 8 then
+    out.byte(1)
+  else
+    out.byte(2)
+  out.byte(ga[gi])
+  out.end()
+
+/-- A wider variable is compared, its low byte indexes. -/
+ember def widths := do
+  let k : u16 ← input.next()
+  if k == 0xFFFF then
+    return
+  gj := k + 250
+  gi := (gj : u8)
+  if gj < 8 then
+    out.byte(ga[gi])
+  if gi < 8 then
+    out.byte(ga[gj])
+  out.end()
+
+/-- In range by the comparison: no trap, and the loop's own bound. -/
+ember def fine := do
+  let k : u16 ← input.next()
+  if k == 0xFFFF then
+    return
+  gi := (k : u8)
+  if gi < 8 then
+    out.byte(ga[gi])
+  for i in [0, (8 : u8)) do
+    out.byte(ga[i])
+  for j in [0, (9 : u8)) do
+    if gi == 200 then
+      out.byte(ga[j])
+  out.end()
+
+def progs : List (String × Prog) :=
+  [("guard_changed", { globals := [ga, gi, gj], fns := [changed], entry := "changed" }),
+   ("guard_through_call", { globals := [ga, gi, gj], fns := [bump, through_call], entry := "through_call" }),
+   ("guard_loose", { globals := [ga, gi, gj], fns := [loose], entry := "loose" }),
+   ("guard_one_path", { globals := [ga, gi, gj], fns := [one_path], entry := "one_path" }),
+   ("guard_widths", { globals := [ga, gi, gj], fns := [widths], entry := "widths" }),
+   ("guard_fine", { globals := [ga, gi, gj], fns := [fine], entry := "fine" })]
+
+/-- Indices inside, at and beyond the bound. -/
+def inputs : List (Array Ember.Trace.Input) :=
+  [0, 2, 3, 6, 7, 8, 9, 13, 200, 255].map fun b => #[.rx (ByteArray.mk #[b])]
+
+end Guard
 
 end Ember.Tests.LangPrograms

@@ -14,6 +14,9 @@
 /* Next input item: 0x00..0xFF a byte, 0x0100 a tick, 0xFFFF nothing. */
 uint16_t ember_input_next(void);
 uint16_t ember_ring_pop(void);
+/* On a link that delivers whole frames: as ember_input_next, and 0x0200
+ * after the last byte of each frame. */
+uint16_t ember_input_frame(void);
 
 /* Transmit: bytes of the current frame, then end of frame. */
 void ember_out_byte(uint8_t b);
@@ -36,7 +39,16 @@ void ember_mmio_write32(uint32_t addr, uint32_t value);
 
 /* A bounds check failed; `where` names the Ember function and statement.
  * Does not return (and saying so lets the optimiser, and -Warray-bounds,
- * know that the access after a failed check is unreachable). */
+ * know that the access after a failed check is unreachable).
+ *
+ * With EMBER_TRAP_TERSE the names are not compiled in (they are a
+ * kilobyte of strings, a lot on a Z80): the trap is reported without
+ * its place. */
+#ifdef EMBER_TRAP_TERSE
+EMBER_NORETURN void ember_trap_terse(void);
+#define ember_trap(where) ember_trap_terse()
+#else
 EMBER_NORETURN void ember_trap(const char *where);
+#endif
 
 #endif

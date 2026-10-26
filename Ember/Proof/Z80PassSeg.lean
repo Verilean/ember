@@ -1,0 +1,1165 @@
+import Ember.Proof.Z80PassTaint
+import Ember.Proof.Z80PassCtl
+import Ember.Proof.Z80PassRun
+import Ember.Proof.Z80Bytes
+
+/-!
+# Ember.Proof.Z80PassSeg — the relation of the two machines, and its segments (plan M7.3)
+
+The machine of the image without the passes (`A`) and that of an image
+with them (`B`), each at an item of its own image, are related
+(`Sync`) when:
+
+* the CPUs are equal but for the program counter, `R`, the T-states,
+  memory and the stack pointer, `H` and `L` free where `th`, `tl` say
+  (`EqvT`);
+* their memories are equal on `[lo, hi)`, the RAM below the stack;
+* their stacks hold the same calls (`Stk`): for each call, `A`'s return
+  address (an item of `A`) and `B`'s (an item of `B`) — or, for a call
+  that is a jump in `B` (a tail call), `A`'s alone;
+* the devices are in the same state.
+
+Each lemma here is a segment of the two runs, from related states to
+related states: an ordinary instruction (`seg_ord`), …  Which items of
+the two images go together is the match's (`Z80PassCheck`); the lemmas
+take the facts they need about the items as hypotheses.
+-/
+
+namespace Ember.Proof.PassSim
+open Ember.Z80 Ember.Z80.Asm Ember.Z80.Cpu Ember.Proof.Z80Enc Ember.Proof.Z80Gen Ember.Proof.PassLocal
+
+/-- What a call pushed on the stacks. -/
+inductive Frame where
+  /-- A call in both images: `A`'s return point and `B`'s (item indices), and the item of the
+  entry of the function called, in `A`. -/
+  | ret (rA rB e : Nat)
+  /-- A call of `A` that is a jump in `B`: `A`'s return point and the entry; nothing on `B`'s stack. -/
+  | tail (rA e : Nat)
+  /-- A word pushed by both (`push af`), the same in both. -/
+  | data
+  deriving DecidableEq, Repr
+
+/-- Where the stack's top is: `sp`, or the top of memory when `sp` is 0 (the stack empty). -/
+def top (sp : UInt16) : Nat := if sp = 0 then 65536 else sp.toNat
+
+/-- The word at `x`, low byte first. -/
+def word (m : ByteArray) (x : Nat) : Nat := (m.get! x).toNat + 256 * (m.get! (x + 1)).toNat
+
+/-- **The two stacks**: from `a` (in `A`'s memory) and `b` (in `B`'s) up to the top of memory, the
+frames `G`; every byte at or above `lo`. -/
+def Stk (A B : Code) (lo : Nat) : List Frame → Nat → Nat → ByteArray → ByteArray → Prop
+  | [], a, b, _, _ => a = 65536 ∧ b = 65536
+  | .ret rA rB _ :: G, a, b, mA, mB =>
+    lo ≤ a ∧ lo ≤ b ∧ A.addrs[rA]? = some (word mA a) ∧ B.addrs[rB]? = some (word mB b) ∧
+      Stk A B lo G (a + 2) (b + 2) mA mB
+  | .tail rA _ :: G, a, b, mA, mB =>
+    lo ≤ a ∧ A.addrs[rA]? = some (word mA a) ∧ Stk A B lo G (a + 2) b mA mB
+  | .data :: G, a, b, mA, mB =>
+    lo ≤ a ∧ lo ≤ b ∧ word mA a = word mB b ∧ Stk A B lo G (a + 2) (b + 2) mA mB
+
+/-- The stacks depend on the bytes from their tops up only. -/
+theorem Stk.congr {A B : Code} {lo : Nat} : ∀ (G : List Frame) (a b : Nat) (mA mB mA' mB' : ByteArray),
+    Stk A B lo G a b mA mB → (∀ x, a ≤ x → mA'.get! x = mA.get! x) → (∀ x, b ≤ x → mB'.get! x = mB.get! x) →
+    Stk A B lo G a b mA' mB'
+  | [], _, _, _, _, _, _, h, _, _ => h
+  | .ret rA rB e :: G, a, b, mA, mB, mA', mB', ⟨h1, h2, h3, h4, h5⟩, hA, hB => by
+    refine ⟨h1, h2, ?_, ?_, Stk.congr G (a + 2) (b + 2) mA mB mA' mB' h5
+      (fun x hx => hA x (by omega)) (fun x hx => hB x (by omega))⟩
+    · unfold word; rw [hA a (by omega), hA (a + 1) (by omega)]; exact h3
+    · unfold word; rw [hB b (by omega), hB (b + 1) (by omega)]; exact h4
+  | .tail rA e :: G, a, b, mA, mB, mA', mB', ⟨h1, h3, h5⟩, hA, hB => by
+    refine ⟨h1, ?_, Stk.congr G (a + 2) b mA mB mA' mB' h5 (fun x hx => hA x (by omega)) hB⟩
+    unfold word; rw [hA a (by omega), hA (a + 1) (by omega)]; exact h3
+  | .data :: G, a, b, mA, mB, mA', mB', ⟨h1, h2, h3, h5⟩, hA, hB => by
+    refine ⟨h1, h2, ?_, Stk.congr G (a + 2) (b + 2) mA mB mA' mB' h5
+      (fun x hx => hA x (by omega)) (fun x hx => hB x (by omega))⟩
+    unfold word; rw [hA a (by omega), hA (a + 1) (by omega), hB b (by omega), hB (b + 1) (by omega)]; exact h3
+
+/-- The tops are at or above `lo`, and `A`'s is at or below `B`'s (`B` has fewer frames). -/
+theorem Stk.bounds {A B : Code} {lo : Nat} : ∀ (G : List Frame) (a b : Nat) (mA mB : ByteArray),
+    Stk A B lo G a b mA mB → a ≤ b ∧ b ≤ 65536 ∧ a + 2 * G.length ≤ 65536 ∧ (G ≠ [] → lo ≤ a)
+  | [], _, _, _, _, ⟨h1, h2⟩ => ⟨by omega, by omega, by simp; omega, fun h => absurd rfl h⟩
+  | .ret _ _ _ :: G, a, b, mA, mB, ⟨h1, _, _, _, h5⟩ => by
+    have := Stk.bounds G _ _ _ _ h5
+    exact ⟨by omega, by omega, by simp; omega, fun _ => h1⟩
+  | .tail _ _ :: G, a, b, mA, mB, ⟨h1, _, h5⟩ => by
+    have := Stk.bounds G _ _ _ _ h5
+    exact ⟨by omega, by omega, by simp; omega, fun _ => h1⟩
+  | .data :: G, a, b, mA, mB, ⟨h1, _, _, h5⟩ => by
+    have := Stk.bounds G _ _ _ _ h5
+    exact ⟨by omega, by omega, by simp; omega, fun _ => h1⟩
+
+/-- **The relation of the two machines** at items `kA` of `A` and `kB` of `B`, with the frames `G`
+on the stacks and `H`, `L` free where `th`, `tl`. -/
+structure Sync (D : Dev) (A B : Code) (lo hi : Nat) (G : List Frame) (kA kB : Nat) (th tl : Bool)
+    (x y : Cpu × D.W) : Prop where
+  atA : At A.addrs kA x.1
+  atB : At B.addrs kB y.1
+  LA : Loaded A x.1
+  LB : Loaded B y.1
+  E : EqvT lo hi th tl x.1 y.1
+  stk : Stk A B hi G (top x.1.sp) (top y.1.sp) x.1.mem y.1.mem
+  msz : x.1.mem.size = 65536
+  rs : x.1.ramStart.toNat ≤ lo
+  w : y.2 = x.2
+
+theorem mask_de (th tl : Bool) (s t : Cpu) : (mask th tl s t).de = t.de := by cases t; rfl
+theorem mask_io (th tl : Bool) (s t : Cpu) : (mask th tl s t).io = t.io := by cases t; rfl
+theorem mask_ramStart (th tl : Bool) (s t : Cpu) : (mask th tl s t).ramStart = t.ramStart := by cases t; rfl
+
+/-- Where the frames are: at or above `lo` (the bottom of the stack), or the stack is empty. -/
+theorem Stk.top_ge {A B : Code} {lo : Nat} {G : List Frame} {a b : Nat} {mA mB : ByteArray}
+    (h : Stk A B lo G a b mA mB) (hlo : lo ≤ 65536) : lo ≤ a ∧ lo ≤ b := by
+  obtain ⟨h1, h2, _, h4⟩ := Stk.bounds G a b mA mB h
+  cases G with
+  | nil => obtain ⟨e1, e2⟩ := h; omega
+  | cons _ _ => have := h4 (by simp); omega
+
+/-! ## Inside a segment: the stack not empty -/
+
+/-- **`A`'s stack is not empty at every step strictly inside `n` steps from `x`.** -/
+def NZ (D : Dev) (x : Cpu × D.W) (n : Nat) : Prop := ∀ t, 0 < t → t < n → (mrun D t x).1.sp ≠ 0
+
+theorem NZ.le1 (D : Dev) (x : Cpu × D.W) {n : Nat} (h : n ≤ 1) : NZ D x n := fun _ h1 h2 => absurd h2 (by omega)
+
+/-- `a` steps, then `b`: the state between with its stack not empty. -/
+theorem NZ.pre {D : Dev} {x z : Cpu × D.W} {a b : Nat} (hA : NZ D x a) (e : mrun D a x = z)
+    (hz : 0 < a → 0 < b → z.1.sp ≠ 0) (hB : NZ D z b) : NZ D x (a + b) := by
+  intro t h1 h2
+  rcases Nat.lt_or_ge t a with h | h
+  · exact hA t h1 h
+  · rcases Nat.eq_or_lt_of_le h with h' | h'
+    · subst h'; rw [e]; exact hz h1 (by omega)
+    · have := hB (t - a) (by omega) (by omega)
+      rwa [← e, ← mrun_add, show a + (t - a) = t by omega] at this
+
+/-- One step, then `b`. -/
+theorem NZ.cons {D : Dev} {x z : Cpu × D.W} {b : Nat} (e : mstep D x = z) (hz : 0 < b → z.1.sp ≠ 0)
+    (hB : NZ D z b) : NZ D x (1 + b) :=
+  NZ.pre (NZ.le1 D x (Nat.le_refl _)) e (fun _ h => hz h) hB
+
+/-- `A`'s stack top with frames on it is below the top of memory: `SP` not 0. -/
+theorem Stk.sp_ne {A B : Code} {lo : Nat} {G : List Frame} {sp : UInt16} {b : Nat} {mA mB : ByteArray}
+    (h : Stk A B lo G (top sp) b mA mB) (hG : G ≠ []) : sp ≠ 0 := by
+  intro e
+  have hb := Stk.bounds G _ _ _ _ h
+  cases G with
+  | nil => exact hG rfl
+  | cons f G =>
+    simp only [top, e, if_true] at hb
+    simp only [List.length_cons] at hb
+    omega
+
+theorem Sync.sp_ne {D : Dev} {A B : Code} {lo hi : Nat} {G : List Frame} {kA kB : Nat} {th tl : Bool}
+    {x y : Cpu × D.W} (S : Sync D A B lo hi G kA kB th tl x y) (hG : G ≠ []) : x.1.sp ≠ 0 :=
+  Stk.sp_ne S.stk hG
+
+/-- **An ordinary instruction, in both machines**: the same instruction of a form of `Form` at
+`kA` in `A` and at `kB` in `B`, with the same operand in both, reading none of `H`, `L` that are
+free; the bytes it reads or writes in the RAM below the stack.  One step of each machine keeps the
+relation, at the items after, `H`, `L` free that were and are not written. -/
+theorem seg_ord (D : Dev) {A B : Code} {lo hi : Nat} (hhi : hi ≤ 65536) {G : List Frame} {kA kB : Nat}
+    {th tl : Bool} (f : Form) (hnh : f ≠ .halt)
+    (hA : A.items[kA]? = some (.ins f.instr)) (hB : B.items[kB]? = some (.ins f.instr))
+    (hop : ∀ pa pb, f.instr.immB (A.a.env pa) = f.instr.immB (B.a.env pb) ∧
+      f.instr.immW (A.a.env pa) = f.instr.immW (B.a.env pb))
+    (hrh : th = true → f.readsH = false) (hrl : tl = true → f.readsL = false)
+    {x y : Cpu × D.W} (S : Sync D A B lo hi G kA kB th tl x y)
+    (hhl : f.viaHL = true → lo ≤ x.1.hl.toNat ∧ x.1.hl.toNat < hi)
+    (hde : f.viaDE = true → lo ≤ x.1.de.toNat ∧ x.1.de.toNat < hi)
+    (hnn : ∀ pa, f.viaNN = true → lo ≤ (f.instr.immW (A.a.env pa)).toNat ∧ (f.instr.immW (A.a.env pa)).toNat + 1 < hi) :
+    Sync D A B lo hi G (kA + 1) (kB + 1) (th && !f.writesH) (tl && !f.writesL) (mstep D x) (mstep D y) := by
+  obtain ⟨sA, w⟩ := x
+  obtain ⟨sB, w'⟩ := y
+  have hw : w' = w := S.w
+  subst hw
+  obtain ⟨pa, hpa, hpcA⟩ := S.atA
+  obtain ⟨pb, hpb, hpcB⟩ := S.atB
+  have E := S.E
+  have hnA := hnn pa
+  -- the step of `A`
+  obtain ⟨s', hs', hrs', hsz', hrom', hh', hsp'⟩ := ord_rom f lo hi hhi (f.instr.immB (A.a.env pa))
+    (f.instr.immW (A.a.env pa)) (D.bus w') sA hhl hde hnA
+  obtain ⟨t', ht', E'⟩ := ord_eqvT lo hi hhi f th tl hrh hrl _ _ (D.bus w') sA sB E hhl hde hnA s' hs'
+  -- what `B` reads and writes is where `A` does
+  have hmB : sB.ramStart = sA.ramStart := by
+    have := RegsS.ramStart E.regs; rw [mask_ramStart] at this; exact this.symm
+  have hhlB : f.viaHL = true → lo ≤ sB.hl.toNat ∧ sB.hl.toNat < hi := by
+    intro hv
+    have h1 : th = false := by
+      cases th
+      · rfl
+      · have := hrh rfl; rw [Form.viaHL_readsH f hv] at this; cases this
+    have h2 : tl = false := by
+      cases tl
+      · rfl
+      · have := hrl rfl; rw [Form.viaHL_readsL f hv] at this; cases this
+    subst h1 h2
+    have := RegsS.hl E.regs; rw [mask_ff] at this; rw [← this]; exact hhl hv
+  have hdeB : f.viaDE = true → lo ≤ sB.de.toNat ∧ sB.de.toNat < hi := by
+    intro hv
+    have := RegsS.de E.regs; rw [mask_de] at this; rw [← this]; exact hde hv
+  obtain ⟨t'', ht'', hrsT, hszT, hromT, hhT, hspT⟩ := ord_rom f lo hi hhi (f.instr.immB (A.a.env pa))
+    (f.instr.immW (A.a.env pa)) (D.bus w') sB hhlB hdeB hnA
+  rw [ht'] at ht''
+  cases ht''
+  have exA : exec (A.a.env pa) f.instr sA (D.bus w') = some s' := hs'
+  have exB : exec (B.a.env pb) f.instr sB (D.bus w') = some t' := by
+    show execI f.instr (f.instr.immB (B.a.env pb)) (f.instr.immW (B.a.env pb)) sB (D.bus w') = some t'
+    rw [← (hop pa pb).1, ← (hop pa pb).2]; exact ht'
+  have stA := step_item A.placed S.LA.1 hA hpa hpcA S.LA.2 exA
+  have stB := step_item B.placed S.LB.1 hB hpb hpcB S.LB.2 exB
+  have hio : t'.io = s'.io := by
+    have := RegsS.io E'.regs; rw [mask_io] at this; exact this.symm
+  have eA : mstep D (sA, w') = (s', D.dev w' s'.io) := by
+    show (sA.step (D.bus w'), D.dev w' (sA.step (D.bus w')).io) = _
+    rw [stA.1]
+  have eB : mstep D (sB, w') = (t', D.dev w' s'.io) := by
+    show (sB.step (D.bus w'), D.dev w' (sB.step (D.bus w')).io) = _
+    rw [stB.1, hio]
+  rw [eA, eB]
+  have hrsL : sA.ramStart.toNat ≤ lo := S.rs
+  have htop : hi ≤ top sA.sp ∧ hi ≤ top sB.sp := (S.stk).top_ge hhi
+  refine ⟨stA.2 (ord_falls f), stB.2 (ord_falls f),
+    S.LA.keep hrs' (fun x (hx : x < sA.ramStart.toNat) => hrom' x (Or.inl (by omega))) (by rw [hh' hnh]; exact S.LA.2),
+    S.LB.keep hrsT (fun x (hx : x < sB.ramStart.toNat) => hromT x (Or.inl (by rw [hmB] at hx; omega)))
+      (by rw [hhT hnh]; exact S.LB.2), E', ?_, by rw [hsz']; exact S.msz, by rw [hrs']; exact S.rs, rfl⟩
+  show Stk A B hi G (top s'.sp) (top t'.sp) s'.mem t'.mem
+  rw [hsp', hspT]
+  exact Stk.congr G _ _ _ _ _ _ S.stk (fun x hx => hrom' x (Or.inr (by omega)))
+    (fun x hx => hromT x (Or.inr (by omega)))
+
+/-- info: 'Ember.Proof.PassSim.seg_ord' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in #print axioms seg_ord
+
+/-! ## Jumps -/
+
+/-- `op1`, then the program counter and the T-states set: the relation is kept. -/
+theorem Eqv.jumped {lo hi : Nat} {s u : Cpu} (E : Eqv lo hi s u) (p q : UInt16) (c d : UInt64) :
+    Eqv lo hi (jumped s p c) (jumped u q d) := by
+  obtain ⟨p', r', c', m', q', e⟩ := regs_ex E.regs
+  subst e
+  exact ⟨by cases s; rfl, E.mem, E.msz⟩
+
+theorem mask_jumped (th tl : Bool) (s t : Cpu) (p q : UInt16) (c d : UInt64) :
+    mask th tl (jumped s p c) (jumped t q d) = jumped (mask th tl s t) q d := by
+  cases s; cases t; rfl
+
+theorem EqvT.jumped {lo hi : Nat} {th tl : Bool} {s t : Cpu} (E : EqvT lo hi th tl s t) (p q : UInt16)
+    (c d : UInt64) : EqvT lo hi th tl (jumped s p c) (jumped t q d) := by
+  unfold EqvT at *
+  rw [mask_jumped]
+  exact Eqv.jumped E p q c d
+
+theorem EqvT.f {lo hi : Nat} {th tl : Bool} {s t : Cpu} (E : EqvT lo hi th tl s t) : s.f = t.f := by
+  obtain ⟨_, _, _, _, _, e⟩ := regs_ex E.regs
+  have : (mask th tl s t).f = t.f := by cases t; rfl
+  rw [← this, e]
+
+theorem taken_eq {lo hi : Nat} {th tl : Bool} {s t : Cpu} (E : EqvT lo hi th tl s t) (cc : Option Arg) :
+    taken cc s = taken cc t := by
+  cases cc with
+  | none => rfl
+  | some _ =>
+    simp only [taken, Cpu.cond]
+    rw [show s.flag = t.flag by funext m; simp only [Cpu.flag, E.f]]
+
+/-- **A jump in both machines**: at `kA` in `A` a `jp` or a `jr` to the label at `jA`, at `kB` in `B`
+one to the same label, at `jB`, with the same condition (or none).  One step of each keeps the
+relation, both at their labels or both at the items after. -/
+theorem seg_jump (D : Dev) {A B : Code} {lo hi : Nat} {G : List Frame} {kA kB jA jB : Nat} {th tl : Bool}
+    {opA opB : Op} {cc : Option Arg} {l : String}
+    (hopA : opA = .jp ∨ opA = .jr) (hopB : opB = .jp ∨ opB = .jr)
+    (hcc : ∀ cnd, cc = some cnd → cnd = .nz ∨ cnd = .z ∨ cnd = .nc ∨ cnd = .c)
+    (hA : A.items[kA]? = some (.ins ⟨opA, cc.toList ++ [.imm (.sym l 0)]⟩)) (hjA : A.items[jA]? = some (.label l))
+    (hB : B.items[kB]? = some (.ins ⟨opB, cc.toList ++ [.imm (.sym l 0)]⟩)) (hjB : B.items[jB]? = some (.label l))
+    {x y : Cpu × D.W} (S : Sync D A B lo hi G kA kB th tl x y) :
+    if taken cc x.1 then Sync D A B lo hi G jA jB th tl (mstep D x) (mstep D y)
+    else Sync D A B lo hi G (kA + 1) (kB + 1) th tl (mstep D x) (mstep D y) := by
+  obtain ⟨sA, w⟩ := x
+  obtain ⟨sB, w'⟩ := y
+  have hw : w' = w := S.w
+  subst hw
+  have hcc1 : ∀ op : Op, ∀ cnd, cc = some cnd → op = .jr → cnd = .nz ∨ cnd = .z ∨ cnd = .nc ∨ cnd = .c :=
+    fun _ cnd h _ => hcc cnd h
+  have hcc2 : ∀ cnd, cc = some cnd → (cc? cnd).isSome := by
+    intro cnd h; rcases hcc cnd h with rfl | rfl | rfl | rfl <;> rfl
+  obtain ⟨pA, cA, eA, LA, atA⟩ := jump_mstep D hopA (hcc1 opA) hcc2 hA hjA S.LA S.atA w'
+  obtain ⟨pB, cB, eB, LB, atB⟩ := jump_mstep D hopB (hcc1 opB) hcc2 hB hjB S.LB S.atB w'
+  rw [eA, eB]
+  have ht := taken_eq S.E cc
+  have E' := S.E.jumped pA pB cA cB
+  have stk : Stk A B hi G (top (jumped sA pA cA).sp) (top (jumped sB pB cB).sp) (jumped sA pA cA).mem
+      (jumped sB pB cB).mem := S.stk
+  simp only at atA atB ht ⊢
+  by_cases hc : taken cc sA = true
+  · rw [if_pos hc] at atA ⊢
+    rw [ht] at hc
+    rw [if_pos hc] at atB
+    exact ⟨atA, atB, LA, LB, E', stk, S.msz, S.rs, rfl⟩
+  · rw [if_neg hc] at atA ⊢
+    rw [ht] at hc
+    rw [if_neg hc] at atB
+    exact ⟨atA, atB, LA, LB, E', stk, S.msz, S.rs, rfl⟩
+
+/-- info: 'Ember.Proof.PassSim.seg_jump' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in #print axioms seg_jump
+
+/-! ## Calls and returns -/
+
+theorem byte_lo_hi (v : UInt16) : v.toUInt8.toNat + 256 * (v >>> 8).toUInt8.toNat = v.toNat := by
+  have := v.toNat_lt
+  simp only [UInt16.toNat_toUInt8, UInt16.toNat_shiftRight]
+  rw [show (8 : UInt16).toNat % 16 = 8 from rfl, Nat.shiftRight_eq_div_pow]
+  omega
+
+/-- The word a call pushed is the address after the call. -/
+theorem word_called (s : Cpu) (nn : UInt16) (hsz : s.mem.size = 65536)
+    (hr : s.ramStart.toNat ≤ (s.sp - 2).toNat) (hw : (s.sp - 2).toNat + 1 < 65536) :
+    word (called s nn).mem (s.sp - 2).toNat = (s.pc + 3).toNat := by
+  unfold word
+  rw [called_mem s nn hsz hr hw, called_mem s nn hsz hr hw]
+  simp only [if_true, show ¬ ((s.sp - 2).toNat + 1 = (s.sp - 2).toNat) by omega, if_false]
+  exact byte_lo_hi _
+
+theorem top_sub2 (sp : UInt16) (h : 3 ≤ top sp) : top (sp - 2) = top sp - 2 ∧ (sp - 2).toNat = top sp - 2 := by
+  by_cases h0 : sp = 0
+  · subst h0; decide
+  · have ht : top sp = sp.toNat := by simp only [top, h0, if_false]
+    rw [ht] at h ⊢
+    have h1 : (sp - 2).toNat = sp.toNat - 2 := by
+      rw [UInt16.toNat_sub_of_le]
+      · rfl
+      · rw [UInt16.le_iff_toNat_le]; show 2 ≤ sp.toNat; omega
+    have h2 : sp - 2 ≠ 0 := by
+      intro e
+      have := congrArg UInt16.toNat e
+      rw [h1] at this
+      simp at this
+      omega
+    refine ⟨?_, h1⟩
+    simp only [top, h2, if_false, h1]
+
+/-- A call writes below the stack's top only: the bytes at and above `sp` as they were, and those
+below the two it pushed. -/
+theorem called_above (s : Cpu) (nn : UInt16) (hsz : s.mem.size = 65536) (h2 : 3 ≤ top s.sp)
+    (hr : s.ramStart.toNat ≤ (s.sp - 2).toNat) (x : Nat) (hx : top s.sp ≤ x ∨ x < top s.sp - 2) :
+    (called s nn).mem.get! x = s.mem.get! x := by
+  obtain ⟨t1, t2⟩ := top_sub2 s.sp h2
+  have hb : top s.sp ≤ 65536 := by have := s.sp.toNat_lt; unfold top; split <;> omega
+  rw [called_mem s nn hsz hr (by omega)]
+  rw [if_neg (by omega), if_neg (by omega)]
+
+theorem RegsS.after_call {s t : Cpu} (h : RegsS s t) (p q : UInt16) :
+    RegsS (PassSim.called s p) (PassSim.called t q) := by
+  obtain ⟨p', r', c', m', q', e⟩ := regs_ex h
+  subst e
+  cases s
+  simp only [RegsS, PassSim.called, callTo, Cpu.push, Cpu.wr16, Cpu.wr, Cpu.tick, skip, op1, Cpu.bumpR]
+  (repeat' split) <;> rfl
+
+theorem mask_called (th tl : Bool) (s t : Cpu) (p q : UInt16) :
+    mask th tl (called s p) (called t q) = called (mask th tl s t) q := by
+  cases s with
+  | mk a0 f0 b0 c0 d0 e0 h0 l0 a0' f0' b0' c0' d0' e0' h0' l0' ix0 iy0 sp0 pc0 i0 r0 iff10 iff20 im0 halted0 eiDelay0
+      cycles0 io0 ramStart0 mem0 =>
+  cases t with
+  | mk a f b c d e h l a' f' b' c' d' e' h' l' ix iy sp pc i r iff1 iff2 im halted eiDelay cycles io ramStart mem =>
+  simp only [mask, called, callTo, Cpu.push, Cpu.wr16, Cpu.wr, Cpu.tick, skip, op1, Cpu.bumpR]
+  by_cases h1 : sp - 2 < ramStart <;> by_cases h2 : sp - 2 + 1 < ramStart <;>
+    by_cases h3 : sp0 - 2 < ramStart0 <;> by_cases h4 : sp0 - 2 + 1 < ramStart0 <;> simp [h1, h2, h3, h4]
+
+/-- **A call, in both machines**: at `kA` in `A` and `kB` in `B` a `call` to the same label (at `eA`
+in `A`, at `eB` in `B`); room for the return address above the RAM kept equal.  One step of each
+pushes its own return address, the items after the calls: the relation holds at the entries, a
+frame more on the stacks. -/
+theorem seg_call (D : Dev) {A B : Code} {lo hi : Nat} (hhi : hi ≤ 65536) {G : List Frame}
+    {kA kB eA eB : Nat} {th tl : Bool} {l : String}
+    (hA : A.items[kA]? = some (.ins ⟨.call, [.imm (.sym l 0)]⟩)) (heA : A.items[eA]? = some (.label l))
+    (hB : B.items[kB]? = some (.ins ⟨.call, [.imm (.sym l 0)]⟩)) (heB : B.items[eB]? = some (.label l))
+    {x y : Cpu × D.W} (S : Sync D A B lo hi G kA kB th tl x y) (hlo : lo ≤ hi) (h1 : 1 ≤ hi)
+    (room : hi + 2 ≤ top x.1.sp) :
+    Sync D A B lo hi (.ret (kA + 1) (kB + 1) eA :: G) eA eB th tl (mstep D x) (mstep D y) := by
+  obtain ⟨sA, w⟩ := x
+  obtain ⟨sB, w'⟩ := y
+  have hw : w' = w := S.w
+  subst hw
+  simp only at room
+  obtain ⟨TA, adA, hTA, hrA, hpcA, hltA, eA', atA⟩ := call_mstep D hA heA S.LA S.atA w'
+  obtain ⟨TB, adB, hTB, hrB, hpcB, hltB, eB', atB⟩ := call_mstep D hB heB S.LB S.atB w'
+  rw [eA', eB']
+  have E := S.E
+  have hrsB : sB.ramStart = sA.ramStart := by
+    have := RegsS.ramStart E.regs; rw [mask_ramStart] at this; exact this.symm
+  have hrsA : sA.ramStart.toNat ≤ lo := S.rs
+  have hszA : sA.mem.size = 65536 := S.msz
+  have hmszB : (mask th tl sA sB).mem.size = sB.mem.size := by cases sB; rfl
+  have hszB : sB.mem.size = 65536 := by rw [← hmszB, ← E.msz]; exact hszA
+  have bnd := Stk.bounds G _ _ _ _ S.stk
+  simp only at bnd
+  have hab : top sA.sp ≤ top sB.sp := bnd.1
+  have hbB : top sB.sp ≤ 65536 := bnd.2.1
+  obtain ⟨tA1, tA2⟩ := top_sub2 sA.sp (by omega)
+  obtain ⟨tB1, tB2⟩ := top_sub2 sB.sp (by omega)
+  have rA' : sA.ramStart.toNat ≤ (sA.sp - 2).toNat := by omega
+  have rB' : sB.ramStart.toNat ≤ (sB.sp - 2).toNat := by rw [hrsB]; omega
+  -- the bytes each call wrote: above the RAM kept equal, below its stack's old top
+  have aboveA := called_above sA (UInt16.ofNat TA) hszA (by omega) rA'
+  have aboveB := called_above sB (UInt16.ofNat TB) hszB (by omega) rB'
+  have E' : EqvT lo hi th tl (called sA (UInt16.ofNat TA)) (called sB (UInt16.ofNat TB)) := by
+    unfold EqvT
+    rw [mask_called]
+    obtain ⟨hr, hm, hsz⟩ := E
+    have hmsp : (mask th tl sA sB).sp = sB.sp := by cases sB; rfl
+    have hmr : (mask th tl sA sB).ramStart = sB.ramStart := by cases sB; rfl
+    have hmsz : (mask th tl sA sB).mem.size = 65536 := by rw [hmszB]; exact hszB
+    have aboveM := called_above (mask th tl sA sB) (UInt16.ofNat TB) hmsz (by rw [hmsp]; omega)
+      (by rw [hmsp, hmr]; exact rB')
+    refine ⟨?_, fun x h1 h2 => ?_, ?_⟩
+    · exact hr.after_call _ _
+    · rw [aboveA x (Or.inr (by omega)), aboveM x (Or.inr (by rw [hmsp]; omega))]
+      exact hm x h1 h2
+    · rw [called_size, called_size]; exact hsz
+  have keepA : ∀ x, x < sA.ramStart.toNat → (called sA (UInt16.ofNat TA)).mem.get! x = sA.mem.get! x :=
+    fun x hx => aboveA x (Or.inr (by omega))
+  have keepB : ∀ x, x < sB.ramStart.toNat → (called sB (UInt16.ofNat TB)).mem.get! x = sB.mem.get! x :=
+    fun x hx => aboveB x (Or.inr (by rw [hrsB] at hx; omega))
+  refine ⟨atA, atB, S.LA.keep (called_ramStart _ _) keepA (by rw [called_halted]; exact S.LA.2),
+    S.LB.keep (called_ramStart _ _) keepB (by rw [called_halted]; exact S.LB.2), E', ?_,
+    by rw [called_size]; exact hszA, by rw [called_ramStart]; exact hrsA, rfl⟩
+  -- the new frame: each image's return address at its new top, the frames below as they were
+  show Stk A B hi (.ret (kA + 1) (kB + 1) eA :: G) (top (called sA _).sp) (top (called sB _).sp)
+    (called sA _).mem (called sB _).mem
+  rw [called_sp, called_sp, tA1, tB1]
+  refine ⟨by omega, by omega, ?_, ?_, ?_⟩
+  · rw [← tA2, word_called sA _ hszA rA' (by omega), hrA]
+    congr 1
+    rw [UInt16.toNat_add, hpcA]; simp only [show (3 : UInt16).toNat = 3 from rfl]; omega
+  · rw [← tB2, word_called sB _ hszB rB' (by omega), hrB]
+    congr 1
+    rw [UInt16.toNat_add, hpcB]; simp only [show (3 : UInt16).toNat = 3 from rfl]; omega
+  · rw [show top sA.sp - 2 + 2 = top sA.sp by omega, show top sB.sp - 2 + 2 = top sB.sp by omega]
+    exact Stk.congr G _ _ _ _ _ _ S.stk (fun x hx => aboveA x (Or.inl hx)) (fun x hx => aboveB x (Or.inl hx))
+
+/-- info: 'Ember.Proof.PassSim.seg_call' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in #print axioms seg_call
+
+theorem rd16_word (s : Cpu) (h : s.sp.toNat + 1 < 65536) : (s.rd16 s.sp).toNat = word s.mem s.sp.toNat := by
+  have e1 : (s.sp + 1).toNat = s.sp.toNat + 1 := by
+    rw [UInt16.toNat_add]; simp only [UInt16.toNat_one]; omega
+  have : s.rd16 s.sp = mk16 (s.rd (s.sp + 1)) (s.rd s.sp) := by
+    simp only [Cpu.rd16, mk16, UInt16.or_comm]
+  rw [this, Ember.Proof.Z80Gen.mk16_toNat]
+  simp only [Cpu.rd, e1, word]
+  omega
+
+theorem top_add2 (sp : UInt16) (h : sp.toNat + 2 ≤ 65536) : top (sp + 2) = sp.toNat + 2 := by
+  by_cases e : sp.toNat + 2 = 65536
+  · have : sp + 2 = 0 := by
+      apply UInt16.toNat_inj.mp; rw [UInt16.toNat_add]; simp only [show (2 : UInt16).toNat = 2 from rfl]
+      rw [e]; rfl
+    simp only [top, this, if_true]; omega
+  · have h2 : (sp + 2).toNat = sp.toNat + 2 := by
+      rw [UInt16.toNat_add]; simp only [show (2 : UInt16).toNat = 2 from rfl]; omega
+    have : sp + 2 ≠ 0 := by intro e'; have := congrArg UInt16.toNat e'; rw [h2] at this; simp at this
+    simp only [top, this, if_false, h2]
+
+theorem Eqv.returned {lo hi : Nat} {s u : Cpu} (E : Eqv lo hi s u) (c d : UInt64) :
+    Eqv lo hi (returned s c) (returned u d) := by
+  obtain ⟨p', r', c', m', q', e⟩ := regs_ex E.regs
+  subst e
+  exact ⟨by cases s; rfl, E.mem, E.msz⟩
+
+theorem mask_returned (th tl : Bool) (s t : Cpu) (c d : UInt64) :
+    mask th tl (returned s c) (returned t d) = returned (mask th tl s t) d := by
+  cases s; cases t; rfl
+
+/-- **A return, in both machines**: at `kA` in `A` and `kB` in `B` a `ret` (with the same condition,
+or none), the frame on top of the stacks a call of both.  Taken, one step of each returns each to
+its own return point (`rA`, `rB`), the frame popped; not taken, both go on. -/
+theorem seg_ret (D : Dev) {A B : Code} {lo hi : Nat} {G : List Frame} {rA rB e kA kB : Nat} {th tl : Bool}
+    {cc : Option Arg} (hcc : ∀ cnd, cc = some cnd → (cc? cnd).isSome)
+    (hA : A.items[kA]? = some (.ins ⟨.ret, cc.toList⟩)) (hB : B.items[kB]? = some (.ins ⟨.ret, cc.toList⟩))
+    {x y : Cpu × D.W} (S : Sync D A B lo hi (.ret rA rB e :: G) kA kB th tl x y) :
+    if taken cc x.1 then Sync D A B lo hi G rA rB th tl (mstep D x) (mstep D y)
+    else Sync D A B lo hi (.ret rA rB e :: G) (kA + 1) (kB + 1) th tl (mstep D x) (mstep D y) := by
+  obtain ⟨sA, w⟩ := x
+  obtain ⟨sB, w'⟩ := y
+  have hw : w' = w := S.w
+  subst hw
+  have stA := ret_mstep D hcc hA S.LA S.atA w'
+  have stB := ret_mstep D hcc hB S.LB S.atB w'
+  have ht := taken_eq S.E cc
+  simp only at ht ⊢
+  have stk := S.stk
+  obtain ⟨hA1, hB1, wA, wB, rest⟩ := stk
+  have bnd := Stk.bounds G _ _ _ _ rest
+  simp only at hA1 hB1 wA wB rest bnd
+  by_cases hc : taken cc sA = true
+  · rw [if_pos hc] at stA ⊢
+    rw [ht] at hc
+    rw [if_pos hc] at stB
+    obtain ⟨cA, eA⟩ := stA
+    obtain ⟨cB, eB⟩ := stB
+    rw [eA, eB]
+    -- the frame's addresses, where each stack's top is
+    have hspA : sA.sp ≠ 0 := by intro h0; simp only [top, h0, if_true] at bnd; omega
+    have hspB : sB.sp ≠ 0 := by intro h0; simp only [top, h0, if_true] at bnd; omega
+    have tA : top sA.sp = sA.sp.toNat := by simp only [top, hspA, if_false]
+    have tB : top sB.sp = sB.sp.toNat := by simp only [top, hspB, if_false]
+    rw [tA] at wA bnd rest; rw [tB] at wB bnd rest
+    have pA : (returned sA cA).pc.toNat = word sA.mem sA.sp.toNat := by
+      rw [returned_pc]; exact rd16_word sA (by omega)
+    have pB : (returned sB cB).pc.toNat = word sB.mem sB.sp.toNat := by
+      rw [returned_pc]; exact rd16_word sB (by omega)
+    refine ⟨⟨_, wA, pA⟩, ⟨_, wB, pB⟩, ⟨S.LA.1.congr rfl (returned_mem _ _), S.LA.2⟩,
+      ⟨S.LB.1.congr rfl (returned_mem _ _), S.LB.2⟩, ?_, ?_, S.msz, S.rs, rfl⟩
+    · unfold EqvT; rw [mask_returned]; exact Eqv.returned S.E _ _
+    · show Stk A B hi G (top (returned sA cA).sp) (top (returned sB cB).sp) (returned sA cA).mem
+        (returned sB cB).mem
+      rw [returned_sp, returned_sp, returned_mem, returned_mem, top_add2 _ (by omega),
+        top_add2 _ (by omega)]
+      exact rest
+  · rw [if_neg hc] at stA ⊢
+    rw [ht] at hc
+    rw [if_neg hc] at stB
+    obtain ⟨pA, cA, eA, atA⟩ := stA
+    obtain ⟨pB, cB, eB, atB⟩ := stB
+    rw [eA, eB]
+    exact ⟨atA, atB, ⟨S.LA.1.congr rfl rfl, S.LA.2⟩, ⟨S.LB.1.congr rfl rfl, S.LB.2⟩, S.E.jumped _ _ _ _,
+      S.stk, S.msz, S.rs, rfl⟩
+
+/-- info: 'Ember.Proof.PassSim.seg_ret' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in #print axioms seg_ret
+
+/-! ## `djnz`, `halt`, `ld sp,nn` -/
+
+theorem Eqv.djnzed {lo hi : Nat} {s u : Cpu} (E : Eqv lo hi s u) (p q : UInt16) (c d : UInt64) :
+    Eqv lo hi (djnzed s p c) (djnzed u q d) := by
+  obtain ⟨p', r', c', m', q', e⟩ := regs_ex E.regs
+  subst e
+  exact ⟨by cases s; rfl, E.mem, E.msz⟩
+
+theorem mask_djnzed (th tl : Bool) (s t : Cpu) (p q : UInt16) (c d : UInt64) :
+    mask th tl (djnzed s p c) (djnzed t q d) = djnzed (mask th tl s t) q d := by
+  cases s; cases t; rfl
+
+theorem EqvT.b {lo hi : Nat} {th tl : Bool} {s t : Cpu} (E : EqvT lo hi th tl s t) : s.b = t.b := by
+  obtain ⟨_, _, _, _, _, e⟩ := regs_ex E.regs
+  have : (mask th tl s t).b = t.b := by cases t; rfl
+  rw [← this, e]
+
+/-- **`djnz` in both machines** to the same label: `B` the same in both, both jump or both go on. -/
+theorem seg_djnz (D : Dev) {A B : Code} {lo hi : Nat} {G : List Frame} {kA kB jA jB : Nat} {th tl : Bool}
+    {l : String}
+    (hA : A.items[kA]? = some (.ins ⟨.djnz, [.imm (.sym l 0)]⟩)) (hjA : A.items[jA]? = some (.label l))
+    (hB : B.items[kB]? = some (.ins ⟨.djnz, [.imm (.sym l 0)]⟩)) (hjB : B.items[jB]? = some (.label l))
+    {x y : Cpu × D.W} (S : Sync D A B lo hi G kA kB th tl x y) :
+    if (x.1.b - 1 != 0) = true then Sync D A B lo hi G jA jB th tl (mstep D x) (mstep D y)
+    else Sync D A B lo hi G (kA + 1) (kB + 1) th tl (mstep D x) (mstep D y) := by
+  obtain ⟨sA, w⟩ := x
+  obtain ⟨sB, w'⟩ := y
+  have hw : w' = w := S.w
+  subst hw
+  obtain ⟨pA, cA, eA, LA, atA⟩ := djnz_mstep D hA hjA S.LA S.atA w'
+  obtain ⟨pB, cB, eB, LB, atB⟩ := djnz_mstep D hB hjB S.LB S.atB w'
+  rw [eA, eB]
+  have hb : sA.b = sB.b := S.E.b
+  have E' : EqvT lo hi th tl (djnzed sA pA cA) (djnzed sB pB cB) := by
+    unfold EqvT; rw [mask_djnzed]; exact Eqv.djnzed S.E _ _ _ _
+  have stk : Stk A B hi G (top (djnzed sA pA cA).sp) (top (djnzed sB pB cB).sp) (djnzed sA pA cA).mem
+      (djnzed sB pB cB).mem := S.stk
+  simp only at atA atB ⊢
+  rw [hb] at atA ⊢
+  by_cases hc : (sB.b - 1 != 0) = true
+  · rw [if_pos hc] at atA atB ⊢
+    exact ⟨atA, atB, LA, LB, E', stk, S.msz, S.rs, rfl⟩
+  · rw [if_neg hc] at atA atB ⊢
+    exact ⟨atA, atB, LA, LB, E', stk, S.msz, S.rs, rfl⟩
+
+/-- Both machines halted, the devices in the same state: the end. -/
+def Done (D : Dev) (x y : Cpu × D.W) : Prop := x.1.halted = true ∧ y.1.halted = true ∧ y.2 = x.2
+
+/-- **`halt` in both machines**: both halt, the devices as they were. -/
+theorem seg_halt (D : Dev) {A B : Code} {lo hi : Nat} {G : List Frame} {kA kB : Nat} {th tl : Bool}
+    (hA : A.items[kA]? = some (.ins ⟨.halt, []⟩)) (hB : B.items[kB]? = some (.ins ⟨.halt, []⟩))
+    {x y : Cpu × D.W} (S : Sync D A B lo hi G kA kB th tl x y) : Done D (mstep D x) (mstep D y) := by
+  obtain ⟨sA, w⟩ := x
+  obtain ⟨sB, w'⟩ := y
+  have hw : w' = w := S.w
+  subst hw
+  rw [halt_mstep D hA S.LA S.atA w', halt_mstep D hB S.LB S.atB w']
+  exact ⟨rfl, rfl, rfl⟩
+
+/-- **`ld sp,0` in both machines**: both stacks empty, whatever was on them (start-up). -/
+theorem seg_ldsp0 (D : Dev) {A B : Code} {lo hi : Nat} {G : List Frame} {kA kB : Nat} {th tl : Bool}
+    (hA : A.items[kA]? = some (.ins ⟨.ld, [.sp, .imm (.num (Int.ofNat 0))]⟩))
+    (hB : B.items[kB]? = some (.ins ⟨.ld, [.sp, .imm (.num (Int.ofNat 0))]⟩))
+    {x y : Cpu × D.W} (S : Sync D A B lo hi G kA kB th tl x y) :
+    Sync D A B lo hi [] (kA + 1) (kB + 1) th tl (mstep D x) (mstep D y) := by
+  obtain ⟨sA, w⟩ := x
+  obtain ⟨sB, w'⟩ := y
+  have hw : w' = w := S.w
+  subst hw
+  obtain ⟨pA, cA, eA, atA, LA⟩ := ldsp_mstep D 0 (by decide) hA S.LA S.atA w'
+  obtain ⟨pB, cB, eB, atB, LB⟩ := ldsp_mstep D 0 (by decide) hB S.LB S.atB w'
+  rw [eA, eB]
+  refine ⟨atA, atB, LA, LB, ?_, ⟨rfl, rfl⟩, S.msz, S.rs, rfl⟩
+  have e : ∀ (s : Cpu) (p : UInt16) (c : UInt64), ({ op1 s with sp := UInt16.ofNat 0, pc := p, cycles := c } : Cpu) =
+      { jumped s p c with sp := 0 } := by intro s p c; rfl
+  rw [e, e]
+  have E := S.E.jumped pA pB cA cB
+  unfold EqvT at *
+  have hm : mask th tl ({ jumped sA pA cA with sp := 0 } : Cpu) { jumped sB pB cB with sp := 0 } =
+      { mask th tl (jumped sA pA cA) (jumped sB pB cB) with sp := 0 } := by cases sA; cases sB; rfl
+  rw [hm]
+  obtain ⟨hr, hm', hsz⟩ := E
+  exact ⟨by obtain ⟨_, _, _, _, _, e⟩ := regs_ex hr; rw [e]; cases sA; rfl, hm', hsz⟩
+
+/-! ## `packHigh` -/
+
+theorem RegsS.trans {s t u : Cpu} (h1 : RegsS s t) (h2 : RegsS t u) : RegsS s u := Eq.trans h1 h2
+theorem RegsS.symm {s t : Cpu} (h : RegsS s t) : RegsS t s := Eq.symm h
+
+theorem regsS_fromF_toF {lo hi : Nat} {th tl : Bool} {s t : Cpu} (E : EqvT lo hi th tl s t) :
+    RegsS (fromF s) (toF t) := by
+  have e1 := RegsS.of_regs (from_regs s)
+  have e2 := RegsS.of_regs (to_regs t)
+  refine e1.trans (RegsS.trans ?_ e2.symm)
+  obtain ⟨p', r', c', m', q', e⟩ := regs_ex E.regs
+  have ha : s.a = t.a := by
+    have : (mask th tl s t).a = t.a := by cases t; rfl
+    rw [← this, e]
+  have e3 : ({ t with h := t.a, l := 0, io := .none, eiDelay := false } : Cpu) =
+      { mask th tl s t with h := s.a, l := 0, io := .none, eiDelay := false } := by
+    rw [ha]; cases t; rfl
+  rw [e3, e]
+  cases s; rfl
+
+theorem fromF_mem (s : Cpu) : (fromF s).mem = s.mem ∧ (fromF s).sp = s.sp ∧ (fromF s).ramStart = s.ramStart := by
+  cases s; exact ⟨rfl, rfl, rfl⟩
+theorem toF_mem (s : Cpu) : (toF s).mem = s.mem ∧ (toF s).sp = s.sp ∧ (toF s).ramStart = s.ramStart := by
+  cases s; exact ⟨rfl, rfl, rfl⟩
+
+/-- **`packHigh` in both machines**: at `kA` in `A` the four items it rewrites, at `kB` in `B` the two it
+writes instead; four steps of `A` and two of `B` keep the relation, at the items after, `H` and `L`
+written (no longer free). -/
+theorem seg_pack (D : Dev) {A B : Code} {lo hi : Nat} {G : List Frame} {kA kB : Nat} {th tl : Bool}
+    (hA : Has A kA (packHighFrom.map .ins)) (hB : Has B kB (packHighTo.map .ins))
+    {x y : Cpu × D.W} (S : Sync D A B lo hi G kA kB th tl x y) :
+    Sync D A B lo hi G (kA + 4) (kB + 2) false false (mrun D 4 x) (mrun D 2 y) ∧ (x.1.sp ≠ 0 → NZ D x 4) := by
+  obtain ⟨sA, w⟩ := x
+  obtain ⟨sB, w'⟩ := y
+  have hw : w' = w := S.w
+  subst hw
+  obtain ⟨e1, a1, L1, S1⟩ := does_step D does_ld_l_a (hA.get 0 rfl) S.LA S.atA w'
+  obtain ⟨e2, a2, L2, S2⟩ := does_step D does_ld_h_0 (hA.get 1 rfl) L1 a1 w'
+  obtain ⟨e3, a3, L3, S3⟩ := does_step D does_ld_h_l (hA.get 2 rfl) L2 a2 w'
+  obtain ⟨e4, a4, L4, S4⟩ := does_step D does_ld_l_0 (hA.get 3 rfl) L3 a3 w'
+  obtain ⟨f1, b1, M1, T1⟩ := does_step D does_ld_h_a (hB.get 0 rfl) S.LB S.atB w'
+  obtain ⟨f2, b2, M2, T2⟩ := does_step D does_ld_l_0 (hB.get 1 rfl) M1 b1 w'
+  have rA : mrun D 4 (sA, w') = (fromF sA, w') := by
+    show mrun D 3 (mstep D (sA, w')) = _
+    rw [e1]; show mrun D 2 (mstep D _) = _
+    rw [e2]; show mrun D 1 (mstep D _) = _
+    rw [e3]; show mrun D 0 (mstep D _) = _
+    rw [e4]; rfl
+  have rB : mrun D 2 (sB, w') = (toF sB, w') := by
+    show mrun D 1 (mstep D (sB, w')) = _
+    rw [f1]; show mrun D 0 (mstep D _) = _
+    rw [f2]; rfl
+  have nz : sA.sp ≠ 0 → NZ D (sA, w') 4 := fun h0 =>
+    NZ.cons e1 (fun _ => by rw [S1.2.2.2]; exact h0) (NZ.cons e2 (fun _ => by rw [S2.2.2.2, S1.2.2.2]; exact h0)
+      (NZ.cons e3 (fun _ => by rw [S3.2.2.2, S2.2.2.2, S1.2.2.2]; exact h0) (NZ.le1 _ _ (Nat.le_refl _))))
+  refine ⟨?_, nz⟩
+  rw [rA, rB]
+  obtain ⟨mA, spA, rsA⟩ := fromF_mem sA
+  obtain ⟨mB, spB, rsB⟩ := toF_mem sB
+  have hmsk : (mask th tl sA sB).mem = sB.mem := by cases sB; rfl
+  refine ⟨a4, b2, L4, M2, ?_, ?_, by rw [mA]; exact S.msz, by rw [rsA]; exact S.rs, rfl⟩
+  · show Eqv lo hi (fromF sA) (mask false false (fromF sA) (toF sB))
+    rw [mask_ff]
+    refine ⟨regsS_fromF_toF S.E, fun x h1 h2 => ?_, ?_⟩
+    · rw [mA, mB, ← hmsk]; exact S.E.mem x h1 h2
+    · rw [mA, mB, ← hmsk]; exact S.E.msz
+  · show Stk A B hi G (top (fromF sA).sp) (top (toF sB).sp) (fromF sA).mem (toF sB).mem
+    rw [mA, mB, spA, spB]; exact S.stk
+
+/-- info: 'Ember.Proof.PassSim.seg_pack' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in #print axioms seg_pack
+
+/-! ## `push af`, `pop af` -/
+
+theorem pushedAF_sp (s : Cpu) : (pushedAF s).sp = s.sp - 2 := by
+  simp only [pushedAF, Cpu.push, Cpu.wr16, Cpu.wr, Cpu.tick, op1, Cpu.bumpR]; (repeat' split) <;> rfl
+theorem pushedAF_ramStart (s : Cpu) : (pushedAF s).ramStart = s.ramStart := by
+  simp only [pushedAF, Cpu.push, Cpu.wr16, Cpu.wr, Cpu.tick, op1, Cpu.bumpR]; (repeat' split) <;> rfl
+theorem pushedAF_halted (s : Cpu) : (pushedAF s).halted = s.halted := by
+  simp only [pushedAF, Cpu.push, Cpu.wr16, Cpu.wr, Cpu.tick, op1, Cpu.bumpR]; (repeat' split) <;> rfl
+theorem pushedAF_size (s : Cpu) : (pushedAF s).mem.size = s.mem.size := by
+  simp only [pushedAF, Cpu.push, Cpu.wr16, Cpu.wr, Cpu.tick, op1, Cpu.bumpR]; (repeat' split) <;> simp
+
+theorem pushedAF_mem (s : Cpu) (hsz : s.mem.size = 65536)
+    (hr : s.ramStart.toNat ≤ (s.sp - 2).toNat) (hw : (s.sp - 2).toNat + 1 < 65536) (x : Nat) :
+    (pushedAF s).mem.get! x =
+      if x = (s.sp - 2).toNat then s.af.toUInt8
+      else if x = (s.sp - 2).toNat + 1 then (s.af >>> 8).toUInt8 else s.mem.get! x := by
+  have h1 : (s.sp - 2 + 1).toNat = (s.sp - 2).toNat + 1 := by
+    rw [UInt16.toNat_add]; simp only [UInt16.toNat_one]; omega
+  have hnl : ¬ (s.sp - 2) < s.ramStart := by rw [UInt16.lt_iff_toNat_lt]; omega
+  have hnl' : ¬ (s.sp - 2 + 1) < s.ramStart := by rw [UInt16.lt_iff_toNat_lt, h1]; omega
+  have hm : (pushedAF s).mem = (s.mem.set! (s.sp - 2).toNat s.af.toUInt8).set! ((s.sp - 2).toNat + 1)
+      (s.af >>> 8).toUInt8 := by
+    simp only [pushedAF, Cpu.push, Cpu.wr16, Cpu.wr, Cpu.tick, op1, Cpu.bumpR, hnl, hnl', if_false, h1]; rfl
+  rw [hm, Ember.Proof.IRSim.get_set, Ember.Proof.IRSim.get_set, Ember.Proof.IRSim.size_set, hsz]
+  by_cases hx : x = (s.sp - 2).toNat
+  · subst hx
+    have : ¬ ((s.sp - 2).toNat + 1 = (s.sp - 2).toNat) := by omega
+    simp only [this, false_and, if_false, true_and, if_true]
+    rw [if_pos (by omega)]
+  · by_cases hx' : x = (s.sp - 2).toNat + 1
+    · subst hx'
+      have : ¬ ((s.sp - 2).toNat + 1 = (s.sp - 2).toNat) := by omega
+      simp only [true_and, if_true, this, if_false]
+      rw [if_pos (by omega)]
+    · have a1 : ¬ ((s.sp - 2).toNat + 1 = x ∧ (s.sp - 2).toNat + 1 < 65536) := fun h => hx' h.1.symm
+      have a2 : ¬ ((s.sp - 2).toNat = x ∧ (s.sp - 2).toNat < 65536) := fun h => hx h.1.symm
+      simp only [hx, hx', a1, a2, if_false]
+
+theorem RegsS.pushedAF {s t : Cpu} (h : RegsS s t) : RegsS (PassSim.pushedAF s) (PassSim.pushedAF t) := by
+  obtain ⟨p', r', c', m', q', e⟩ := regs_ex h
+  subst e
+  cases s
+  simp only [RegsS, PassSim.pushedAF, Cpu.push, Cpu.wr16, Cpu.wr, Cpu.tick, op1, Cpu.bumpR]
+  (repeat' split) <;> rfl
+
+theorem mask_pushedAF (th tl : Bool) (s t : Cpu) : mask th tl (pushedAF s) (pushedAF t) = pushedAF (mask th tl s t) := by
+  cases s with
+  | mk a0 f0 b0 c0 d0 e0 h0 l0 a0' f0' b0' c0' d0' e0' h0' l0' ix0 iy0 sp0 pc0 i0 r0 iff10 iff20 im0 halted0 eiDelay0
+      cycles0 io0 ramStart0 mem0 =>
+  cases t with
+  | mk a f b c d e h l a' f' b' c' d' e' h' l' ix iy sp pc i r iff1 iff2 im halted eiDelay cycles io ramStart mem =>
+  simp only [mask, pushedAF, Cpu.push, Cpu.wr16, Cpu.wr, Cpu.tick, op1, Cpu.bumpR, Cpu.af]
+  by_cases h1 : sp - 2 < ramStart <;> by_cases h2 : sp - 2 + 1 < ramStart <;>
+    by_cases h3 : sp0 - 2 < ramStart0 <;> by_cases h4 : sp0 - 2 + 1 < ramStart0 <;> simp [h1, h2, h3, h4]
+
+theorem EqvT.af {lo hi : Nat} {th tl : Bool} {s t : Cpu} (E : EqvT lo hi th tl s t) : s.af = t.af := by
+  obtain ⟨_, _, _, _, _, e⟩ := regs_ex E.regs
+  have h1 : (mask th tl s t).a = t.a := by cases t; rfl
+  have h2 : (mask th tl s t).f = t.f := by cases t; rfl
+  simp only [Cpu.af]
+  rw [← h1, ← h2, e]
+
+/-- **`push af` in both machines**: each pushes `AF`, the same word: a frame of data more. -/
+theorem seg_push_af (D : Dev) {A B : Code} {lo hi : Nat} {G : List Frame} {kA kB : Nat} {th tl : Bool}
+    (hA : A.items[kA]? = some (.ins ⟨.push, [.af]⟩)) (hB : B.items[kB]? = some (.ins ⟨.push, [.af]⟩))
+    {x y : Cpu × D.W} (S : Sync D A B lo hi G kA kB th tl x y) (hlo : lo ≤ hi) (h1 : 1 ≤ hi)
+    (room : hi + 2 ≤ top x.1.sp) :
+    Sync D A B lo hi (.data :: G) (kA + 1) (kB + 1) th tl (mstep D x) (mstep D y) := by
+  obtain ⟨sA, w⟩ := x
+  obtain ⟨sB, w'⟩ := y
+  have hw : w' = w := S.w
+  subst hw
+  simp only at room
+  obtain ⟨eA, atA⟩ := push_af_mstep D hA S.LA S.atA w'
+  obtain ⟨eB, atB⟩ := push_af_mstep D hB S.LB S.atB w'
+  rw [eA, eB]
+  have E := S.E
+  have hrsB : sB.ramStart = sA.ramStart := by
+    have := RegsS.ramStart E.regs; rw [mask_ramStart] at this; exact this.symm
+  have hrsA : sA.ramStart.toNat ≤ lo := S.rs
+  have hszA : sA.mem.size = 65536 := S.msz
+  have hmszB : (mask th tl sA sB).mem.size = sB.mem.size := by cases sB; rfl
+  have hszB : sB.mem.size = 65536 := by rw [← hmszB, ← E.msz]; exact hszA
+  have bnd := Stk.bounds G _ _ _ _ S.stk
+  simp only at bnd
+  have hab : top sA.sp ≤ top sB.sp := bnd.1
+  have hbB : top sB.sp ≤ 65536 := bnd.2.1
+  obtain ⟨tA1, tA2⟩ := top_sub2 sA.sp (by omega)
+  obtain ⟨tB1, tB2⟩ := top_sub2 sB.sp (by omega)
+  have rA' : sA.ramStart.toNat ≤ (sA.sp - 2).toNat := by omega
+  have rB' : sB.ramStart.toNat ≤ (sB.sp - 2).toNat := by rw [hrsB]; omega
+  have aboveA : ∀ x, top sA.sp ≤ x ∨ x < top sA.sp - 2 → (pushedAF sA).mem.get! x = sA.mem.get! x := by
+    intro x hx; rw [pushedAF_mem sA hszA rA' (by omega)]; rw [if_neg (by omega), if_neg (by omega)]
+  have aboveB : ∀ x, top sB.sp ≤ x ∨ x < top sB.sp - 2 → (pushedAF sB).mem.get! x = sB.mem.get! x := by
+    intro x hx; rw [pushedAF_mem sB hszB rB' (by omega)]; rw [if_neg (by omega), if_neg (by omega)]
+  have E' : EqvT lo hi th tl (pushedAF sA) (pushedAF sB) := by
+    unfold EqvT
+    rw [mask_pushedAF]
+    obtain ⟨hr, hm, hsz⟩ := E
+    have hmsp : (mask th tl sA sB).sp = sB.sp := by cases sB; rfl
+    have hmr : (mask th tl sA sB).ramStart = sB.ramStart := by cases sB; rfl
+    have hmsz : (mask th tl sA sB).mem.size = 65536 := by rw [hmszB]; exact hszB
+    have rM : (mask th tl sA sB).ramStart.toNat ≤ ((mask th tl sA sB).sp - 2).toNat := by rw [hmsp, hmr]; exact rB'
+    refine ⟨hr.pushedAF, fun x h1 h2 => ?_, ?_⟩
+    · rw [aboveA x (Or.inr (by omega)), pushedAF_mem _ hmsz rM (by rw [hmsp]; omega),
+        if_neg (by rw [hmsp]; omega), if_neg (by rw [hmsp]; omega)]
+      exact hm x h1 h2
+    · rw [pushedAF_size, pushedAF_size]; exact hsz
+  refine ⟨atA, atB, S.LA.keep (pushedAF_ramStart _) (fun x (hx : x < sA.ramStart.toNat) => aboveA x (Or.inr (by omega)))
+      (by rw [pushedAF_halted]; exact S.LA.2),
+    S.LB.keep (pushedAF_ramStart _) (fun x (hx : x < sB.ramStart.toNat) => aboveB x (Or.inr (by rw [hrsB] at hx; omega)))
+      (by rw [pushedAF_halted]; exact S.LB.2), E', ?_,
+    by rw [pushedAF_size]; exact hszA, by rw [pushedAF_ramStart]; exact hrsA, rfl⟩
+  show Stk A B hi (.data :: G) (top (pushedAF sA).sp) (top (pushedAF sB).sp) (pushedAF sA).mem (pushedAF sB).mem
+  rw [pushedAF_sp, pushedAF_sp, tA1, tB1]
+  refine ⟨by omega, by omega, ?_, ?_⟩
+  · rw [← tA2, ← tB2]
+    unfold word
+    rw [pushedAF_mem sA hszA rA' (by omega), pushedAF_mem sA hszA rA' (by omega),
+      pushedAF_mem sB hszB rB' (by omega), pushedAF_mem sB hszB rB' (by omega)]
+    simp only [if_true, show ¬ ((sA.sp - 2).toNat + 1 = (sA.sp - 2).toNat) by omega,
+      show ¬ ((sB.sp - 2).toNat + 1 = (sB.sp - 2).toNat) by omega, if_false]
+    rw [byte_lo_hi, byte_lo_hi, S.E.af]
+  · rw [show top sA.sp - 2 + 2 = top sA.sp by omega, show top sB.sp - 2 + 2 = top sB.sp by omega]
+    exact Stk.congr G _ _ _ _ _ _ S.stk (fun x hx => aboveA x (Or.inl hx)) (fun x hx => aboveB x (Or.inl hx))
+
+/-- info: 'Ember.Proof.PassSim.seg_push_af' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in #print axioms seg_push_af
+
+theorem mask_poppedAF (th tl : Bool) (s t : Cpu) : mask th tl (poppedAF s) (poppedAF t) = poppedAF (mask th tl s t) := by
+  cases s; cases t; rfl
+
+theorem Eqv.poppedAF {lo hi : Nat} {s u : Cpu} (E : Eqv lo hi s u) (hrd : s.rd16 s.sp = u.rd16 u.sp) :
+    Eqv lo hi (PassSim.poppedAF s) (PassSim.poppedAF u) := by
+  obtain ⟨p', r', c', m', q', e⟩ := regs_ex E.regs
+  subst e
+  refine ⟨?_, E.mem, E.msz⟩
+  revert hrd
+  cases s
+  simp only [RegsS, PassSim.poppedAF, op1, Cpu.bumpR, Cpu.tick]
+  intro hrd
+  rw [hrd]
+
+/-- **`pop af` in both machines**, a frame of data on top: `AF` the same word in both, the frame popped. -/
+theorem seg_pop_af (D : Dev) {A B : Code} {lo hi : Nat} {G : List Frame} {kA kB : Nat} {th tl : Bool}
+    (hA : A.items[kA]? = some (.ins ⟨.pop, [.af]⟩)) (hB : B.items[kB]? = some (.ins ⟨.pop, [.af]⟩))
+    {x y : Cpu × D.W} (S : Sync D A B lo hi (.data :: G) kA kB th tl x y) :
+    Sync D A B lo hi G (kA + 1) (kB + 1) th tl (mstep D x) (mstep D y) := by
+  obtain ⟨sA, w⟩ := x
+  obtain ⟨sB, w'⟩ := y
+  have hw : w' = w := S.w
+  subst hw
+  obtain ⟨eA, atA, LA⟩ := pop_af_mstep D hA S.LA S.atA w'
+  obtain ⟨eB, atB, LB⟩ := pop_af_mstep D hB S.LB S.atB w'
+  rw [eA, eB]
+  have stk := S.stk
+  obtain ⟨hA1, hB1, wd, rest⟩ := stk
+  have bnd := Stk.bounds G _ _ _ _ rest
+  simp only at hA1 hB1 wd rest bnd
+  have hspA : sA.sp ≠ 0 := by intro h0; simp only [top, h0, if_true] at bnd; omega
+  have hspB : sB.sp ≠ 0 := by intro h0; simp only [top, h0, if_true] at bnd; omega
+  have tA : top sA.sp = sA.sp.toNat := by simp only [top, hspA, if_false]
+  have tB : top sB.sp = sB.sp.toNat := by simp only [top, hspB, if_false]
+  rw [tA, tB] at wd bnd rest
+  have hrd : sA.rd16 sA.sp = sB.rd16 sB.sp := by
+    apply UInt16.toNat_inj.mp
+    rw [rd16_word sA (by omega), rd16_word sB (by omega), wd]
+  have hmrd : (mask th tl sA sB).rd16 (mask th tl sA sB).sp = sB.rd16 sB.sp := by cases sB; rfl
+  refine ⟨atA, atB, LA, LB, ?_, ?_, S.msz, S.rs, rfl⟩
+  · unfold EqvT; rw [mask_poppedAF]; exact Eqv.poppedAF S.E (by rw [hmrd]; exact hrd)
+  · show Stk A B hi G (top (poppedAF sA).sp) (top (poppedAF sB).sp) (poppedAF sA).mem (poppedAF sB).mem
+    have e1 : ∀ s : Cpu, (poppedAF s).sp = s.sp + 2 ∧ (poppedAF s).mem = s.mem := fun s => ⟨rfl, rfl⟩
+    rw [(e1 sA).1, (e1 sB).1, (e1 sA).2, (e1 sB).2, top_add2 _ (by omega), top_add2 _ (by omega)]
+    exact rest
+
+/-- info: 'Ember.Proof.PassSim.seg_pop_af' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in #print axioms seg_pop_af
+
+/-! ## `ldir` -/
+
+theorem ldirS_sp (s : Cpu) : (ldirS s).sp = s.sp ∧ (ldirS s).ramStart = s.ramStart ∧ (ldirS s).halted = s.halted := by
+  simp only [ldirS, ldirG]; split <;> exact ⟨rfl, rfl, rfl⟩
+
+theorem ldirS_mem (s : Cpu) (x : Nat) (hsz : s.mem.size = 65536) (hr : s.ramStart.toNat ≤ s.de.toNat) :
+    (ldirS s).mem.get! x = if x = s.de.toNat then s.mem.get! s.hl.toNat else s.mem.get! x := by
+  have hnl : ¬ s.de < s.ramStart := by rw [UInt16.lt_iff_toNat_lt]; omega
+  have hm : (ldirS s).mem = s.mem.set! s.de.toNat (s.mem.get! s.hl.toNat) := by
+    simp only [ldirS, ldirG]
+    have : (op2 s).de = s.de ∧ (op2 s).ramStart = s.ramStart ∧ (op2 s).mem = s.mem ∧ (op2 s).hl = s.hl :=
+      ⟨rfl, rfl, rfl, rfl⟩
+    rw [this.1, this.2.1, this.2.2.1, this.2.2.2, if_neg hnl]
+    split <;> rfl
+  rw [hm, Ember.Proof.IRSim.get_set, hsz]
+  by_cases hx : x = s.de.toNat
+  · subst hx; simp [s.de.toNat_lt]
+  · have : ¬ (s.de.toNat = x ∧ s.de.toNat < 65536) := fun h => hx h.1.symm
+    simp only [this, hx, if_false]
+
+theorem ldirS_size (s : Cpu) : (ldirS s).mem.size = s.mem.size := by
+  simp only [ldirS, ldirG]; split <;> (split <;> first | rfl | simp <;> rfl)
+
+/-- `ldirG` with the byte it moves given. -/
+def ldirR (x : Cpu) (v : UInt8) : Cpu :=
+  let m := if x.de < x.ramStart then x.mem else x.mem.set! x.de.toNat v
+  let bc' := x.bc - 1
+  let more : Bool := bc' != 0
+  let n : UInt8 := x.a + v
+  let f' : UInt8 := (x.f &&& (FS ||| FZ ||| FC)) ||| bit more FPV ||| (n &&& FX) ||| bit (n &&& 2 != 0) FY
+  let w : Cpu :=
+    { x with mem := m, h := hi (x.hl + 1), l := lo (x.hl + 1), d := hi (x.de + 1), e := lo (x.de + 1),
+             b := hi bc', c := lo bc', f := f' }
+  if more then { w with pc := x.pc - 2, cycles := x.cycles + 21 } else { w with cycles := x.cycles + 16 }
+
+theorem ldirS_R (s : Cpu) : ldirS s = ldirR (op2 s) (s.mem.get! s.hl.toNat) := rfl
+
+/-- The registers after a round of `ldir` from CPUs that agree, `H` and `L` free or not (both). -/
+theorem regsS_ldirS {lo hi : Nat} {τ : Bool} {s t : Cpu} (E : EqvT lo hi τ τ s t)
+    (hv : s.mem.get! s.hl.toNat = t.mem.get! t.hl.toNat) :
+    RegsS (ldirS s) (mask τ τ (ldirS s) (ldirS t)) := by
+  rw [ldirS_R, ldirS_R, ← hv]
+  generalize s.mem.get! s.hl.toNat = v
+  obtain ⟨p', r', c', m', q', e⟩ := regs_ex E.regs
+  cases τ
+  · rw [mask_ff] at e ⊢
+    subst e
+    cases s
+    simp only [RegsS, ldirR, op2, op1, skip, Cpu.bumpR, Cpu.hl, Cpu.de, Cpu.bc]
+    split <;> split <;> rfl
+  · revert e
+    cases s; cases t
+    simp only [mask, if_true, Cpu.mk.injEq]
+    intro e
+    obtain ⟨ea, ef, eb, ec, ed, ee, eh, el, ea', ef', eb', ec', ed', ee', eh', el', eix, eiy, esp, epc, ei, er, eiff1, eiff2,
+      eim, ehalted, eei, ecy, eio, ers, emem⟩ := e
+    subst ea ef eb ec ed ee ea' ef' eb' ec' ed' ee' eh' el' eix eiy ei eiff1 eiff2 eim ehalted eei eio ers
+    simp only [RegsS, ldirR, op2, op1, skip, Cpu.bumpR, Cpu.hl, Cpu.de, Cpu.bc]
+    split <;> split <;> rfl
+
+/-- **A round of `ldir` in both machines**: the byte each reads at its `HL` the same (in the RAM kept
+equal, or a literal of each image's ROM — then `H` and `L` free), written at `DE` in the RAM kept
+equal; both back at the `ldir` or both on, the relation kept. -/
+theorem seg_ldir (D : Dev) {A B : Code} {lo hi : Nat} (hhi : hi ≤ 65536) {G : List Frame} {kA kB : Nat}
+    {τ : Bool} (hA : A.items[kA]? = some (.ins ⟨.ldir, []⟩)) (hB : B.items[kB]? = some (.ins ⟨.ldir, []⟩))
+    {x y : Cpu × D.W} (S : Sync D A B lo hi G kA kB τ τ x y)
+    (hv : x.1.mem.get! x.1.hl.toNat = y.1.mem.get! y.1.hl.toNat)
+    (hde : lo ≤ x.1.de.toNat ∧ x.1.de.toNat < hi) :
+    if (x.1.bc - 1 != 0) = true then Sync D A B lo hi G kA kB τ τ (mstep D x) (mstep D y)
+    else Sync D A B lo hi G (kA + 1) (kB + 1) τ τ (mstep D x) (mstep D y) := by
+  obtain ⟨sA, w⟩ := x
+  obtain ⟨sB, w'⟩ := y
+  have hw : w' = w := S.w
+  subst hw
+  simp only at hv hde ⊢
+  obtain ⟨eA, atA⟩ := ldir_mstep D hA S.LA S.atA w'
+  obtain ⟨eB, atB⟩ := ldir_mstep D hB S.LB S.atB w'
+  rw [eA, eB]
+  have E := S.E
+  have hrsB : sB.ramStart = sA.ramStart := by
+    have := RegsS.ramStart E.regs; rw [mask_ramStart] at this; exact this.symm
+  have hdeB : sB.de = sA.de := by
+    have := RegsS.de E.regs; rw [mask_de] at this; exact this.symm
+  have hbc : sA.bc = sB.bc := by
+    obtain ⟨_, _, _, _, _, e⟩ := regs_ex E.regs
+    have : (mask τ τ sA sB).bc = sB.bc := by cases sB; rfl
+    rw [← this, e]; rfl
+  have hrsA : sA.ramStart.toNat ≤ lo := S.rs
+  have hszA : sA.mem.size = 65536 := S.msz
+  have hmszB : (mask τ τ sA sB).mem.size = sB.mem.size := by cases sB; rfl
+  have hszB : sB.mem.size = 65536 := by rw [← hmszB, ← E.msz]; exact hszA
+  have hmmem : (mask τ τ sA sB).mem = sB.mem := by cases sB; rfl
+  have rA : sA.ramStart.toNat ≤ sA.de.toNat := by omega
+  have rB : sB.ramStart.toNat ≤ sB.de.toNat := by rw [hrsB, hdeB]; omega
+  have hrsB' : sB.ramStart.toNat = sA.ramStart.toNat := by rw [hrsB]
+  have htop := (S.stk).top_ge hhi
+  simp only at htop
+  obtain ⟨spA, rsA', hA'⟩ := ldirS_sp sA
+  obtain ⟨spB, rsB', hB'⟩ := ldirS_sp sB
+  have keepA : ∀ z, ¬ (lo ≤ z ∧ z < hi) → (ldirS sA).mem.get! z = sA.mem.get! z := by
+    intro z hz; rw [ldirS_mem sA z hszA rA, if_neg (by omega)]
+  have keepB : ∀ z, ¬ (lo ≤ z ∧ z < hi) → (ldirS sB).mem.get! z = sB.mem.get! z := by
+    intro z hz; rw [ldirS_mem sB z hszB rB, if_neg (by rw [hdeB]; omega)]
+  have E' : EqvT lo hi τ τ (ldirS sA) (ldirS sB) := by
+    refine ⟨regsS_ldirS E hv, fun z h1 h2 => ?_, ?_⟩
+    · have hmm : (mask τ τ (ldirS sA) (ldirS sB)).mem = (ldirS sB).mem := by cases (ldirS sB); rfl
+      rw [hmm, ldirS_mem sA z hszA rA, ldirS_mem sB z hszB rB, hdeB, hv]
+      split
+      · rfl
+      · have := E.mem z h1 h2; rw [hmmem] at this; exact this
+    · have hmm : (mask τ τ (ldirS sA) (ldirS sB)).mem = (ldirS sB).mem := by cases (ldirS sB); rfl
+      rw [hmm, ldirS_size, ldirS_size, hszA, hszB]
+  have LA : Loaded A (ldirS sA) := S.LA.keep rsA' (fun z (hz : z < sA.ramStart.toNat) => keepA z (by omega))
+    (by rw [hA']; exact S.LA.2)
+  have LB : Loaded B (ldirS sB) := S.LB.keep rsB' (fun z (hz : z < sB.ramStart.toNat) => keepB z (by omega))
+    (by rw [hB']; exact S.LB.2)
+  have stk : Stk A B hi G (top (ldirS sA).sp) (top (ldirS sB).sp) (ldirS sA).mem (ldirS sB).mem := by
+    rw [spA, spB]
+    exact Stk.congr G _ _ _ _ _ _ S.stk (fun z hz => keepA z (by omega)) (fun z hz => keepB z (by omega))
+  have atA' : if (sA.bc - 1 != 0) = true then At A.addrs kA (ldirS sA) else At A.addrs (kA + 1) (ldirS sA) := atA
+  have atB' : if (sB.bc - 1 != 0) = true then At B.addrs kB (ldirS sB) else At B.addrs (kB + 1) (ldirS sB) := atB
+  clear atA atB
+  rw [hbc] at atA' ⊢
+  by_cases hc : (sB.bc - 1 != 0) = true
+  · rw [if_pos hc] at atA' atB' ⊢
+    exact ⟨atA', atB', LA, LB, E', stk, by rw [ldirS_size]; exact hszA, by rw [rsA']; exact hrsA, rfl⟩
+  · rw [if_neg hc] at atA' atB' ⊢
+    exact ⟨atA', atB', LA, LB, E', stk, by rw [ldirS_size]; exact hszA, by rw [rsA']; exact hrsA, rfl⟩
+
+/-- info: 'Ember.Proof.PassSim.seg_ldir' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in #print axioms seg_ldir
+
+/-! ## A step that goes on, in general -/
+
+/-- **One instruction that goes on, in both machines, in general**: each image's instruction does,
+from the related states, what `sA'` and `sB'` are — no I/O, the stack pointer, the start of RAM and
+memory outside `[lo, hi)` as they were, not halted — and those are related (`E'`, with `H`, `L`
+free as it says).  Then the relation holds at the items after. -/
+theorem seg_gen (D : Dev) {A B : Code} {lo hi : Nat} (hhi : hi ≤ 65536) {G : List Frame} {kA kB : Nat}
+    {th tl th' tl' : Bool} {iA iB : Instr}
+    (hA : A.items[kA]? = some (.ins iA)) (hB : B.items[kB]? = some (.ins iB))
+    (hfA : iA.falls = true) (hfB : iB.falls = true)
+    {x y : Cpu × D.W} (S : Sync D A B lo hi G kA kB th tl x y) (sA' sB' : Cpu)
+    (exA : ∀ pa, A.addrs[kA]? = some pa → exec (A.a.env pa) iA x.1 (D.bus x.2) = some sA')
+    (exB : ∀ pb, B.addrs[kB]? = some pb → exec (B.a.env pb) iB y.1 (D.bus y.2) = some sB')
+    (ioA : sA'.io = .none) (ioB : sB'.io = .none)
+    (spA : sA'.sp = x.1.sp) (spB : sB'.sp = y.1.sp) (rsA : sA'.ramStart = x.1.ramStart)
+    (rsB : sB'.ramStart = y.1.ramStart) (hA' : sA'.halted = false) (hB' : sB'.halted = false)
+    (memA : ∀ z, ¬ (lo ≤ z ∧ z < hi) → sA'.mem.get! z = x.1.mem.get! z)
+    (memB : ∀ z, ¬ (lo ≤ z ∧ z < hi) → sB'.mem.get! z = y.1.mem.get! z)
+    (szA : sA'.mem.size = 65536) (E' : EqvT lo hi th' tl' sA' sB') :
+    Sync D A B lo hi G (kA + 1) (kB + 1) th' tl' (mstep D x) (mstep D y) := by
+  obtain ⟨sA, w⟩ := x
+  obtain ⟨sB, w'⟩ := y
+  have hw : w' = w := S.w
+  subst hw
+  obtain ⟨pa, hpa, hpcA⟩ := S.atA
+  obtain ⟨pb, hpb, hpcB⟩ := S.atB
+  have stA := step_item A.placed S.LA.1 hA hpa hpcA S.LA.2 (exA pa hpa)
+  have stB := step_item B.placed S.LB.1 hB hpb hpcB S.LB.2 (exB pb hpb)
+  have eA : mstep D (sA, w') = (sA', w') := by
+    show (sA.step (D.bus w'), D.dev w' (sA.step (D.bus w')).io) = _
+    rw [stA.1, ioA, D.quiet]
+  have eB : mstep D (sB, w') = (sB', w') := by
+    show (sB.step (D.bus w'), D.dev w' (sB.step (D.bus w')).io) = _
+    rw [stB.1, ioB, D.quiet]
+  rw [eA, eB]
+  have hrsA : sA.ramStart.toNat ≤ lo := S.rs
+  have hrsB : sB.ramStart = sA.ramStart := by
+    have := RegsS.ramStart S.E.regs; rw [mask_ramStart] at this; exact this.symm
+  have hrsB' : sB.ramStart.toNat = sA.ramStart.toNat := by rw [hrsB]
+  have htop : hi ≤ top sA.sp ∧ hi ≤ top sB.sp := (S.stk).top_ge hhi
+  refine ⟨stA.2 hfA, stB.2 hfB, S.LA.keep rsA (fun z (hz : z < sA.ramStart.toNat) => memA z (by omega)) hA',
+    S.LB.keep rsB (fun z (hz : z < sB.ramStart.toNat) => memB z (by omega)) hB', E', ?_, szA,
+    by rw [rsA]; exact hrsA, rfl⟩
+  show Stk A B hi G (top sA'.sp) (top sB'.sp) sA'.mem sB'.mem
+  rw [spA, spB]
+  exact Stk.congr G _ _ _ _ _ _ S.stk (fun z (hz : top sA.sp ≤ z) => memA z (by omega))
+    (fun z (hz : top sB.sp ≤ z) => memB z (by omega))
+
+/-- info: 'Ember.Proof.PassSim.seg_gen' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in #print axioms seg_gen
+
+/-! ## `H` and `L` free: a literal's address into `HL`, `HL` stepped, a byte read through it -/
+
+/-- A state after an instruction that changes the program counter, the T-states (and `R`) and
+writes `H` and `L`. -/
+theorem eqvT_hl_written {lo hi : Nat} {th tl : Bool} {s t : Cpu} (E : EqvT lo hi th tl s t)
+    (p q : UInt16) (c d : UInt64) (a1 a2 b1 b2 : UInt8) :
+    EqvT lo hi true true { jumped s p c with h := a1, l := a2 } { jumped t q d with h := b1, l := b2 } := by
+  unfold EqvT at *
+  have hm : mask true true ({ jumped s p c with h := a1, l := a2 } : Cpu) { jumped t q d with h := b1, l := b2 } =
+      { jumped (mask th tl s t) q d with h := a1, l := a2 } := by cases s; cases t; rfl
+  rw [hm]
+  have J := Eqv.jumped E p q c d
+  obtain ⟨p', r', c', m', q', e⟩ := regs_ex J.regs
+  refine ⟨?_, J.mem, J.msz⟩
+  rw [e]; cases s; rfl
+
+theorem alu_struct (s : Cpu) (k v : UInt8) : s.alu k v = { s with a := aluA k s.a s.f v, f := aluF k s.a s.f v } := by
+  unfold aluA aluF Cpu.alu; split <;> rfl
+
+/-- A state after an operation on `A` with a byte read: the program counter, the T-states, `R`,
+`A` and the flags. -/
+theorem eqvT_alu_read {lo hi : Nat} {th tl : Bool} {s t : Cpu} (E : EqvT lo hi th tl s t)
+    (p q : UInt16) (c d : UInt64) (k v : UInt8) :
+    EqvT lo hi th tl { jumped s p c with a := aluA k s.a s.f v, f := aluF k s.a s.f v }
+      { jumped t q d with a := aluA k t.a t.f v, f := aluF k t.a t.f v } := by
+  unfold EqvT at *
+  have hm : mask th tl ({ jumped s p c with a := aluA k s.a s.f v, f := aluF k s.a s.f v } : Cpu)
+      { jumped t q d with a := aluA k t.a t.f v, f := aluF k t.a t.f v } =
+      { jumped (mask th tl s t) q d with a := aluA k t.a t.f v, f := aluF k t.a t.f v } := by cases s; cases t; rfl
+  rw [hm]
+  have J := Eqv.jumped E p q c d
+  have ha : s.a = (mask th tl s t).a ∧ s.f = (mask th tl s t).f := by
+    obtain ⟨_, _, _, _, _, e⟩ := regs_ex E.regs; rw [e]; exact ⟨rfl, rfl⟩
+  have ha' : (mask th tl s t).a = t.a ∧ (mask th tl s t).f = t.f := by cases t; exact ⟨rfl, rfl⟩
+  obtain ⟨p', r', c', m', q', e⟩ := regs_ex J.regs
+  refine ⟨?_, J.mem, J.msz⟩
+  rw [← ha'.1, ← ha'.2, ← ha.1, ← ha.2, e]; cases s; rfl
+
+/-- The state after `ld hl,nn`. -/
+def ldHL (s : Cpu) (n : UInt16) : Cpu := ((skip (op1 s) 2).setRp .hl 2 n).tick 10
+
+theorem ldHL_eq (s : Cpu) (n : UInt16) :
+    ldHL s n = { jumped s (s.pc + 1 + 2) ((op1 s).cycles + 10) with h := Cpu.hi n, l := Cpu.lo n } := by
+  cases s; rfl
+
+/-- **`ld hl,nn` in both machines, the operands what they may be** (a literal's address, each in its
+own image): the relation holds after, `H` and `L` free. -/
+theorem seg_ldhl (D : Dev) {A B : Code} {lo hi : Nat} (hhi : hi ≤ 65536) {G : List Frame} {kA kB : Nat}
+    {th tl : Bool} {vA vB : Val}
+    (hA : A.items[kA]? = some (.ins ⟨.ld, [.hl, .imm vA]⟩)) (hB : B.items[kB]? = some (.ins ⟨.ld, [.hl, .imm vB]⟩))
+    {x y : Cpu × D.W} (S : Sync D A B lo hi G kA kB th tl x y) :
+    Sync D A B lo hi G (kA + 1) (kB + 1) true true (mstep D x) (mstep D y) := by
+  obtain ⟨pa, hpa, _⟩ := S.atA
+  obtain ⟨pb, hpb, _⟩ := S.atB
+  have hw : y.2 = x.2 := S.w
+  refine seg_gen D hhi hA hB rfl rfl S (ldHL x.1 (Instr.immW (A.a.env pa) ⟨.ld, [.hl, .imm vA]⟩))
+    (ldHL y.1 (Instr.immW (B.a.env pb) ⟨.ld, [.hl, .imm vB]⟩)) (fun pa' h => ?_) (fun pb' h => ?_)
+    (by rw [ldHL_eq]; rfl) (by rw [ldHL_eq]; rfl) (by rw [ldHL_eq]; rfl) (by rw [ldHL_eq]; rfl)
+    (by rw [ldHL_eq]; rfl) (by rw [ldHL_eq]; rfl) (by rw [ldHL_eq]; exact S.LA.2) (by rw [ldHL_eq]; exact S.LB.2)
+    (fun z _ => by rw [ldHL_eq]; rfl) (fun z _ => by rw [ldHL_eq]; rfl) (by rw [ldHL_eq]; exact S.msz)
+    (by rw [ldHL_eq, ldHL_eq]; exact eqvT_hl_written S.E _ _ _ _ _ _ _ _)
+  · rw [hpa] at h; cases h; rfl
+  · rw [hpb] at h; cases h; rfl
+
+/-- The state after `inc hl`. -/
+def incHLS (s : Cpu) : Cpu := ((op1 s).setRp .hl 2 ((op1 s).rp .hl 2 + 1)).tick 6
+
+theorem incHLS_eq (s : Cpu) :
+    incHLS s = { jumped s (s.pc + 1) ((op1 s).cycles + 6) with h := Cpu.hi (s.hl + 1), l := Cpu.lo (s.hl + 1) } := by
+  cases s; rfl
+
+/-- **`inc hl` in both machines, `H` and `L` free**: they stay free. -/
+theorem seg_inchl_free (D : Dev) {A B : Code} {lo hi : Nat} (hhi : hi ≤ 65536) {G : List Frame} {kA kB : Nat}
+    (hA : A.items[kA]? = some (.ins ⟨.inc, [.hl]⟩)) (hB : B.items[kB]? = some (.ins ⟨.inc, [.hl]⟩))
+    {x y : Cpu × D.W} (S : Sync D A B lo hi G kA kB true true x y) :
+    Sync D A B lo hi G (kA + 1) (kB + 1) true true (mstep D x) (mstep D y) := by
+  refine seg_gen D hhi hA hB rfl rfl S (incHLS x.1) (incHLS y.1) (fun _ _ => rfl) (fun _ _ => rfl)
+    (by rw [incHLS_eq]; rfl) (by rw [incHLS_eq]; rfl) (by rw [incHLS_eq]; rfl) (by rw [incHLS_eq]; rfl)
+    (by rw [incHLS_eq]; rfl) (by rw [incHLS_eq]; rfl) (by rw [incHLS_eq]; exact S.LA.2) (by rw [incHLS_eq]; exact S.LB.2)
+    (fun z _ => by rw [incHLS_eq]; rfl) (fun z _ => by rw [incHLS_eq]; rfl) (by rw [incHLS_eq]; exact S.msz)
+    (by rw [incHLS_eq, incHLS_eq]; exact eqvT_hl_written S.E _ _ _ _ _ _ _ _)
+
+/-- The state after an operation on `A` with the byte at `(HL)` (`k`: `alu`'s code). -/
+def aluMS (k : UInt8) (s : Cpu) : Cpu := ((op1 s).alu k ((op1 s).rd (op1 s).hl)).tick 7
+
+theorem aluMS_eq (k : UInt8) (s : Cpu) :
+    aluMS k s = { jumped s (s.pc + 1) ((op1 s).cycles + 7) with
+      a := aluA k s.a s.f (s.mem.get! s.hl.toNat), f := aluF k s.a s.f (s.mem.get! s.hl.toNat) } := by
+  simp only [aluMS, alu_struct]; cases s; rfl
+
+/-- **An operation on `A` with the byte at each one's `(HL)`, in both machines**: the bytes the same
+(`H`, `L` free or not) — `A` and the flags the same after. -/
+theorem seg_aluM (D : Dev) {A B : Code} {lo hi : Nat} (hhi : hi ≤ 65536) {G : List Frame} {kA kB : Nat}
+    {th tl : Bool} {i : Instr} (k : UInt8) (hi_ : ∀ env s inp, exec env i s inp = some (aluMS k s))
+    (hf : i.falls = true)
+    (hA : A.items[kA]? = some (.ins i)) (hB : B.items[kB]? = some (.ins i))
+    {x y : Cpu × D.W} (S : Sync D A B lo hi G kA kB th tl x y)
+    (hv : x.1.mem.get! x.1.hl.toNat = y.1.mem.get! y.1.hl.toNat) :
+    Sync D A B lo hi G (kA + 1) (kB + 1) th tl (mstep D x) (mstep D y) := by
+  refine seg_gen D hhi hA hB hf hf S (aluMS k x.1) (aluMS k y.1) (fun _ _ => hi_ _ _ _) (fun _ _ => hi_ _ _ _)
+    (by rw [aluMS_eq]; rfl) (by rw [aluMS_eq]; rfl) (by rw [aluMS_eq]; rfl) (by rw [aluMS_eq]; rfl)
+    (by rw [aluMS_eq]; rfl) (by rw [aluMS_eq]; rfl) (by rw [aluMS_eq]; exact S.LA.2) (by rw [aluMS_eq]; exact S.LB.2)
+    (fun z _ => by rw [aluMS_eq]; rfl) (fun z _ => by rw [aluMS_eq]; rfl) (by rw [aluMS_eq]; exact S.msz) ?_
+  rw [aluMS_eq, aluMS_eq, hv]
+  exact eqvT_alu_read S.E _ _ _ _ _ _
+
+theorem exec_sbc_a_m (env : Env) (s : Cpu) (inp : UInt16 → UInt8) :
+    exec env ⟨.sbc, [.a, .mhl]⟩ s inp = some (aluMS 3 s) := rfl
+theorem exec_adc_a_m (env : Env) (s : Cpu) (inp : UInt16 → UInt8) :
+    exec env ⟨.adc, [.a, .mhl]⟩ s inp = some (aluMS 1 s) := rfl
+theorem exec_or_m (env : Env) (s : Cpu) (inp : UInt16 → UInt8) :
+    exec env ⟨.or, [.mhl]⟩ s inp = some (aluMS 6 s) := rfl
+
+end Ember.Proof.PassSim

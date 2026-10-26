@@ -82,17 +82,26 @@ structure World where
   events : Array (Nat × Event) := #[]
   frame  : ByteArray := .empty
   mmio   : Std.HashMap UInt32 UInt32 := {}
+  /-- The program reads frame by frame (`input.frame`): the end of a
+  chunk is an item of its own, so an exhausted chunk is not skipped. -/
+  framed : Bool := false
+  /-- A trap was recorded: a machine's harness sets it when the program
+  writes its trap port.  The Ember semantics never sets it. -/
+  trapped : Bool := false
   deriving Inhabited
 
 def World.done (w : World) : Bool := w.pos ≥ w.inputs.size
 
-/-- Skip empty chunks. -/
-partial def World.normalize (w : World) : World :=
+/-- Skip empty chunks (not for a framed program: there the end of a
+chunk is still to be read). -/
+def World.normalize (w : World) : World :=
+  if w.framed then w else
   if h : w.pos < w.inputs.size then
     match w.inputs[w.pos] with
     | .rx b => if w.off ≥ b.size then { w with pos := w.pos + 1, off := 0 }.normalize else w
     | .tick => w
   else w
+termination_by w.inputs.size - w.pos
 
 def World.next (w : World) : UInt16 × World :=
   let w := w.normalize
@@ -102,6 +111,17 @@ def World.next (w : World) : UInt16 × World :=
     | .rx b =>
       let v := (b.get! w.off).toUInt16
       (v, { w with cur := w.pos, off := w.off + 1 }.normalize)
+  else (0xFFFF, w)
+
+/-- `input.frame`: a byte, `0x0100` for a tick, `0x0200` at the end of a
+chunk (of an empty one too), `0xFFFF` when nothing is left. -/
+def World.nextFramed (w : World) : UInt16 × World :=
+  if h : w.pos < w.inputs.size then
+    match w.inputs[w.pos] with
+    | .tick => (0x0100, { w with cur := w.pos, pos := w.pos + 1, off := 0 })
+    | .rx b =>
+      if w.off < b.size then ((b.get! w.off).toUInt16, { w with cur := w.pos, off := w.off + 1 })
+      else (0x0200, { w with cur := w.pos, pos := w.pos + 1, off := 0 })
   else (0xFFFF, w)
 
 def World.emit (w : World) (e : Event) : World :=
@@ -167,7 +187,7 @@ def initOf (p : Prog) (g : Global) : Val :=
   | t, _ => zeroOf p t
 
 def Machine.init (p : Prog) (inputs : Array Input) : Machine := Id.run do
-  let mut m : Machine := { prog := p, world := { inputs } }
+  let mut m : Machine := { prog := p, world := { inputs, framed := p.framed } }
   for g in p.globals do
     m := { m with globals := m.globals.insert g.name m.store.size, store := m.store.push (initOf p g) }
   return m
@@ -318,6 +338,10 @@ def effect (fr : Frame) (e : Effect) (args : List Expr) : EvalM (Option Val) := 
   match e with
   | .inputNext | .ringPop =>
     let (v, w') := w.next
+    set' w'
+    return some (.int .w16 v.toUInt64)
+  | .inputFrame =>
+    let (v, w') := w.nextFramed
     set' w'
     return some (.int .w16 v.toUInt64)
   | .outByte =>
@@ -482,7 +506,7 @@ def runMachine (m : Machine) (header : Header) (fuel : Nat := 1000000) : Result 
     for (k, e) in w.events do
       if k == i then lines := lines.push ⟨i, e⟩
   if let some e := err then
-    lines := lines.push ⟨w.cur, .note s!"trap {e}"⟩
+    lines := lines.push ⟨w.cur, .note (trapNote (toString e))⟩
   return { trace := { header, lines }, error := err, machine := m }
 
 /-- Check and run a program on the inputs of a trace. -/

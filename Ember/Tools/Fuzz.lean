@@ -11,8 +11,10 @@ import Ember.Tools.Cc
 COUNT random programs (with random inputs) are emitted, compiled in
 batches of 100 with the host harness — strict warnings, `-O0` and `-O2`,
 UBSan and ASan — and their traces compared with the interpreter's:
-every line except `note`s must agree, and a trap must happen in both or
-neither.  A diverging program is shrunk (statements removed, expressions
+every line must agree — the program's notes with their values too —
+except the last line of a run that trapped (`note trap (…)`, which says
+where in each implementation's own words), and a trap must happen in
+both or neither.  A diverging program is shrunk (statements removed, expressions
 replaced by operands) and printed, and saved under `Tests/Ember/regress/`.
 
 `--plant` turns on the emitter's planted bug (the truncating cast of
@@ -45,9 +47,12 @@ partial def parse : List String → Opts → Opts
   | "--profile" :: p :: r, o => parse r { o with profile := (Profile.ofName? p).getD .host64 }
   | a :: r, o => parse r { o with count := a.toNat?.getD o.count }
 
-/-- Lines that must agree: everything but notes. -/
+/-- Lines that must agree: all but the last when it is the note of a
+trap (`Cc.trapped`: its text says where, differently in each
+implementation; that both trapped is compared apart).  The program's own
+notes — their names, their values, how many and where — must agree. -/
 def comparable (t : Trace) : Array Line :=
-  t.lines.filter fun l => match l.ev with | .note _ => false | _ => true
+  if Cc.trapped t then t.lines.pop else t.lines
 
 def agree (a b : Trace) : Bool :=
   comparable a == comparable b && Cc.trapped a == Cc.trapped b

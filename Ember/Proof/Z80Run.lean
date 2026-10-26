@@ -1,0 +1,207 @@
+import Ember.Proof.Z80Encode
+import Ember.Proof.Z80Asm
+
+/-!
+# Ember.Proof.Z80Run — running an assembled image, instruction by instruction (plan M7.3)
+
+What the proofs about generated code stand on:
+
+* `Img a s`: the bytes of the assembled image `a` are in the memory of
+  the CPU `s`, below `ramStart` — in ROM, where no write changes them
+  (`Img.wr`);
+* `step_item`: with the program counter at the address of an item that
+  is an instruction, one step of the CPU is what `Asm.exec` says the
+  instruction does (`assemble_ok` and `step_encode` together);
+* `Steps s s'`: the CPU gets from `s` to `s'` in some number of steps.
+-/
+
+namespace Ember.Proof.Z80Enc
+open Ember.Z80 Ember.Z80.Cpu Ember.Z80.Asm
+
+/-- What `assemble_ok` says of an image: `addrs` are the addresses of its items. -/
+def Placed (items : List Item) (origin : Nat) (a : Assembled) (addrs : List Nat) : Prop :=
+  addrs[0]? = some origin ∧
+    ∀ k it, items[k]? = some it →
+      ∃ ad bs, addrs[k]? = some ad ∧ it.encode (a.env ad) = .ok bs ∧ addrs[k + 1]? = some (ad + bs.length) ∧
+        origin ≤ ad ∧ (∀ j b, bs[j]? = some b → a.bytes.data[ad - origin + j]? = some b) ∧
+        ad + bs.length ≤ origin + a.bytes.size ∧
+        ∀ n, it = Item.label n → a.labels.reverse.lookup n = some ad
+
+theorem placed_of_assemble {items : List Item} {origin : Nat} {a : Assembled} (h : assemble items origin = .ok a) :
+    ∃ addrs, Placed items origin a addrs := assemble_ok h
+
+/-- The image is in memory at `origin`, in ROM. -/
+structure Img (a : Assembled) (origin : Nat) (s : Cpu) : Prop where
+  rom : origin + a.bytes.size ≤ s.ramStart.toNat
+  bytes : ∀ x b, a.bytes.data[x]? = some b → s.mem.get! (origin + x) = b
+
+theorem Img.congr {a : Assembled} {origin : Nat} {s s' : Cpu} (I : Img a origin s) (hr : s'.ramStart = s.ramStart)
+    (hm : s'.mem = s.mem) : Img a origin s' :=
+  ⟨by rw [hr]; exact I.rom, fun x b h => by rw [hm]; exact I.bytes x b h⟩
+
+theorem getBang_set (m : ByteArray) (i : Nat) (b : UInt8) (x : Nat) (h : i ≠ x) : (m.set! i b).get! x = m.get! x := by
+  obtain ⟨bs⟩ := m
+  simp [ByteArray.set!, ByteArray.get!, Array.getElem!_eq_getD, Array.getD_eq_getD_getElem?,
+    Array.getElem?_setIfInBounds_ne h]
+
+/-- A write leaves the image. -/
+theorem Img.wr {a : Assembled} {origin : Nat} {s : Cpu} (I : Img a origin s) (x : UInt16) (v : UInt8) :
+    Img a origin (s.wr x v) := by
+  unfold Cpu.wr
+  split
+  · exact I
+  · rename_i hlt
+    refine ⟨I.rom, fun y b h => ?_⟩
+    have hy : y < a.bytes.size := by
+      rcases Nat.lt_or_ge y a.bytes.data.size with h' | h'
+      · exact h'
+      · rw [Array.getElem?_eq_none h'] at h; cases h
+    have hge : s.ramStart.toNat ≤ x.toNat := by
+      rw [UInt16.not_lt] at hlt
+      exact UInt16.le_iff_toNat_le.mp hlt
+    have hrom := I.rom
+    show (s.mem.set! x.toNat v).get! (origin + y) = b
+    rw [getBang_set _ _ _ _ (by omega)]
+    exact I.bytes y b h
+
+theorem Img.wr16 {a : Assembled} {origin : Nat} {s : Cpu} (I : Img a origin s) (x v : UInt16) :
+    Img a origin (s.wr16 x v) := (I.wr _ _).wr _ _
+
+/-- The bytes of an item are the code at its address. -/
+theorem Placed.code {items : List Item} {origin : Nat} {a : Assembled} {addrs : List Nat}
+    (P : Placed items origin a addrs) {s : Cpu} (I : Img a origin s) {k : Nat} {it : Item}
+    (hk : items[k]? = some it) :
+    ∃ ad bs, addrs[k]? = some ad ∧ it.encode (a.env ad) = .ok bs ∧ addrs[k + 1]? = some (ad + bs.length) ∧
+      (s.pc.toNat = ad → Code s bs) := by
+  obtain ⟨ad, bs, h1, h2, h3, h4, h5, _⟩ := P.2 k it hk
+  refine ⟨ad, bs, h1, h2, h3, fun hpc j b hj => ?_⟩
+  have hb := h5 j b hj
+  have hlt : ad - origin + j < a.bytes.size := by
+    rcases Nat.lt_or_ge (ad - origin + j) a.bytes.data.size with h' | h'
+    · exact h'
+    · rw [Array.getElem?_eq_none h'] at hb; cases hb
+  have hrom := I.rom
+  have hr : s.ramStart.toNat < 65536 := s.ramStart.toNat_lt
+  have := I.bytes _ b hb
+  show s.mem.get! (s.pc + UInt16.ofNat j).toNat = b
+  have hto : (s.pc + UInt16.ofNat j).toNat = origin + (ad - origin + j) := by
+    rw [UInt16.toNat_add, hpc, UInt16.toNat_ofNat']
+    omega
+  rw [hto]
+  exact this
+
+/-- The CPU is at item `k`. -/
+def At (addrs : List Nat) (k : Nat) (s : Cpu) : Prop := ∃ ad, addrs[k]? = some ad ∧ s.pc.toNat = ad
+
+/-- **One instruction of the image**: the step is what `Asm.exec` says,
+and after an instruction that goes on the CPU is at the next item. -/
+theorem step_item {items : List Item} {origin : Nat} {a : Assembled} {addrs : List Nat}
+    (P : Placed items origin a addrs) {s s' : Cpu} (I : Img a origin s) {k ad : Nat} {i : Instr}
+    (hk : items[k]? = some (.ins i)) (had : addrs[k]? = some ad) (hpc : s.pc.toNat = ad)
+    (hh : s.halted = false) {inp : UInt16 → UInt8} (hx : exec (a.env ad) i s inp = some s') :
+    s.step inp = s' ∧ (i.falls = true → At addrs (k + 1) s') := by
+  obtain ⟨ad', bs, h1, h2, h3, h4, h5, _⟩ := P.2 k _ hk
+  rw [had] at h1
+  cases h1
+  obtain ⟨_, bs', _, h2', _, hcode⟩ := P.code I hk
+  have hst := step_encode i h2 (by
+    intro j b hj
+    have hb := h5 j b hj
+    have hlt : ad - origin + j < a.bytes.size := by
+      rcases Nat.lt_or_ge (ad - origin + j) a.bytes.data.size with h' | h'
+      · exact h'
+      · rw [Array.getElem?_eq_none h'] at hb; cases hb
+    have hrom := I.rom
+    have hr : s.ramStart.toNat < 65536 := s.ramStart.toNat_lt
+    show s.mem.get! (s.pc + UInt16.ofNat j).toNat = b
+    have hto : (s.pc + UInt16.ofNat j).toNat = origin + (ad - origin + j) := by
+      rw [UInt16.toNat_add, hpc, UInt16.toNat_ofNat']
+      omega
+    rw [hto]
+    exact I.bytes _ b hb) hh hx
+  refine ⟨hst.1, fun hf => ⟨ad + bs.length, h3, ?_⟩⟩
+  rw [hst.2 hf, UInt16.toNat_add, hpc, UInt16.toNat_ofNat']
+  have hpcl : s.pc.toNat < 65536 := s.pc.toNat_lt
+  rcases Nat.eq_zero_or_pos bs.length with h0 | hpos
+  · rw [h0]
+    omega
+  · have hb := h5 (bs.length - 1) (bs[bs.length - 1]'(by omega)) (List.getElem?_eq_getElem (by omega))
+    have hlt : ad - origin + (bs.length - 1) < a.bytes.size := by
+      rcases Nat.lt_or_ge (ad - origin + (bs.length - 1)) a.bytes.data.size with h' | h'
+      · exact h'
+      · rw [Array.getElem?_eq_none h'] at hb; cases hb
+    have hrom := I.rom
+    have hr : s.ramStart.toNat < 65536 := s.ramStart.toNat_lt
+    omega
+
+/-- The item after an instruction is at the address after its bytes, which is in the image. -/
+theorem Placed.next {items : List Item} {origin : Nat} {a : Assembled} {addrs : List Nat}
+    (P : Placed items origin a addrs) {s : Cpu} (I : Img a origin s) {k ad : Nat} {it : Item}
+    (hk : items[k]? = some it) (had : addrs[k]? = some ad) :
+    ∃ bs, it.encode (a.env ad) = .ok bs ∧ addrs[k + 1]? = some (ad + bs.length) ∧
+      (bs ≠ [] → ad + bs.length < 65536) := by
+  obtain ⟨ad', bs, h1, h2, h3, h4, h5, _⟩ := P.2 k _ hk
+  rw [had] at h1
+  cases h1
+  refine ⟨bs, h2, h3, fun hne => ?_⟩
+  have hpos : 0 < bs.length := List.length_pos_iff.mpr hne
+  have hb := h5 (bs.length - 1) (bs[bs.length - 1]'(by omega)) (List.getElem?_eq_getElem (by omega))
+  have hlt : ad - origin + (bs.length - 1) < a.bytes.size := by
+    rcases Nat.lt_or_ge (ad - origin + (bs.length - 1)) a.bytes.data.size with h' | h'
+    · exact h'
+    · rw [Array.getElem?_eq_none h'] at hb; cases hb
+  have hrom := I.rom
+  have hr : s.ramStart.toNat < 65536 := s.ramStart.toNat_lt
+  omega
+
+/-- An item that is not code is where the next item is. -/
+theorem at_skip {items : List Item} {origin : Nat} {a : Assembled} {addrs : List Nat}
+    (P : Placed items origin a addrs) {s : Cpu} {k : Nat} {it : Item} (hk : items[k]? = some it)
+    (he : ∀ env, it.encode env = .ok []) (h : At addrs k s) : At addrs (k + 1) s := by
+  obtain ⟨ad, bs, h1, h2, h3, _⟩ := P.2 k it hk
+  rw [he] at h2
+  cases h2
+  obtain ⟨ad', ha, hp⟩ := h
+  rw [h1] at ha
+  cases ha
+  exact ⟨ad, by simpa using h3, hp⟩
+
+/-! ## Several steps -/
+
+def run (inp : UInt16 → UInt8) : Nat → Cpu → Cpu
+  | 0, s => s
+  | n + 1, s => run inp n (s.step inp)
+
+/-- The CPU gets from `s` to `s'` without input or output: in some
+number of steps, none of which uses the I/O bus — so whatever the bus
+would answer (`inp`). -/
+def Steps (s s' : Cpu) : Prop :=
+  ∀ inp : UInt16 → UInt8, ∃ n, run inp n s = s' ∧ ∀ k, k < n → (run inp (k + 1) s).io = .none
+
+theorem Steps.refl (s : Cpu) : Steps s s := fun _ => ⟨0, rfl, fun _ h => absurd h (Nat.not_lt_zero _)⟩
+
+theorem run_add (inp : UInt16 → UInt8) : ∀ (n m : Nat) (s : Cpu), run inp (n + m) s = run inp m (run inp n s)
+  | 0, m, s => by simp [run]
+  | n + 1, m, s => by
+    rw [show n + 1 + m = (n + m) + 1 by omega, run, run, run_add inp n m]
+
+theorem Steps.trans {s s' s'' : Cpu} (h1 : Steps s s') (h2 : Steps s' s'') : Steps s s'' := by
+  intro inp
+  obtain ⟨n, hn, hq1⟩ := h1 inp
+  obtain ⟨m, hm, hq2⟩ := h2 inp
+  refine ⟨n + m, by rw [run_add, hn, hm], fun k hk => ?_⟩
+  rcases Nat.lt_or_ge k n with h | h
+  · exact hq1 k h
+  · have := hq2 (k - n) (by omega)
+    rw [← hn, ← run_add, show n + (k - n + 1) = k + 1 by omega] at this
+    exact this
+
+theorem Steps.one {s s' : Cpu} (h : ∀ inp, s.step inp = s') (hio : s'.io = .none) : Steps s s' := fun inp =>
+  ⟨1, h inp, fun k hk => by
+    have : k = 0 := by omega
+    subst this
+    show (s.step inp).io = _
+    rw [h inp]
+    exact hio⟩
+
+end Ember.Proof.Z80Enc

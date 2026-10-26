@@ -28,6 +28,10 @@ structure GState where
   fresh  : Nat := 0
   /-- Helpers generated so far: name, scalar parameter types, result width. -/
   helpers : Array (String × List Width × Bool × Width) := #[]
+  /-- Widths the generated code computes in.  (`u64` is left out for the
+  Z80: SDCC 4.6 miscompiles 64-bit shifts and comparisons, see the
+  decision log.) -/
+  widths : Array Width := #[.w8, .w16, .w32, .w64]
 
 abbrev GM := StateM GState
 
@@ -46,7 +50,7 @@ def freshName (base : String) : GM String := do
   set { s with fresh := s.fresh + 1 }
   return s!"{base}{s.fresh}"
 
-def widths : Array Width := #[.w8, .w16, .w32, .w64]
+def pickWidth : GM Width := do pick (← get).widths
 
 def interesting (w : Width) : GM Nat := do
   let m := w.modulus
@@ -103,7 +107,7 @@ partial def genInt (vs : List Var) (w : Width) (d : Nat) : GM Expr := do
       let (a, _, n) ← pick arrs.toArray
       return .index a (← genIndex vs n 3)
     | _ =>
-      let w' ← pick widths
+      let w' ← pickWidth
       let vars' := intVars vs w'
       if vars'.isEmpty then return .lit (← interesting w) (some w)
       return .cast w (← pick vars'.toArray)
@@ -115,12 +119,12 @@ partial def genInt (vs : List Var) (w : Width) (d : Nat) : GM Expr := do
     return .bin op (← genInt vs w (d+1)) (← genInt vs w (d+1))
   | 7 =>
     let op ← pick #[BinOp.shl, .shr]
-    let sw ← pick widths
+    let sw ← pickWidth
     let amt ← if ← chance 50 then pure (.lit (← rn (w.bits + 8)) (some sw)) else genInt vs sw (d+1)
     return .bin op (← genInt vs w (d+1)) amt
   | 8 => return .un (← pick #[UnOp.bnot, .neg]) (← genInt vs w (d+1))
   | 9 =>
-    let w' ← pick widths
+    let w' ← pickWidth
     return .cast w (← genInt vs w' (d+1))
   | 10 => return .cond (← genBool vs (d+1)) (← genInt vs w (d+1)) (← genInt vs w (d+1))
   | _ => return .cast w (← genBool vs (d+1))
@@ -132,7 +136,7 @@ partial def genBool (vs : List Var) (d : Nat) : GM Expr := do
     return .blit (← chance 50)
   match ← rn 5 with
   | 0 | 1 | 2 =>
-    let w ← pick widths
+    let w ← pickWidth
     let op ← pick #[BinOp.eq, .ne, .lt, .le, .gt, .ge]
     return .bin op (← genInt vs w (d+1)) (← genInt vs w (d+1))
   | 3 => return .bin (← pick #[BinOp.land, .lor]) (← genBool vs (d+1)) (← genBool vs (d+1))
@@ -174,7 +178,7 @@ partial def genStmts (vs : List Var) (depth : Nat) (n : Nat) (inLoop : Bool) : G
       let (l, t) ← pick ts.toArray
       out := out.push (.assign l (← genScalar vs t))
     | 5 =>
-      out := out.push (.eff none .outByte [.cast .w8 (← genInt vs (← pick widths) 0)])
+      out := out.push (.eff none .outByte [.cast .w8 (← genInt vs (← pickWidth) 0)])
     | 6 =>
       out := out.push (.ite (← genBool vs 0) (← genStmts vs (depth+1) ((← rn 3) + 1) inLoop)
         (← if ← chance 50 then genStmts vs (depth+1) (← rn 3) inLoop else pure []))
@@ -224,12 +228,12 @@ def genHelper (k : Nat) : GM Fn := do
   let mut ps : List Param := []
   let mut pws : List Width := []
   for i in [0:np] do
-    let w ← pick widths
+    let w ← pickWidth
     ps := ps ++ [{ name := s!"p{i}", ty := .int w }]
     pws := pws ++ [w]
   let byRef ← chance 40
   if byRef then ps := ps ++ [{ name := "arr", ty := .arr .u8 8, byRef := true }]
-  let rw ← pick widths
+  let rw ← pickWidth
   let vs : List Var := ps.map fun p => { name := p.name, ty := p.ty }
   let body ← genStmts vs 1 ((← rn 4) + 1) false
   let r ← genInt vs rw 0
@@ -242,11 +246,15 @@ def genProg : GM Prog := do
   let mut fns := #[]
   for k in [0:nh] do fns := fns.push (← genHelper k)
   let kv : Var := { name := "k", ty := .u16 }
-  let vs := kv :: globalVars
+  -- without `u64` among the widths the program does not touch `g64` either
+  let has64 := (← get).widths.contains .w64
+  let vs := kv :: globalVars.filter fun v => has64 || v.name != "g64"
   let body ← genStmts vs 0 ((← rn 6) + 2) false
   let outs : List Stmt := [Expr.var "g8", .cast .w8 (.var "g16"), .cast .w8 (.var "g32"),
       .cast .w8 (.bin .shr (.var "g64") (.lit 56 (some .w64))), .cast .w8 (.var "gb"),
-      .index (.var "ga") (.lit 0 (some .w8)), .field (.var "gr") "a"].map fun e => .eff none .outByte [e]
+      .index (.var "ga") (.lit 0 (some .w8)), .field (.var "gr") "a"].filterMap fun e =>
+        if !has64 && e == .cast .w8 (.bin .shr (.var "g64") (.lit 56 (some .w64))) then none
+        else some (.eff none .outByte [e])
   let main : Fn := { name := "main", body :=
     [.decl "k" .u16 none, .eff (some (.var "k")) .inputNext [],
      .ite (.bin .eq (.var "k") (.lit 0xFFFF (some .w16))) [.ret none] []] ++ body ++ outs ++
@@ -263,8 +271,8 @@ def genInputs : GM (Array Trace.Input) := do
   return ins
 
 /-- A random program and inputs from a seed. -/
-def sample (seed : Nat) : Prog × Array Trace.Input :=
-  let ((p, i), _) := (do return (← genProg, ← genInputs) : GM _).run { rng := Rng.ofSeed seed }
+def sample (seed : Nat) (widths : Array Width := #[.w8, .w16, .w32, .w64]) : Prog × Array Trace.Input :=
+  let ((p, i), _) := (do return (← genProg, ← genInputs) : GM _).run { rng := Rng.ofSeed seed, widths }
   (p, i)
 
 /-! ## Shrinking -/

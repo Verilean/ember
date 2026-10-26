@@ -11,7 +11,7 @@
  * row that consume nothing, as `Ember.Lang.runMachine` does), and writes
  * the same trace the interpreter writes: every input line followed by
  * the events attributed to it.  A trap is reported as a final
- * `note trap ...` line and exit status 3.
+ * `note trap (...)` line and exit status 3.
  *
  * EMBER_TRACE=0 omits drop/note lines; 2 (default) keeps them. */
 #define _POSIX_C_SOURCE 200809L
@@ -31,6 +31,7 @@ typedef struct {
   void (*entry)(void);
   const char *const *drops; const unsigned *ndrops;
   const char *const *notes; const unsigned *nnotes;
+  const unsigned *framed;
 } ember_prog;
 extern const ember_prog ember_progs[];
 extern const unsigned ember_nprogs;
@@ -43,7 +44,6 @@ static input *ins; static size_t nins, capins;
 static event *evs; static size_t nevs, capevs;
 static size_t pos, off, cur;
 static unsigned char *frame; static size_t nframe, capframe;
-static const ember_prog *prog;
 static char header[512];
 static jmp_buf trap_jmp;
 static char trap_msg[512];
@@ -108,7 +108,12 @@ static void read_inputs(const char *path) {
   fclose(f);
 }
 
+static const ember_prog *prog;
+
+/* Not for a program that reads frame by frame: there the end of a chunk
+ * is an item still to be read. */
 static void normalize(void) {
+  if (*prog->framed) return;
   while (pos < nins && !ins[pos].tick && off >= ins[pos].n) { pos++; off = 0; }
 }
 
@@ -123,6 +128,15 @@ uint16_t ember_input_next(void) {
 }
 
 uint16_t ember_ring_pop(void) { return ember_input_next(); }
+
+uint16_t ember_input_frame(void) {
+  if (pos >= nins) return 0xFFFFu;
+  cur = pos;
+  if (ins[pos].tick) { pos++; off = 0; return 0x0100u; }
+  if (off < ins[pos].n) return ins[pos].b[off++];
+  pos++; off = 0;
+  return 0x0200u;
+}
 
 void ember_out_byte(uint8_t b) {
   frame = grow(frame, &capframe, nframe + 1, 1);
@@ -215,7 +229,7 @@ static int run_one(unsigned k, const char *in_path, FILE *o) {
       else print_line(o, i, "note", evs[e].text);
     }
   }
-  if (trapped) { char r[600]; snprintf(r, sizeof r, "trap %s", trap_msg); print_line(o, cur, "note", r); }
+  if (trapped) { char r[600]; snprintf(r, sizeof r, "trap (%s)", trap_msg); print_line(o, cur, "note", r); }
   for (size_t e = 0; e < nevs; e++) { free(evs[e].text); free(evs[e].b); }
   for (size_t i = 0; i < nins; i++) free(ins[i].b);
   return trapped ? 3 : 0;
