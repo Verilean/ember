@@ -25,6 +25,9 @@ mk NAME=echo PROG=runtime/z80/echo.c
 mk NAME=sliploop PROG=$out/sliploop.c
 mk NAME=stack PROG=$out/net.c
 mk NAME=stack-dropped PROG=$out/net-dropped.c
+# the HTTP server of plan M8 (Net.Http, two connections)
+lake exe ember-emit http --profile sdcc-z80 > $out/http.c
+mk NAME=stack-http PROG=$out/http.c
 # notes named `trap` and `trap counter`, and a trap: with the place of the trap and without
 lake exe ember-emit trapnote --profile sdcc-z80 > $out/trapnote.c
 mk NAME=trapnote PROG=$out/trapnote.c
@@ -92,3 +95,13 @@ for img in net sliploop; do
   size $img || exit 1
   size $img --plain || exit 1
 done
+# HTTP on the Z80 (plan M8.3): the recorded curl session and the exchanges of
+# Tests/Ember/HttpTests.lean, with Spec.Srv's traces, through SDCC and the own back end
+lake build test
+rm -rf $out/http-sessions
+EMBER_HTTP_DUMP=$out/http-sessions .lake/build/bin/test
+$z80 replay $out/stack-http.ihx Tests/Ember/http $out/http-sessions
+$z80 own-build http --out $out
+$z80 replay $out/http-own.ihx Tests/Ember/http $out/http-sessions
+size http --trace 0 || exit 1
+size http || exit 1

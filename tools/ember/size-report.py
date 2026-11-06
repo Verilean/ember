@@ -55,7 +55,18 @@ def host64(tmp, prog="net"):
     return code, ram, rodata
 
 
-def z80(tmp, prog="net", key="z80"):
+def emitted(tmp, prog, profile):
+    """The C of a program without a golden file (plan M8: `http`), from ember-emit; None without it."""
+    exe = os.path.join(ROOT, ".lake/build/bin/ember-emit")
+    if not os.path.exists(exe):
+        return None
+    path = os.path.join(tmp, f"{prog}.{profile}.c")
+    with open(path, "w") as f:
+        subprocess.run([exe, prog, "--profile", profile], check=True, stdout=f, cwd=ROOT)
+    return path
+
+
+def z80(tmp, prog="net", key="z80", src=None):
     """The image of runtime/z80 as a board would run it: no trace, traps
     without their place (EMBER_TRACE=0, EMBER_TRAP_TERSE).  Code is
     everything in ROM (start-up, interrupt routine, runtime, the stack,
@@ -63,7 +74,7 @@ def z80(tmp, prog="net", key="z80"):
     stack."""
     if shutil.which("sdcc") is None or shutil.which("make") is None:
         return None
-    src = os.path.join(ROOT, f"Tests/Ember/golden/{prog}.sdcc-z80.c")
+    src = src or os.path.join(ROOT, f"Tests/Ember/golden/{prog}.sdcc-z80.c")
     tmp = os.path.join(tmp, key)
     os.makedirs(tmp, exist_ok=True)
     subprocess.run(["make", "-s", "-f", os.path.join(ROOT, "runtime/z80/Makefile"), "OUT=" + tmp,
@@ -106,7 +117,7 @@ def z80(tmp, prog="net", key="z80"):
     return m, funcs, sizes
 
 
-def z80own(tmp):
+def z80own(tmp, prog="net", key="z80own"):
     """The stack compiled by the own Z80 back end (plan M6), no trace: code
     with constants and runtime routines; static RAM (the runtime's cells and
     its 256-byte receive ring, globals, frames, temporaries — not the stack);
@@ -116,27 +127,27 @@ def z80own(tmp):
     if not os.path.exists(exe):
         return None
     run = lambda *a: subprocess.run([exe, *a], check=True, capture_output=True, text=True, cwd=ROOT).stdout
-    out = run("own-size", "net", "--trace", "0")
+    out = run("own-size", prog, "--trace", "0")
     g = re.search(r"(\d+) bytes of code and constants, (\d+) bytes of RAM", out)
     funcs = {mm.group(2): int(mm.group(1)) for mm in re.finditer(r"^\s+(\d+)\t(\S+)$", out, re.M)}
-    m = {"z80own.code": int(g.group(1)), "z80own.ram": int(g.group(2))}
+    m = {f"{key}.code": int(g.group(1)), f"{key}.ram": int(g.group(2))}
     # the static bound on the stack (start-up, the program, one interrupt); own-size fails
     # when it exceeds the room above the static RAM
-    m["z80own.stack_bound"] = int(re.search(r"stack bound: (\d+) bytes", out).group(1))
-    run("own-build", "net", "--trace", "0", "--out", os.path.join(tmp, "own0"))
-    m["z80own.stack"] = int(re.search(r"stack: (\d+) bytes", run(
-        "stack", os.path.join(tmp, "own0/net-own.ihx"), os.path.join(ROOT, "Tests/Ember/corpus"))).group(1))
-    run("own-build", "net", "--trace", "1", "--out", os.path.join(tmp, "own1"))
-    m["z80own.ping_tstates"] = int(re.search(r"(\d+) T-states", run("ping", os.path.join(tmp, "own1/net-own.ihx"))).group(1))
+    m[f"{key}.stack_bound"] = int(re.search(r"stack bound: (\d+) bytes", out).group(1))
+    run("own-build", prog, "--trace", "0", "--out", os.path.join(tmp, key + "0"))
+    m[f"{key}.stack"] = int(re.search(r"stack: (\d+) bytes", run(
+        "stack", os.path.join(tmp, key + f"0/{prog}-own.ihx"), os.path.join(ROOT, "Tests/Ember/corpus"))).group(1))
+    run("own-build", prog, "--trace", "1", "--out", os.path.join(tmp, key + "1"))
+    m[f"{key}.ping_tstates"] = int(re.search(r"(\d+) T-states", run("ping", os.path.join(tmp, key + f"1/{prog}-own.ihx"))).group(1))
     return m, funcs
 
 
-def esp32c3(tmp, prog="net", key="esp32c3"):
+def esp32c3(tmp, prog="net", key="esp32c3", src=None):
     """Sizes of the image a board runs (EMBER_TRACE=0) and instructions per ping."""
     need = ["riscv32-none-elf-gcc", "esptool", "make"]
     if any(shutil.which(t) is None for t in need):
         return None
-    src = os.path.join(ROOT, f"Tests/Ember/golden/{prog}.rv32.c")
+    src = src or os.path.join(ROOT, f"Tests/Ember/golden/{prog}.rv32.c")
     tmp = os.path.join(tmp, key)
     os.makedirs(tmp, exist_ok=True)
     mk = ["make", "-s", "-f", os.path.join(ROOT, "runtime/esp32c3/Makefile"), "OUT=" + tmp, "PROG=" + src]
@@ -222,6 +233,17 @@ def main():
         de = esp32c3(tmp, "net.dropped", "esp32c3.dropped")
         if de is not None:
             metrics.update(de[0])
+        # M8: the HTTP server (Net.Http, two connections), its own rows; the budgets of
+        # docs/Ember-plan.md §M8 are the acceptance, the ±3 % the gate
+        for prof, key, fn in [("sdcc-z80", "z80.http", z80), ("rv32", "esp32c3.http", esp32c3)]:
+            src = emitted(tmp, "http", prof)
+            if src is not None:
+                r = fn(tmp, "http", key, src=src)
+                if r is not None:
+                    metrics.update(r[0])
+        oh = z80own(tmp, "http", "z80own.http")
+        if oh is not None:
+            metrics.update(oh[0])
         print("totals:")
         for k, v in metrics.items():
             print(f"  {k:26s} {v}")

@@ -30,7 +30,9 @@ globals, one slot per connection):
 | `app_acked(n : u16)` | `acked` |
 | `app_close() : bool` | `close` |
 
-and three constants, `APP_PORT`, `APP_IDLE_CLOSE` and `APP_REUSE_TW`.  `echo n mss` is
+and a constant `APP_PORT` and two settings `APP_IDLE_CLOSE` and
+`APP_REUSE_TW` (variables with their initial value: SDCC stops on a
+condition it can decide at compile time).  `echo n mss` is
 `Spec.Srv.echo` written so.
 -/
 
@@ -64,7 +66,10 @@ ember global cur : u16
 def connGlobals (n : Nat) : List Global :=
   Tcb.fields.map fun (f, ty) => { name := "c_" ++ f, ty := .arr ty n }
 
-def nConns (n : Nat) : Global := { name := "N_CONNS", ty := .u16, init := [n], const := true }
+/-- The number of connections: a variable, not a constant — with a constant
+bound SDCC sees that the index checks in the loops over the connections
+never fail and stops on "unreachable code". -/
+def nConns (n : Nat) : Global := { name := "N_CONNS", ty := .u16, init := [n] }
 
 ember def tcb_load (i : u16) := do
   cur := i
@@ -504,8 +509,9 @@ structure App where
 def echo (n mss : Nat) : App where
   globals :=
     [{ name := "APP_PORT", ty := .u16, init := [7], const := true },
-     { name := "APP_IDLE_CLOSE", ty := .bool, init := [1], const := true },
-     { name := "APP_REUSE_TW", ty := .bool, init := [0], const := true },
+     -- variables, not constants: SDCC stops on a condition it can decide
+     { name := "APP_IDLE_CLOSE", ty := .bool, init := [1] },
+     { name := "APP_REUSE_TW", ty := .bool, init := [0] },
      { name := "e_len", ty := .arr .u16 n },
      { name := "pend", ty := .arr .u8 (n * mss) }]
   fns := [Echo.app_reset, Echo.app_room, Echo.app_recv, Echo.app_avail, Echo.app_fill,

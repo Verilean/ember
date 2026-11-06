@@ -641,7 +641,7 @@ its budget, with the measured numbers in the step's record.
 |---|---|---|
 | Echo stack, ESP32-C3 (today) | code 7 076 B, RAM 5 028 B (4 KB stack included) | unchanged: code < 16 KB, RAM < 8 KB |
 | HTTP, ESP32-C3, 2 connections (`stack-http`, M8.4) | measured: text 15 688 B (code and the site's constants, about 2.6 KB), bss 5 884 B (4 KB stack, 2 × 512 B request buffers, TCB arrays) | code ≤ 24 KB, RAM ≤ 8 KB |
-| HTTP, Z80, 2 connections (M8.3) | estimated: code 10–13 KB (echo is 6–7.5 KB, plus the HTTP parser and the 2.6 KB of constants in ROM), RAM about 2 KB | ROM ≤ 24 KB of the 32 KB, RAM ≤ 4 KB |
+| HTTP, Z80, 2 connections (M8.3) | measured (size gate `z80.http.*`, `z80own.http.*`): SDCC code 15 027 B, RAM 1 742 B and a stack of 131 B; own back end code 12 187 B, RAM 1 933 B, stack bound 28 B | ROM ≤ 24 KB of the 32 KB, RAM ≤ 4 KB |
 | HTTPS, ESP32-C3, 2 connections (M8.7) | estimated: code 30–45 KB (SHA-256/512, HKDF, ChaCha20-Poly1305, X25519, Ed25519, handshake, certificate); RAM per connection: 2 KB record buffer, about 1 KB handshake flight kept for retransmission, about 0.5 KB keys and transcript hash, plus about 0.5 KB of shared field-arithmetic temporaries | code ≤ 64 KB (the linker's IRAM), RAM ≤ 32 KB of the 64 KB DRAM |
 
 The budgets for the ESP32-C3 are above the M4 budget, which was for the

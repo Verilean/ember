@@ -4,6 +4,7 @@ import Ember.Lang.Examples
 import Ember.Z80.Asm
 import Ember.Net.Loop
 import Ember.Net.Main
+import Ember.Net.Http
 import Ember.Z80.IRInterp
 import Ember.Z80.IRSem
 import Ember.Z80.Codegen
@@ -698,7 +699,8 @@ def ownBoardImage (name : String) (trace : Nat) (annotate := false) (passes := t
     | "net" => pure Net.prog
     | "sliploop" => pure Net.Loop.prog
     | "trapnote" => pure Lang.Examples.TrapNote.prog
-    | n => throw s!"own-build: unknown program {n} (net, sliploop, trapnote)"
+    | "http" => pure (Net.Http.prog 2 Spec.Srv.Http.demo)
+    | n => throw s!"own-build: unknown program {n} (net, sliploop, trapnote, http)"
   let p ← match prog.check with
     | .ok p => pure p
     | .error e => throw e.toString

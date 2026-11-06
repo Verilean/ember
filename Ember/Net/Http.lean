@@ -73,19 +73,19 @@ ember def h_decide := do
       ns := ns + 1
   h_head[cur] := false
   if ns != 2 then
-    h_kind[cur] := (K_400 : u8)
+    h_kind[cur] := KB_400
     return
   let v : u16 := s2 + 1
   if l - v != 8 || s2 - s1 < 2 then
-    h_kind[cur] := (K_400 : u8)
+    h_kind[cur] := KB_400
     return
   if h_req[base + v] != 72 || h_req[base + v + 1] != 84 || h_req[base + v + 2] != 84 || h_req[base + v + 3] != 80 || h_req[base + v + 4] != 47 || h_req[base + v + 5] != 49 || h_req[base + v + 6] != 46 || h_req[base + v + 7] < 48 || h_req[base + v + 7] > 57 then
-    h_kind[cur] := (K_400 : u8)
+    h_kind[cur] := KB_400
     return
   let get : bool := s1 == 3 && h_req[base] == 71 && h_req[base + 1] == 69 && h_req[base + 2] == 84
   let head : bool := s1 == 4 && h_req[base] == 72 && h_req[base + 1] == 69 && h_req[base + 2] == 65 && h_req[base + 3] == 68
   if !get && !head then
-    h_kind[cur] := (K_501 : u8)
+    h_kind[cur] := KB_501
     return
   h_head[cur] := head
   -- the path: the target up to `?`
@@ -127,7 +127,7 @@ ember def app_recv (off : u16) (n : u16) := do
     h_dec[cur] := true
     return
   if rlen >= REQ_MAX then
-    h_kind[cur] := (K_400 : u8)
+    h_kind[cur] := KB_400
     h_head[cur] := false
     h_dec[cur] := true
 
@@ -176,9 +176,14 @@ def app (n : Nat) (site : Spec.Srv.Http.Site) : Net.Srv.App :=
   let poff := (paths.foldl (fun (acc, o) p => (acc ++ [o], o + p.length)) (([] : List Nat), 0)).1
   let nr := site.routes.length
   { globals :=
-      [scalar "APP_PORT" .u16 site.port.toNat, scalar "APP_IDLE_CLOSE" .bool 1, scalar "APP_REUSE_TW" .bool 1,
-       scalar "REQ_MAX" .u16 site.reqMax, scalar "N_ROUTES" .u16 nr,
-       scalar "K_404" .u16 nr, scalar "K_400" .u16 (nr + 1), scalar "K_501" .u16 (nr + 2),
+      [scalar "APP_PORT" .u16 site.port.toNat, { name := "APP_IDLE_CLOSE", ty := .bool, init := [1] }, { name := "APP_REUSE_TW", ty := .bool, init := [1] },
+       scalar "REQ_MAX" .u16 site.reqMax,
+       -- a variable, not a constant: with a constant bound SDCC sees the
+       -- index checks of the route loop never fail and stops on "unreachable code"
+       { name := "N_ROUTES", ty := .u16, init := [nr] },
+       scalar "K_404" .u16 nr,
+       -- the kinds stored in `h_kind` as bytes: the own Z80 back end does not cast a constant
+       scalar "KB_400" .u8 (nr + 1), scalar "KB_501" .u8 (nr + 2),
        bytesG "h_rom" rom, u16s "h_hoff" hoff, u16s "h_hlen" (rs.map (·.1.size)),
        u16s "h_boff" boff, u16s "h_blen" (rs.map (·.2.size)),
        bytesG "h_paths" paths.flatten, u16s "h_poff" poff, u16s "h_plen" (paths.map (·.length)),
