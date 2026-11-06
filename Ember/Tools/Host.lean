@@ -1,5 +1,6 @@
 import Ember.Spec.Stack
 import Ember.Spec.Srv.Http
+import Ember.Spec.Srv.Tls
 import Ember.Spec.Srv.Stack
 import Ember.Trace.Text
 import Std.Sync.Mutex
@@ -19,7 +20,9 @@ trace on stdout (no wall clock involved).
 
 `--http` runs `Ember.Spec.Srv` with the HTTP application and its demo
 site (`Spec.Srv.Http.demo`, port 80) instead of the echo stack (plan
-M8.2); `--conns N` gives it N connections (default 1).
+M8.2); `--https` the TLS 1.3 server of plan M8.6 with the same site on
+port 443 (`Spec.Srv.Tls.demo`, a self-signed Ed25519 demo certificate);
+`--conns N` gives either N connections (default 1).
 -/
 
 namespace Ember.Tools.Host
@@ -33,6 +36,7 @@ structure Opts where
   replay  : Option String := none
   mtu     : Option Nat := none
   http    : Bool := false
+  https   : Bool := false
   conns   : Nat := 1
 
 partial def parseArgs : List String → Opts → Except String Opts
@@ -40,6 +44,7 @@ partial def parseArgs : List String → Opts → Except String Opts
   | "--eth" :: r, o => parseArgs r { o with eth := true }
   | "--dhcp" :: r, o => parseArgs r { o with dhcp := true }
   | "--http" :: r, o => parseArgs r { o with http := true }
+  | "--https" :: r, o => parseArgs r { o with https := true }
   | "--conns" :: n :: r, o => match n.toNat? with
     | some v => parseArgs r { o with conns := max 1 v }
     | none => .error s!"bad --conns {n}"
@@ -88,10 +93,16 @@ def main (args : List String) : IO UInt32 := do
   let app := Srv.Http.app Srv.Http.demo
   let st ← IO.mkRef (State.init cfg)
   let srv ← IO.mkRef (Srv.State.init app { toConfig := cfg, conns := o.conns })
+  let tapp := Srv.Tls.app Srv.Tls.demo
+  let tls ← IO.mkRef (Srv.State.init tapp { toConfig := cfg, conns := o.conns })
   let stepN ← IO.mkRef 0
   let lock ← Std.BaseMutex.new
   let doStep' (i : Input) : IO Unit := do
-    let es ← if o.http then do
+    let es ← if o.https then do
+        let (s', es) := Srv.step (← tls.get) i
+        tls.set s'
+        pure es
+      else if o.http then do
         let (s', es) := Srv.step (← srv.get) i
         srv.set s'
         pure es

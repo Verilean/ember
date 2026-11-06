@@ -7,6 +7,8 @@ import Ember.Tools.NetCheck
 import Ember.Tools.Cc
 import Tests.Ember.HttpTests
 import Ember.Net.Http
+import Ember.Spec.Srv.Tls
+import Tests.Ember.TlsTests
 
 /-!
 # `Ember.Spec.Srv` against `Ember.Spec` (plan M8.1)
@@ -302,6 +304,25 @@ def httpHostC (extra : Array (String × Array Input)) : IO Nat := do
   IO.println s!"http host C: {k} runs (-O2, UBSan/ASan), C = Spec.Srv, {bad} failures"
   return bad
 
+/-! ## HTTPS: the recorded sessions against `Spec.Srv.Tls` -/
+
+/-- The sessions recorded from Linux clients (`Tests/Ember/https`): curl and
+OpenSSL against `ember-host --https`; `Spec.Srv.Tls` must give their trace. -/
+def httpsFixtures : IO (Nat × Array (String × Array Input)) := do
+  let mut bad := 0
+  let mut out := #[]
+  let files ← SpecTests.traceFiles "Tests/Ember/https"
+  for f in files do
+    let t ← Trace.readFile f
+    let r := Srv.run (Srv.Tls.app Srv.Tls.demo) (srvCfg (Spec.Config.ofHeader t.header)) t.inputs
+    let d := diff t r { observable := true, drops := true }
+    if !d.equal then
+      bad := bad + 1
+      IO.println s!"FAIL https fixture {f}\n{d.report}"
+    out := out.push (f.toString, t.inputs)
+  IO.println s!"https fixtures: {files.size} recorded sessions (curl, openssl s_client), Spec.Srv.Tls = recorded, {bad} failures"
+  return (bad, out)
+
 /-- `EMBER_HTTP_DUMP=DIR`: write the HTTP sessions with `Spec.Srv`'s
 traces, for the replay on the ESP32-C3 image (`qemu-test.sh`). -/
 def httpDump (dir : System.FilePath) : IO Unit := do
@@ -326,8 +347,10 @@ def main : IO UInt32 := do
   let h ← hostC 50 3
   let i ← HttpTests.run
   let (l, fx) ← httpFixtures
+  let (m, _) ← httpsFixtures
+  let t ← TlsTests.run
   let j ← httpNet fx
   let k ← httpHostC fx
-  return if a + b + c + d + e + f + g + h + i + j + k + l == 0 then 0 else 1
+  return if a + b + c + d + e + f + g + h + i + j + k + l + m + t == 0 then 0 else 1
 
 end Ember.Tests.SrvTests
