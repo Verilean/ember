@@ -34,8 +34,30 @@ def str (s : String) : ByteArray := s.toUTF8
 
 def range (a n : Nat) : ByteArray := ByteArray.mk ((List.range n).toArray.map fun i => UInt8.ofNat (a + i))
 
+/-- `r`, `s` of a DER `SEQUENCE { INTEGER r, INTEGER s }` (short form lengths). -/
+def rsOfDer (d : ByteArray) : Nat × Nat :=
+  let rl := d[3]!.toNat
+  let sl := d[5 + rl]!.toNat
+  (beNat (d.extract 4 (4 + rl)), beNat (d.extract (6 + rl) (6 + rl + sl)))
+
+/-- A P-256 key and signature made once by OpenSSL 3.5.9 (plan M9.2):
+the public key (`04 ‖ X ‖ Y`), the message, and `r`, `s` from its DER signature. -/
+def opensslP256 : ByteArray × ByteArray × Nat × Nat :=
+  let pub := ByteArray.mk #[4] ++ hex "59edd2dcea38b5eb77755cc09d4a472f426178285557e80a2f6b7eebc54c6580" ++
+    hex "01df79fb6b7e8fadf9ebe6910cf5e52e778cda6d16b768a41b59fc85a661f534"
+  let (r, s) := rsOfDer (hex ("3044022071286c583f59dd118385977002c54f8009e627d0e69877880e52e3b4ae11a677" ++
+    "02202f4dda29e531a6e989dcb29bffbf8d26c85ae40fe20eb7a0229c13f8c0de4e8f"))
+  (pub, str "a message signed by OpenSSL for Ember (plan M9.2)", r, s)
+
+def verdict (b : Bool) : ByteArray := ByteArray.mk #[if b then 1 else 0]
+
 /-- Each case: a name, what is computed, the expected bytes (hex). -/
 def cases : List (String × ByteArray × String) := [
+  ("p256 verify OpenSSL's signature", verdict (p256Verify opensslP256.1 opensslP256.2.1 opensslP256.2.2.1 opensslP256.2.2.2), "01"),
+  ("p256 verify OpenSSL's signature, message changed",
+    verdict (p256Verify opensslP256.1 (opensslP256.2.1.push 0x21) opensslP256.2.2.1 opensslP256.2.2.2), "00"),
+  ("p256 verify OpenSSL's signature, r changed",
+    verdict (p256Verify opensslP256.1 opensslP256.2.1 (opensslP256.2.2.1 ^^^ 1) opensslP256.2.2.2), "00"),
   ("sha256 empty", sha256 .empty, "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"),
   ("sha256 abc", sha256 (str "abc"), "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"),
   ("sha256 448 bits", sha256 (str "abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq"),
@@ -253,6 +275,57 @@ def emberCases (count seed : Nat) : Array (String × ByteArray × ByteArray) := 
     rng2 := r'
     let d := beNat kb % (n256 - 1) + 1
     out := out.push (s!"p256 random {i}", request 12 (natBe d 32 ++ m), p256Sign d m)
+  -- P-256 verification (M9.2): good signatures, and each part altered
+  let verify (nm : String) (pub h : ByteArray) (r s : Nat) : String × ByteArray × ByteArray :=
+    (s!"p256 verify {nm}", request 13 (pub.extract 1 65 ++ h ++ natBe r 32 ++ natBe s 32),
+      ByteArray.mk #[if p256VerifyHash pub h r s then 1 else 0])
+  let mut keys : List Nat := [d6979, 1, 2, n256 - 1, n256 - 2]
+  for _ in [0:4] do
+    let (kb, r') := (randBytes 32 : RandM _).run rng2
+    rng2 := r'
+    keys := keys ++ [beNat kb % (n256 - 1) + 1]
+  for d in keys do
+    let (mb, r') := (do let n ← randNat 100; randBytes n : RandM _).run rng2
+    rng2 := r'
+    let pub := p256Public d
+    let h := sha256 mb
+    let (r, s) := p256SignRS d mb
+    let pubOther := p256Public (d % (n256 - 1) + 1 + (if d == n256 - 1 then 0 else 1))
+    let flip (b : ByteArray) (i : Nat) : ByteArray := b.set! i (b[i]! ^^^ 1)
+    out := out.push (verify s!"good, d = {d % 1000}…" pub h r s)
+    out := out.push (verify s!"hash altered, d = {d % 1000}…" pub (flip h 31) r s)
+    out := out.push (verify s!"r + 1, d = {d % 1000}…" pub h (r + 1) s)
+    out := out.push (verify s!"s + 1, d = {d % 1000}…" pub h r (s + 1))
+    out := out.push (verify s!"n - s, d = {d % 1000}…" pub h r (n256 - s))
+    out := out.push (verify s!"other key, d = {d % 1000}…" pubOther h r s)
+    out := out.push (verify s!"key off the curve, d = {d % 1000}…" (flip pub 64) h r s)
+  let (r0, s0) := p256SignRS d6979 (str "sample")
+  let pub0 := p256Public d6979
+  let h0 := sha256 (str "sample")
+  for (nm, r, s) in [("r = 0", 0, s0), ("s = 0", r0, 0), ("r = n", n256, s0), ("s = n", r0, n256),
+                     ("r = n + r", n256 + r0, s0), ("r = s = 1", 1, 1), ("r = n - 1", n256 - 1, s0)] do
+    if r < 2 ^ 256 && s < 2 ^ 256 then
+      out := out.push (verify nm pub0 h0 r s)
+  -- a key whose x is above p (x + p < 2^256 for this x) and the point at infinity's encoding
+  let x0 := beNat (pub0.extract 1 33)
+  if x0 + p256 < 2 ^ 256 then
+    out := out.push (verify "key x + p" (ByteArray.mk #[4] ++ natBe (x0 + p256) 32 ++ pub0.extract 33 65) h0 r0 s0)
+  out := out.push (verify "key x = p" (ByteArray.mk #[4] ++ natBe p256 32 ++ pub0.extract 33 65) h0 r0 s0)
+  out := out.push (verify "key (0, 0)" (ByteArray.mk (Array.replicate 65 0)) h0 r0 s0)
+  -- RFC 7515 A.3
+  let a3x := hex "7fcdce2770f6c45d4183cbee6fdb4b7b580733357be9ef13bacf6e3c7bd15445"
+  let a3y := hex "c7f144cd1bbd9b7e872cdfedb9eeb9f4b3695d6ea90b24ad8a4623288588e5ad"
+  let a3in := str "eyJhbGciOiJFUzI1NiJ9.eyJpc3MiOiJqb2UiLA0KICJleHAiOjEzMDA4MTkzODAsDQogImh0dHA6Ly9leGFtcGxlLmNvbS9pc19yb290Ijp0cnVlfQ"
+  let a3r := 0x0ed1215379636c483c2f7f155807d402a3b228033af97c7e17819ac3169ea665
+  let a3s := 0xc50a07d38c3c70e5d8f12daf084a5480a66590c5f293509a8f3f7f8a83a354d5
+  out := out.push (verify "RFC 7515 A.3" (ByteArray.mk #[4] ++ a3x ++ a3y) (sha256 a3in) a3r a3s)
+  -- a key and a signature made by OpenSSL 3.5.9 (`openssl ecparam -genkey`, `openssl dgst -sha256
+  -- -sign`, DER), the message changed, r and s changed
+  let (opub, omsg, osr, oss) := opensslP256
+  out := out.push (verify "OpenSSL signature" opub (sha256 omsg) osr oss)
+  out := out.push (verify "OpenSSL signature, message changed" opub (sha256 (omsg.push 0x21)) osr oss)
+  out := out.push (verify "OpenSSL signature, r changed" opub (sha256 omsg) (osr ^^^ 1) oss)
+  out := out.push (verify "OpenSSL signature, s changed" opub (sha256 omsg) osr (oss ^^^ 0x100))
   out := out.push ("chacha20 2.4.2", request 4 (range 0 32 ++ hex "000000000000004a00000000" ++ natLe 1 4 ++
       str "Ladies and Gentlemen of the class of '99: If I could offer you only one tip for the future, sunscreen would be it."),
     chacha20 (range 0 32) 1 (hex "000000000000004a00000000")

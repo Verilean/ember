@@ -22,7 +22,8 @@ import Ember.Spec.Crypto.P256
 
 Registers: 0–5 temporaries of `pm_*`, 6–8 `t0 t1 t2` and 9–13 `t3 t4 x3
 y3 z3` of the addition, 14–16 the point R0, 17–19 R1, 20 the curve's b,
-21–24 for the signature.
+21–24 for the signature; for the verification (M9.2), 21–23 the public
+key and 24–26 `G + Q`.
 -/
 
 namespace Ember.Net.Crypto
@@ -367,6 +368,120 @@ ember def p2_sign := do
     p2_hmac_v(true, 0, true, false)
     p2_hmac_v(false, 0, false, false)
 
+/-! ## Verification (plan M9.2) -/
+
+/-- Are registers `a` and `b` equal? -/
+ember def pm_eq (a : u16) (b : u16) : bool := do
+  let mut d : u32 := 0
+  for i : u16 in [0, 8) do
+    d := d ||| (pr[a * 8 + i] ^^^ pr[b * 8 + i])
+  return d == 0
+
+/-- ECDSA P-256 verification (`Spec.Crypto.p256Verify` on a hash): is
+`p2_rs` (`r ‖ s`, 64 bytes) a signature of the SHA-256 hash `p2_h` under
+the public key `p2_q` (`x ‖ y`, 64 bytes)?  `r` and `s` must be in
+[1, n), `Q` on the curve with coordinates below `p`; then
+`R = u1·G + u2·Q` (`w = s⁻¹`, `u1 = z w`, `u2 = r w` mod n) by double and
+add over the complete addition (Shamir's trick with `G + Q`; everything
+here is public, so it branches on the scalars' bits), `R ≠ O` and
+`x(R) mod n = r`.  Registers 21–23 hold `Q`, 24–26 `G + Q`. -/
+ember def p2_verify : bool := do
+  pm_const(20, C_B)
+  -- r and s in [1, n)
+  for i : u16 in [0, 32) do
+    p2_v[i] := p2_rs[i]
+  let rok : bool ← p2_v_ok()
+  for i2 : u16 in [0, 32) do
+    p2_v[i2] := p2_rs[32 + i2]
+  let sok : bool ← p2_v_ok()
+  if !rok || !sok then
+    return false
+  -- Q: coordinates below p (unchanged by a round trip through Montgomery form), on the curve
+  for i3 : u16 in [0, 64) do
+    p2_in[i3] := p2_q[i3]
+  pm_load(21, 0)
+  pm_load(22, 32)
+  pm_to(6, 21, 0)
+  pm_from(7, 6, 0)
+  pm_to(8, 22, 0)
+  pm_from(9, 8, 0)
+  let xok : bool ← pm_eq(7, 21)
+  let yok : bool ← pm_eq(9, 22)
+  pm_mul(10, 6, 6, 0)
+  pm_mul(10, 10, 6, 0)
+  pm_sub(10, 10, 6, 0)
+  pm_sub(10, 10, 6, 0)
+  pm_sub(10, 10, 6, 0)
+  pm_add(10, 10, 20, 0)
+  pm_mul(11, 8, 8, 0)
+  let onc : bool ← pm_eq(10, 11)
+  if !xok || !yok || !onc then
+    return false
+  pm_copy(21, 6)
+  pm_copy(22, 8)
+  pm_const(23, C_MONE_P)
+  -- w = s⁻¹, u2 = r w, u1 = z w (mod n); u1 in p2_k, u2 in p2_v (big-endian)
+  for i4 : u16 in [0, 32) do
+    p2_in[i4] := p2_rs[32 + i4]
+    p2_in[32 + i4] := p2_rs[i4]
+  pm_load(6, 0)
+  pm_to(6, 6, 1)
+  pm_inv(6, 6, 1)
+  pm_load(7, 32)
+  pm_to(7, 7, 1)
+  pm_mul(7, 7, 6, 1)
+  pm_from(7, 7, 1)
+  for i5 : u16 in [0, 32) do
+    p2_in[i5] := p2_h[i5]
+  pm_load(8, 0)
+  pm_reduce_n(8)
+  pm_to(8, 8, 1)
+  pm_mul(8, 8, 6, 1)
+  pm_from(8, 8, 1)
+  pm_store(8)
+  for i6 : u16 in [0, 32) do
+    p2_k[i6] := p2_out[i6]
+  pm_store(7)
+  for i7 : u16 in [0, 32) do
+    p2_v[i7] := p2_out[i7]
+  -- G in 17–19, G + Q in 24–26, R = O in 14–16
+  pm_const(17, C_GX)
+  pm_const(18, C_GY)
+  pm_const(19, C_MONE_P)
+  pm_copy(24, 17)
+  pm_copy(25, 18)
+  pm_copy(26, 19)
+  p2_add(24, 21)
+  pm_const(14, C_ZERO)
+  pm_const(15, C_MONE_P)
+  pm_const(16, C_ZERO)
+  for k : u16 in [0, 256) do
+    p2_add(14, 14)
+    let sh : u8 := 7 - ((k &&& 7) : u8)
+    let b1 : u8 := (p2_k[k >>> 3] >>> sh) &&& 1
+    let b2 : u8 := (p2_v[k >>> 3] >>> sh) &&& 1
+    if b1 == 1 && b2 == 1 then
+      p2_add(14, 24)
+    if b1 == 1 && b2 == 0 then
+      p2_add(14, 17)
+    if b1 == 0 && b2 == 1 then
+      p2_add(14, 21)
+  -- R ≠ O, and x(R) mod n = r
+  let mut z : u32 := 0
+  for i8 : u16 in [0, 8) do
+    z := z ||| pr[Z_BASE + i8]
+  if z == 0 then
+    return false
+  pm_inv(6, 16, 0)
+  pm_mul(14, 14, 6, 0)
+  pm_from(14, 14, 0)
+  pm_reduce_n(14)
+  for i9 : u16 in [0, 32) do
+    p2_in[i9] := p2_rs[i9]
+  pm_load(6, 0)
+  let ok : bool ← pm_eq(6, 14)
+  return ok
+
 /-! ## Constants -/
 
 open Ember.Spec.Crypto in
@@ -384,7 +499,9 @@ def p256Consts : List (String × Nat) :=
    ("C_B", b256 * R % p256), ("C_GX", g256.1 * R % p256), ("C_GY", g256.2 * R % p256)]
 
 open Ember.Spec.Crypto in
-def p256Globals : List Global :=
+/-- The globals of the signing code; with `verify` (M9.2) two registers more
+and the inputs of `p2_verify`. -/
+def p256Globals (verify : Bool := false) : List Global :=
   let cs := p256Consts
   [{ name := "P2_MOD", ty := .arr .u32 16, init := words8 p256 ++ words8 n256, const := true },
    { name := "P2_NP", ty := .arr .u32 2, init := [nprime p256, nprime n256], const := true },
@@ -396,15 +513,19 @@ def p256Globals : List Global :=
   [{ name := "Z_BASE", ty := .u16, init := [16 * 8], const := true },
    { name := "X_BASE", ty := .u16, init := [14 * 8], const := true },
    { name := "S_BASE", ty := .u16, init := [23 * 8], const := true }] ++
-  [{ name := "pr", ty := .arr .u32 (8 * 25) }, { name := "pm_t", ty := .arr .u32 10 },
+  [{ name := "pr", ty := .arr .u32 (8 * (if verify then 27 else 25)) }, { name := "pm_t", ty := .arr .u32 10 },
    { name := "pm_u", ty := .arr .u32 8 }, { name := "p2_in", ty := .arr .u8 64 },
    { name := "p2_out", ty := .arr .u8 32 }, { name := "p2_d", ty := .arr .u8 32 },
    { name := "p2_h", ty := .arr .u8 32 }, { name := "p2_k", ty := .arr .u8 32 },
    { name := "p2_v", ty := .arr .u8 32 }, { name := "p2_kk", ty := .arr .u8 32 },
-   { name := "p2_inf", ty := .bool }, { name := "p2_sig", ty := .arr .u8 72 }, { name := "p2_siglen", ty := .u16 }]
+   { name := "p2_inf", ty := .bool }, { name := "p2_sig", ty := .arr .u8 72 }, { name := "p2_siglen", ty := .u16 }] ++
+  (if verify then [{ name := "p2_rs", ty := .arr .u8 64 }, { name := "p2_q", ty := .arr .u8 64 }] else [])
 
 def p256Fns : List Fn :=
   [pm_mul, pm_add, pm_sub, pm_copy, pm_const, pm_to, pm_from, pm_inv, p2_add, p2_cswap, p2_mul_g,
    pm_load, pm_store, pm_reduce_n, p2_hmac_v, p2_v_ok, p2_der_int, p2_sign]
+
+/-- The verification (M9.2), with `p256Globals (verify := true)`. -/
+def p256VerifyFns : List Fn := [pm_eq, p2_verify]
 
 end Ember.Net.Crypto

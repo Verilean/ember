@@ -25,6 +25,7 @@ interpreter, as host C, and on the targets, and is compared with
 | 10 | key (32), nonce (12), AAD length (2), AAD, cipher text and tag | AEAD opening: 1 and the plain text, or 0 alone |
 | 11 | salt length (1 byte), salt, input keying material | HKDF-Extract |
 | 12 | private scalar (32, big-endian), message (at most 512) | ECDSA P-256 / SHA-256, DER |
+| 13 | public key `X ‖ Y` (64), SHA-256 hash (32), `r ‖ s` (64) | ECDSA P-256 verification: 1 or 0 |
 -/
 
 namespace Ember.Net.Crypto
@@ -247,6 +248,23 @@ ember def op_p256 (n : u16) := do
     out.byte(p2_sig[k])
   out.end()
 
+ember def op_p256v := do
+  for i : u16 in [0, 64) do
+    let x : u16 ← rd()
+    p2_q[i] := (x : u8)
+  for j : u16 in [0, 32) do
+    let y : u16 ← rd()
+    p2_h[j] := (y : u8)
+  for k : u16 in [0, 64) do
+    let z : u16 ← rd()
+    p2_rs[k] := (z : u8)
+  let ok : bool ← p2_verify()
+  if ok then
+    out.byte(1)
+  else
+    out.byte(0)
+  out.end()
+
 ember def main := do
   let k : u16 ← input.next()
   if k == 0xFFFF || k == 0x0100 then
@@ -297,11 +315,14 @@ ember def main := do
   if op == 12 then
     op_p256(n)
     return
+  if op == 13 then
+    op_p256v()
+    return
 
 def testProg : Prog :=
-  { globals := sha256Globals ++ chachaGlobals ++ x25519Globals ++ sha512Globals ++ ed25519Globals ++ p256Globals ++
+  { globals := sha256Globals ++ chachaGlobals ++ x25519Globals ++ sha512Globals ++ ed25519Globals ++ p256Globals (verify := true) ++
     [{ name := "rq", ty := .arr .u8 1024 }, { name := "rq_len", ty := .u16 }, { name := "rq_pos", ty := .u16 }],
-    fns := sha256Fns ++ chachaFns ++ x25519Fns ++ sha512Fns ++ ed25519Fns ++ p256Fns ++ [rd, rd16, op_sha256, op_hmac, op_hkdf, rd_key_nonce, chacha_stream, op_chacha,
-      op_poly, op_seal, op_x25519, op_sign, op_reduce, op_open, op_extract, op_p256, main] }
+    fns := sha256Fns ++ chachaFns ++ x25519Fns ++ sha512Fns ++ ed25519Fns ++ p256Fns ++ p256VerifyFns ++ [rd, rd16, op_sha256, op_hmac, op_hkdf, rd_key_nonce, chacha_stream, op_chacha,
+      op_poly, op_seal, op_x25519, op_sign, op_reduce, op_open, op_extract, op_p256, op_p256v, main] }
 
 end Ember.Net.Crypto

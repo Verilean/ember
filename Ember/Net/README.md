@@ -48,6 +48,14 @@ of what is sent (the server's flight and the protected response, kept as
 the Spec keeps them), the transcript hash's SHA-256 context, the keys and
 sequence numbers; records are opened and sealed in place.
 
+`Crypto/P256.lean` also verifies ECDSA P-256 signatures (`p2_verify`, plan
+M9.2) on a SHA-256 hash: `r`, `s` in [1, n), the key on the curve,
+`u1·G + u2·Q` by double and add with `G + Q` over the same complete
+addition (the data are public), `x(R) mod n = r`.  It and its two
+registers and inputs are in a program only when asked for
+(`p256VerifyFns`, `p256Globals (verify := true)`): the HTTPS image of M8
+does not carry them.
+
 ## Data layout
 
 | Global | Type | Bytes (host64) | Role |

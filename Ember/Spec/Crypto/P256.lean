@@ -109,15 +109,27 @@ def p256Sign (d : Nat) (msg : ByteArray) : ByteArray :=
   let body := derInt r ++ derInt s
   ByteArray.mk #[0x30, UInt8.ofNat body.size] ++ body
 
-/-- Verification (for the tests). -/
-def p256Verify (pub msg : ByteArray) (r s : Nat) : Bool :=
+/-- Is `(x, y)` on the curve, with both coordinates below `p`? -/
+def onCurve (x y : Nat) : Bool :=
+  x < p256 && y < p256 && y * y % p256 == (x * x * x + 3 * (p256 - 1) * x + b256) % p256
+
+/-- Verification on the hash `h` (32 bytes) with the public key `pub`
+(`04 ‖ X ‖ Y`): `r`, `s` in [1, n), the key on the curve, `R = u1·G + u2·Q`
+not the point at infinity and `x(R) mod n = r` (FIPS 186-4 §6.4). -/
+def p256VerifyHash (pub h : ByteArray) (r s : Nat) : Bool :=
   if pub.size != 65 || r == 0 || s == 0 || r ≥ n256 || s ≥ n256 then false else
-  let q : Pt := some (beNat (pub.extract 1 33), beNat (pub.extract 33 65))
-  let z := beNat (sha256 msg) % n256
+  let qx := beNat (pub.extract 1 33)
+  let qy := beNat (pub.extract 33 65)
+  if !onCurve qx qy then false else
+  let z := beNat h % n256
   let w := fpow s (n256 - 2) n256
-  match ptAdd (ptMul (z * w % n256) (some g256)) (ptMul (r * w % n256) q) with
+  match ptAdd (ptMul (z * w % n256) (some g256)) (ptMul (r * w % n256) (some (qx, qy))) with
   | some (x, _) => x % n256 == r
   | none => false
+
+/-- Verification of a message (ECDSA P-256 with SHA-256). -/
+def p256Verify (pub msg : ByteArray) (r s : Nat) : Bool :=
+  p256VerifyHash pub (sha256 msg) r s
 
 /-! ## Complete projective addition (Renes, Costello, Batina 2016, Algorithm 4; a = -3)
 
