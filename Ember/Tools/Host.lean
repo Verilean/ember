@@ -29,7 +29,9 @@ port 443 (`Spec.Srv.Tls.demo`, a self-signed Ed25519 demo certificate);
 identity provider `Spec.Srv.Auth.demoCfg`); `--now T` sets their time
 (seconds since 1970; default `Auth.demoNow`, the time of the recorded
 sessions).  `--token SCOPE` prints a token of the demo provider with that
-scope, valid for an hour from that time, and exits.
+scope, valid for an hour from that time, and exits.  `--ctl` (plan M9.5)
+takes the demo sites with a control route (`POST /cmd`, `X-Ember-Seq`)
+and kept connections instead (`Spec.Srv.Http.demoCtl`).
 -/
 
 namespace Ember.Tools.Host
@@ -46,6 +48,7 @@ structure Opts where
   https   : Bool := false
   conns   : Nat := 1
   auth    : Bool := false
+  ctl     : Bool := false
   now     : Nat := Srv.Auth.demoNow
   token   : Option String := none
 
@@ -56,6 +59,7 @@ partial def parseArgs : List String → Opts → Except String Opts
   | "--http" :: r, o => parseArgs r { o with http := true }
   | "--https" :: r, o => parseArgs r { o with https := true }
   | "--auth" :: r, o => parseArgs r { o with auth := true }
+  | "--ctl" :: r, o => parseArgs r { o with ctl := true }
   | "--now" :: n :: r, o => match n.toNat? with
     | some v => parseArgs r { o with now := v }
     | none => .error s!"bad --now {n}"
@@ -108,11 +112,12 @@ def main (args : List String) : IO UInt32 := do
     | none => pure none
   if let some h := traceH then
     h.putStrLn (cfg.header).print
-  let site := if o.auth then { Srv.Http.demoAuth with now := some o.now } else Srv.Http.demo
+  let site := if o.ctl then { Srv.Http.demoCtl with now := some o.now }
+    else if o.auth then { Srv.Http.demoAuth with now := some o.now } else Srv.Http.demo
   let app := Srv.Http.app site
   let st ← IO.mkRef (State.init cfg)
   let srv ← IO.mkRef (Srv.State.init app { toConfig := cfg, conns := o.conns })
-  let tapp := Srv.Tls.app (if o.auth then { Srv.Tls.demoAuth with http := site } else Srv.Tls.demo)
+  let tapp := Srv.Tls.app (if o.auth || o.ctl then { Srv.Tls.demoAuth with http := site } else Srv.Tls.demo)
   let tls ← IO.mkRef (Srv.State.init tapp { toConfig := cfg, conns := o.conns })
   let stepN ← IO.mkRef 0
   let lock ← Std.BaseMutex.new

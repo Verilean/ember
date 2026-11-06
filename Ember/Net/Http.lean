@@ -1,5 +1,5 @@
 import Ember.Net.Srv
-import Ember.Net.Auth
+import Ember.Net.Ctl
 import Ember.Spec.Srv.Http
 
 /-!
@@ -175,11 +175,25 @@ def responses (site : Site) : List (ByteArray × ByteArray) :=
   [(errorText 404 "Not Found" true, str "Not Found\n"),
    (errorText 400 "Bad Request" true, str "Bad Request\n"),
    (errorText 501 "Not Implemented" true, str "Not Implemented\n")] ++
-  (if Net.Auth.protected? site then
+  (if Net.Auth.protected? site || site.ctl then
     [(errorText 401 "Unauthorized" true challenge, str "Unauthorized\n"),
      (errorText 401 "Unauthorized" true invalidToken, str "Unauthorized\n"),
      (errorText 503 "Service Unavailable" true, str "Service Unavailable\n")] ++
     (Net.Auth.scopes site).map fun sc => (errorText 403 "Forbidden" true (insufficientScope sc), str "Forbidden\n")
+   else []) ++
+  -- M9.5 (`Net.Ctl`): the routes and 404 on a kept connection, 405 (kept
+  -- and not), 411, 413, 409 (kept and not), and a place for `200 ok N`
+  (if site.ctl then
+    site.routes.map (fun r => (response 200 "OK" r.ctype r.body true "" false, r.body)) ++
+    [(errorText 404 "Not Found" true "" false, str "Not Found\n"),
+     (errorText 405 "Method Not Allowed" true "Allow: POST\r\n" false, str "Method Not Allowed\n"),
+     (errorText 405 "Method Not Allowed" true "Allow: POST\r\n", str "Method Not Allowed\n"),
+     (errorText 405 "Method Not Allowed" true "Allow: GET, HEAD\r\n", str "Method Not Allowed\n"),
+     (errorText 411 "Length Required" true, str "Length Required\n"),
+     (errorText 413 "Content Too Large" true, str "Content Too Large\n"),
+     (errorText 409 "Conflict" true "" false, str "Conflict\n"),
+     (errorText 409 "Conflict" true, str "Conflict\n"),
+     (.empty, .empty)]
    else [])
 
 def u16s (name : String) (xs : List Nat) : Global :=
@@ -193,13 +207,19 @@ def scalar (name : String) (ty : Ty) (v : Nat) : Global := { name, ty, init := [
 /-- The functions that take the request: `Net.Auth`'s `h_feed` (and the
 token check) for a site with protected routes, this module's otherwise. -/
 def feedFns (site : Spec.Srv.Http.Site) : List Fn :=
-  if Net.Auth.protected? site then [h_decide] ++ Net.Auth.fns else [h_decide, h_feed]
+  if site.ctl then [h_decide] ++ Net.Auth.coreFns ++ Net.Ctl.fns
+  else if Net.Auth.protected? site then [h_decide] ++ Net.Auth.fns else [h_decide, h_feed]
+
+/-- The first kind of `Net.Ctl`'s responses (after the routes, 404, 400,
+501, and the 401, 401, 503 and 403s of `Net.Auth`). -/
+def ctlBase (site : Spec.Srv.Http.Site) : Nat :=
+  site.routes.length + 6 + (Net.Auth.scopes site).length
 
 /-- The HTTP application of `site` for `n` connections; `crypto`: with the
 globals and functions of SHA-256 and P-256 that the token check needs
 (`Net.Tls` has its own). -/
 def app (n : Nat) (site : Spec.Srv.Http.Site) (crypto : Bool := true) : Net.Srv.App :=
-  let prot := Net.Auth.protected? site
+  let prot := Net.Auth.protected? site || site.ctl
   let rs := responses site
   -- h_rom: header 0, body 0, header 1, body 1, …
   let (rom, hoff, boff) := rs.foldl (fun (rom, ho, bo) (h, b) =>
@@ -227,10 +247,12 @@ def app (n : Nat) (site : Spec.Srv.Http.Site) (crypto : Bool := true) : Net.Srv.
        { name := "h_kind", ty := .arr .u8 n }, { name := "h_head", ty := .arr .bool n },
        { name := "h_pos", ty := .arr .u16 n }] ++
       (if prot then Net.Auth.globals n site else []) ++
+      (if site.ctl then Net.Ctl.globals n site (ctlBase site) else []) ++
       (if prot && crypto then Net.Crypto.sha256Globals ++ Net.Crypto.p256Globals (verify := true) else [])
     fns := (if prot && crypto then Net.Crypto.sha256Fns ++ Net.Crypto.p256CoreFns ++ Net.Crypto.p256VerifyFns else []) ++
-      [h_byte, h_total, app_reset, app_room] ++ feedFns site ++ [app_recv, app_avail, app_fill,
-            app_acked, app_close] }
+      (if site.ctl then [app_reset] ++ feedFns site ++ [app_recv, app_avail, app_fill] ++ Net.Ctl.httpFns
+       else [h_byte, h_total, app_reset, app_room] ++ feedFns site ++ [app_recv, app_avail, app_fill,
+            app_acked, app_close]) }
 
 /-- The HTTP server for `site` on `n` connections (SLIP, MTU 296). -/
 def prog (n : Nat) (site : Spec.Srv.Http.Site) : Prog := Net.Srv.prog n (app n site)

@@ -39,6 +39,8 @@ structure State where
   arp   : Arp.Cache := {}
   dhcp  : Dhcp.St := {}
   tickDue : Bool := false
+  /-- The application's state shared by all connections (plan M9.5). -/
+  g     : A.G := A.ginit
 
 instance : Inhabited (State A) := ⟨{}⟩
 
@@ -80,8 +82,8 @@ def runTcp (i : Nat) (act : TcpM A Unit) : StackM A Unit := do
   let s ← getS
   let tag := if s.conns.size > 1 then s!"conn={i} " else ""
   let (_, c) := act.run { tcb := s.conns[i]?.getD {}, iss := s.iss, ourIp := s.ip,
-                          mss := mssFor s.cfg.mtu, tag }
-  modifyS fun s => { s with conns := s.conns.set! i c.tcb, iss := c.iss }
+                          mss := mssFor s.cfg.mtu, tag, g := s.g }
+  modifyS fun s => { s with conns := s.conns.set! i c.tcb, iss := c.iss, g := c.g }
   for (dst, seg) in c.out do sendIp Ipv4.protoTcp dst seg
   for d in c.diag do ev d
 

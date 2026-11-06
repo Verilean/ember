@@ -59,6 +59,13 @@ structure App where
   (a server that closes first, as HTTP does, would otherwise refuse
   clients for `timeWaitTicks` after each one). -/
   reuseTimeWait : Bool := false
+  /-- State shared by all connections (plan M9.5: the device-wide sequence
+  number of control requests); `Unit` for echo and the sites of M8. -/
+  G : Type := Unit
+  ginit : G := by exact ()
+  /-- `recv` with the shared state: in-order data of a connection may change
+  it.  By default the shared state is left alone. -/
+  recvG : G → σ → ByteArray → G × σ := fun g s d => (g, recv s d)
 
 /-- The echo application of `Ember.Spec.Tcp`: the state is its buffer. -/
 def echo : App where
@@ -122,6 +129,8 @@ structure Ctx where
   diag  : Array Trace.Event := #[]
   /-- Prefix of the `tcb` lines (the connection's number when there are several). -/
   tag   : String := ""
+  /-- The application's shared state (`App.G`). -/
+  g     : A.G := A.ginit
 
 abbrev TcpM := StateM (Ctx A)
 
@@ -297,9 +306,10 @@ def connInput (s : Seg) : TcpM A Unit := do
       let skip := dist t.rcvNxt s.seq
       let fresh := s.data.extract skip s.data.size
       let take := min fresh.size t.wnd
-      let app := if t.st == .established then A.recv t.app (fresh.extract 0 take) else t.app
-      modify fun c => { c with tcb := { c.tcb with app,
-                                                   rcvNxt := t.rcvNxt + UInt32.ofNat take } }
+      let g0 := (← get).g
+      let (g, app) := if t.st == .established then A.recvG g0 t.app (fresh.extract 0 take) else (g0, t.app)
+      modify fun c => { c with g, tcb := { c.tcb with app,
+                                                      rcvNxt := t.rcvNxt + UInt32.ofNat take } }
       ackNow := true
       inOrder := take == fresh.size
   let t ← (·.tcb) <$> get

@@ -70,6 +70,21 @@ length.  It takes the place of `Http.lean`'s `h_feed` in a program whose
 site has protected routes (`Http.feedFns`), in HTTP and in HTTPS; a site
 without them gets the functions of M8, unchanged.
 
+`Ctl.lean` (plan M9.5) serves control requests and kept connections for a
+site that has them (`Spec.Srv.Http.Site.ctl`), as `Spec.Srv.Http.stepCtl`
+does: the header is read for `authorization`, `content-length`,
+`transfer-encoding`, `x-ember-seq` and `connection` at once; a control
+request's body goes into a buffer of the connection (at most `bodyMax`
+bytes) and into its SHA-256 context; the shared state (`ctl_last`,
+`ctl_hash`) decides whether it is executed (its body copied to `ctl_cmd`,
+`ctl_new` set for the device), answered again, or refused with 409; the
+answer `200 ok N` is the one response made in RAM (`h_dyn`).  A kept
+connection takes no data while a response is out (`app_room` 0) and the
+next request once it is acknowledged; over plain HTTP the bytes of a
+request that come in the same segment after the previous one are
+dropped (no pipelining), over TLS they are the next request (`h_kept`
+seals the response and resets the request at once).
+
 ## Data layout
 
 | Global | Type | Bytes (host64) | Role |

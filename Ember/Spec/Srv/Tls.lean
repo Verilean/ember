@@ -271,62 +271,93 @@ def respond (site : Site) (c : Conn) (resp : ByteArray) : Conn := Id.run do
   let (r, tx) := protect c.tx 21 (b1 1 ++ b1 0)
   return { c with out := c.out ++ r, tx, phase := .closed, done := true }
 
-/-- One whole record. -/
-def onRecord (site : Site) (c : Conn) (hdr body : ByteArray) : Conn :=
+/-- A response on a kept connection (plan M9.5): its records, no `close_notify`. -/
+def respondKeep (site : Site) (c : Conn) (resp : ByteArray) : Conn := Id.run do
+  let mut c := c
+  let mut off := 0
+  while off < resp.size do
+    let n := min site.chunk (resp.size - off)
+    let (r, tx) := protect c.tx 23 (resp.extract off (off + n))
+    c := { c with out := c.out ++ r, tx }
+    off := off + n
+  return c
+
+/-- Application data on a site with control routes or kept connections:
+byte by byte, so that a request after a kept response, in the same record,
+is the next one. -/
+def appData (site : Site) (g : Http.Ctl) (c : Conn) (m : ByteArray) : Http.Ctl × Conn := Id.run do
+  let mut g := g
+  let mut c := c
+  for b in m.toList do
+    if c.phase == .closed then break
+    let (g', hc) := Http.stepCtl site.http (g, c.http) b
+    g := g'
+    if hc.decided then
+      if hc.closeAfter then c := respond site { c with http := hc } hc.resp
+      else c := { respondKeep site c hc.resp with http := {} }
+    else c := { c with http := hc }
+  return (g, c)
+
+/-- One whole record (`g`: the HTTP application's shared state, M9.5). -/
+def onRecord (site : Site) (g : Http.Ctl) (c : Conn) (hdr body : ByteArray) : Http.Ctl × Conn :=
   let ty := get8 hdr 0
   match c.phase with
-  | .closed => c
+  | .closed => (g, c)
   | .hello =>
-    if ty != 22 then fail c 10 else
+    if ty != 22 then (g, fail c 10) else
     match parseHello body with
-    | some h => serverFlight site c body h
-    | none => fail c 40
+    | some h => (g, serverFlight site c body h)
+    | none => (g, fail c 40)
   | .finished =>
-    if ty == 20 then (if body.toList == [1] then c else fail c 10) else
-    if ty != 23 then fail c 10 else
+    if ty == 20 then (if body.toList == [1] then (g, c) else (g, fail c 10)) else
+    if ty != 23 then (g, fail c 10) else
     match unprotect c.rx hdr body with
-    | none => fail c 20
+    | none => (g, fail c 20)
     | some (ity, m, _) =>
       let want := handshake 20 (hmac256 c.cFin (sha256 c.hs))
       if ity == 22 && m.toList == want.toList then
-        { c with phase := .app, rx := trafficKeys c.cAp, tx := trafficKeys c.sAp, hs := .empty }
-      else fail c 51
+        (g, { c with phase := .app, rx := trafficKeys c.cAp, tx := trafficKeys c.sAp, hs := .empty })
+      else (g, fail c 51)
   | .app =>
-    if ty != 23 then fail c 10 else
+    if ty != 23 then (g, fail c 10) else
     match unprotect c.rx hdr body with
-    | none => fail c 20
+    | none => (g, fail c 20)
     | some (ity, m, rx) =>
       let c := { c with rx }
       -- a close_notify from the client: ours, and the end
-      if ity == 21 then respond site c .empty
-      else if ity != 23 then fail c 10
+      if ity == 21 then (g, respond site c .empty)
+      else if ity != 23 then (g, fail c 10)
+      else if site.http.ctl then appData site g c m
       else
         let hc := Http.recv site.http c.http m
-        if hc.decided then respond site c hc.resp else { c with http := hc }
+        if hc.decided then (g, respond site c hc.resp) else (g, { c with http := hc })
 
 /-- Take every whole record from `inb`. -/
-partial def drain (site : Site) (c : Conn) : Conn :=
-  if c.inb.size < 5 || c.phase == .closed then c else
+partial def drain (site : Site) (g : Http.Ctl) (c : Conn) : Http.Ctl × Conn :=
+  if c.inb.size < 5 || c.phase == .closed then (g, c) else
   let len := get16 c.inb 3
-  if len > site.recMax then fail { c with inb := .empty } 22 else
-  if c.inb.size < 5 + len then c else
+  if len > site.recMax then (g, fail { c with inb := .empty } 22) else
+  if c.inb.size < 5 + len then (g, c) else
   let hdr := c.inb.extract 0 5
   let body := c.inb.extract 5 (5 + len)
-  let c := onRecord site { c with inb := c.inb.extract (5 + len) c.inb.size } hdr body
-  drain site c
+  let (g, c) := onRecord site g { c with inb := c.inb.extract (5 + len) c.inb.size } hdr body
+  drain site g c
 
 def app (site : Site) : App where
   σ := Conn
   port := site.port
   init := {}
   room c cap := if c.phase == .closed then cap else min cap (site.recMax + 5 - c.inb.size)
-  recv c d := if c.phase == .closed then c else drain site { c with inb := c.inb ++ d }
+  recv c d := if c.phase == .closed then c else (drain site {} { c with inb := c.inb ++ d }).2
   avail c := c.out.size
   bytes c off n := Bytes.slice c.out off n
   acked c n := { c with out := c.out.extract n c.out.size }
   close c := c.done
   idleClose := true
   reuseTimeWait := true
+  G := Http.Ctl
+  ginit := {}
+  recvG g c d := if c.phase == .closed then (g, c) else drain site g { c with inb := c.inb ++ d }
 
 def hexBytes (s : String) : ByteArray := Id.run do
   let v (c : Char) : Nat := if c.isDigit then c.toNat - 48 else c.toLower.toNat - 87
@@ -360,5 +391,8 @@ def demo : Site where
 
 /-- `demo` with the protected routes of `Http.demoAuth` (plan M9.3). -/
 def demoAuth : Site := { demo with http := Http.demoAuth }
+
+/-- `demo` with the control route and kept connections of `Http.demoCtl` (plan M9.5). -/
+def demoCtl : Site := { demo with http := Http.demoCtl }
 
 end Ember.Spec.Srv.Tls

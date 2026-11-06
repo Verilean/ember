@@ -190,7 +190,11 @@ every variant, 1 and 2 connections) against `app`. -/
 def emberRuns (what : String) (app : Srv.App) (mk : Nat → Prog) (streams : Array (String × Array Input)) : IO Nat := do
   let mut bad := 0
   let h := Spec.Config.header {}
+  let verbose := (← IO.getEnv "EMBER_VERBOSE").isSome
   for (name, ins) in streams.filter (fun (n, _) => !n.endsWith " re-chunked" && !n.endsWith " ticks") do
+    if verbose then
+      IO.println s!"  {what} net: {name}"
+      (← IO.getStdout).flush
     let s := Tools.NetCheck.comparable (Srv.run app (srvCfg {} 1) ins)
     let r := runMachine (Machine.init (mk 1) ins) { h with impl := "ember-interp" } (fuel := 4000000000)
     let d := diff s (Tools.NetCheck.comparable r.trace) { observable := false, context := 2 }

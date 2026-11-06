@@ -826,6 +826,9 @@ def fns : List Fn :=
    js_lit, js_nend, js_num, js_byte, j_reset_json, j_segend, j_out, j_char, j_fin, ha_reset, j_start,
    ha_vbyte, ha_vend, ha_line, ha_valid, ha_guard, ha_decide, h_feed]
 
+/-- `fns` without `h_feed` (the control requests of M9.5 have their own). -/
+def coreFns : List Fn := fns.filter (·.name != "h_feed")
+
 def u8s (name : String) (xs : List Nat) : Global :=
   { name, ty := .arr .u8 (max 1 xs.length), init := xs, const := true }
 def u16s (name : String) (xs : List Nat) : Global :=

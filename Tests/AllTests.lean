@@ -8,6 +8,8 @@ import Tests.Ember.SrvTests
 import Tests.Ember.CryptoTests
 import Tests.Ember.AuthTests
 import Tests.Ember.AuthNetTests
+import Tests.Ember.ControlTests
+import Tests.Ember.ControlNetTests
 
 /-!
 # `lake test` — everything
@@ -19,7 +21,7 @@ first and fail the run with a non-zero exit; then the LSpec unit tests.
 open LSpec
 
 def main (args : List String) : IO UInt32 := do
-  -- `EMBER_ONLY=spec|srv|crypto|auth|lang|net|esp32|z80` runs one suite
+  -- `EMBER_ONLY=spec|srv|crypto|auth|control|lang|net|esp32|z80` runs one suite
   if let some d ← IO.getEnv "EMBER_CRYPTO_DUMP" then
     Ember.Tests.CryptoTests.dump d
     return 0
@@ -46,6 +48,10 @@ def main (args : List String) : IO UInt32 := do
     if (← Ember.Tests.AuthTests.run) != 0 then rc := 1
     IO.println "== Ember.Net.Auth: the token check in Ember (M9.3)"
     if (← Ember.Tests.AuthNetTests.run) != 0 then rc := 1
+  if want "control" then
+    IO.println "== Spec.Srv.Http: control requests and kept connections (M9.5)"
+    if (← Ember.Tests.ControlTests.run) != 0 then rc := 1
+    if (← Ember.Tests.ControlNetTests.run) != 0 then rc := 1
   if want "lang" then
     IO.println "== Ember.Lang / Ember.C (M2)"
     if (← Ember.Tests.LangTests.main) != 0 then rc := 1

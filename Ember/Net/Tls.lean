@@ -802,7 +802,7 @@ open Ember.Spec.Crypto Ember.Spec.Srv in
 /-- The TLS application of `site` for `n` connections. -/
 def app (n : Nat) (site : Tls.Site) (outb : Nat := 4096) : Net.Srv.App :=
   let h := Net.Http.app n site.http (crypto := false)
-  let prot := Net.Auth.protected? site.http
+  let prot := Net.Auth.protected? site.http || site.http.ctl
   let labs := labels.map bytesOf
   let loff := (labs.foldl (fun (acc, o) l => (acc ++ [o], o + l.length)) (([] : List Nat), 0)).1
   let early := hkdfExtract (Tls.zeros 32) (Tls.zeros 32)
@@ -854,7 +854,7 @@ def app (n : Nat) (site : Tls.Site) (outb : Nat := 4096) : Net.Srv.App :=
        { name := "tl_msg", ty := .arr .u8 8 }, { name := "tl_ity", ty := .u8 }, { name := "tl_ilen", ty := .u16 }] ++
       Net.Crypto.sha256Globals ++ Net.Crypto.chachaGlobals ++ Net.Crypto.x25519Globals ++
       Net.Crypto.sha512Globals ++ Net.Crypto.ed25519Globals ++ Net.Crypto.p256Globals (verify := prot)
-    fns := [Net.Http.h_byte, Net.Http.h_total] ++ Net.Http.feedFns site.http ++
+    fns := (if site.http.ctl then [Net.Ctl.Tls.h_kept] else [Net.Http.h_byte, Net.Http.h_total]) ++ Net.Http.feedFns site.http ++
       Net.Crypto.sha256Fns ++ Net.Crypto.chachaFns ++ Net.Crypto.x25519Fns ++ Net.Crypto.sha512Fns ++
       Net.Crypto.ed25519Fns ++ Net.Crypto.p256Fns ++ (if prot then Net.Crypto.p256VerifyFns else []) ++
       [ib, ib16, ob, ob16, tr_load, tr_store, tr_hash, tr_out, expand_label, extract, derive, set_keys,
