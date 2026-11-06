@@ -8,6 +8,8 @@
 #   z88dk          z88dk-ticks, the reference for the Z80 model (M4z, M6.1)
 #   riscv32-none-elf-gcc, esptool, qemu-system-riscv32-esp, gnumake:
 #                  the ESP32-C3 image and Espressif's QEMU (M4)
+#   openssl        the crypto reference against OpenSSL (M8.5)
+#   curl           HTTP from Linux against the stack (M8.2, M8.4)
 { pkgs ? import <nixpkgs> {} }:
 pkgs.mkShell {
   name = "ember";
@@ -17,5 +19,6 @@ pkgs.mkShell {
     elan gcc sdcc python3 dnsmasq wireshark-cli iproute2 netcat-openbsd iputils
     z88dk gnumake esptool pkgsCross.riscv32-embedded.buildPackages.gcc
     (callPackage ./tools/ember/nix/qemu-esp32c3.nix {})
+    openssl curl
   ];
 }
