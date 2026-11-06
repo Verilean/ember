@@ -7,6 +7,7 @@ import Tests.Ember.Z80Tests
 import Tests.Ember.SrvTests
 import Tests.Ember.CryptoTests
 import Tests.Ember.AuthTests
+import Tests.Ember.AuthNetTests
 
 /-!
 # `lake test` — everything
@@ -43,6 +44,8 @@ def main (args : List String) : IO UInt32 := do
   if want "auth" then
     IO.println "== Ember.Spec.Srv.Auth: OIDC access tokens (M9.1)"
     if (← Ember.Tests.AuthTests.run) != 0 then rc := 1
+    IO.println "== Ember.Net.Auth: the token check in Ember (M9.3)"
+    if (← Ember.Tests.AuthNetTests.run) != 0 then rc := 1
   if want "lang" then
     IO.println "== Ember.Lang / Ember.C (M2)"
     if (← Ember.Tests.LangTests.main) != 0 then rc := 1

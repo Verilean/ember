@@ -56,6 +56,20 @@ registers and inputs are in a program only when asked for
 (`p256VerifyFns`, `p256Globals (verify := true)`): the HTTPS image of M8
 does not carry them.
 
+`Auth.lean` (plan M9.3) checks OIDC access tokens on the protected routes
+of a site (`Spec.Srv.Http`'s `scope`), as `Spec.Srv.Auth.check` and
+`Spec.Srv.Http.guard` do, while the header arrives: the `Authorization`
+fields are followed byte by byte, the token's base64url is decoded by
+segment, the signing input goes into a SHA-256 context of the connection,
+the two JSON texts into a scanner that keeps a depth and a bit per level
+and compares the top-level claims with the configuration as they come;
+the signature is checked (`p2_verify`) only when the header is complete
+and the route is protected.  Per connection about 250 bytes (the SHA-256
+context, the 64-byte signature, the reader's state), whatever the token's
+length.  It takes the place of `Http.lean`'s `h_feed` in a program whose
+site has protected routes (`Http.feedFns`), in HTTP and in HTTPS; a site
+without them gets the functions of M8, unchanged.
+
 ## Data layout
 
 | Global | Type | Bytes (host64) | Role |

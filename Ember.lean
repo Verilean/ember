@@ -32,6 +32,7 @@ import Ember.Net.Main
 import Ember.Net.Loop
 import Ember.Net.Eth
 import Ember.Net.Srv
+import Ember.Net.Auth
 import Ember.Net.Http
 import Ember.Net.Tls
 import Ember.Net.Crypto.Test

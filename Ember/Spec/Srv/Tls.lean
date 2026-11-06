@@ -349,4 +349,7 @@ def demo : Site where
   keyP256 := demoKeyP256
   seed := str "ember demo seed: not for production"
 
+/-- `demo` with the protected routes of `Http.demoAuth` (plan M9.3). -/
+def demoAuth : Site := { demo with http := Http.demoAuth }
+
 end Ember.Spec.Srv.Tls

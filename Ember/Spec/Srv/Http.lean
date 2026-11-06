@@ -204,4 +204,15 @@ def demo : Site where
      { path := "/big.txt", ctype := "text/plain",
        body := str (String.join ((List.range 40).map fun i => s!"line {i}: the quick brown fox jumps over the lazy dog\n")) }]
 
+/-- The demo site with protected routes (plan M9.3): `/status` for any
+token of the demo provider, `/control` with `drone:control`, `/camera`
+with `camera:read`; the time fixed at `Auth.demoNow`. -/
+def demoAuth : Site :=
+  { demo with
+    routes := demo.routes ++
+      [{ path := "/status", ctype := "application/json", body := str "{\"battery\":87,\"armed\":false}\n", scope := some "" },
+       { path := "/control", ctype := "text/plain", body := str "ok\n", scope := some "drone:control" },
+       { path := "/camera", ctype := "text/plain", body := str "frame 0\n", scope := some "camera:read" }]
+    auth := some Auth.demoCfg, now := some Auth.demoNow }
+
 end Ember.Spec.Srv.Http

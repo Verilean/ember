@@ -1,4 +1,5 @@
 import Ember.Net.Srv
+import Ember.Net.Auth
 import Ember.Spec.Srv.Http
 
 /-!
@@ -166,12 +167,20 @@ ember def app_close : bool := do
 
 open Ember.Spec.Srv.Http in
 /-- The responses of a site, in order: the routes, then 404, 400, 501 —
-headers (as for `HEAD`) and bodies. -/
+headers (as for `HEAD`) and bodies; with protected routes (M9.3) then 401
+(no token), 401 (`invalid_token`), 503 and a 403 for each scope a route
+needs (`Net.Auth.scopes`). -/
 def responses (site : Site) : List (ByteArray × ByteArray) :=
   site.routes.map (fun r => (response 200 "OK" r.ctype r.body true, r.body)) ++
   [(errorText 404 "Not Found" true, str "Not Found\n"),
    (errorText 400 "Bad Request" true, str "Bad Request\n"),
-   (errorText 501 "Not Implemented" true, str "Not Implemented\n")]
+   (errorText 501 "Not Implemented" true, str "Not Implemented\n")] ++
+  (if Net.Auth.protected? site then
+    [(errorText 401 "Unauthorized" true challenge, str "Unauthorized\n"),
+     (errorText 401 "Unauthorized" true invalidToken, str "Unauthorized\n"),
+     (errorText 503 "Service Unavailable" true, str "Service Unavailable\n")] ++
+    (Net.Auth.scopes site).map fun sc => (errorText 403 "Forbidden" true (insufficientScope sc), str "Forbidden\n")
+   else [])
 
 def u16s (name : String) (xs : List Nat) : Global :=
   { name, ty := .arr .u16 (max 1 xs.length), init := xs, const := true }
@@ -181,8 +190,16 @@ def bytesG (name : String) (b : List Nat) : Global :=
 
 def scalar (name : String) (ty : Ty) (v : Nat) : Global := { name, ty, init := [v], const := true }
 
-/-- The HTTP application of `site` for `n` connections. -/
-def app (n : Nat) (site : Spec.Srv.Http.Site) : Net.Srv.App :=
+/-- The functions that take the request: `Net.Auth`'s `h_feed` (and the
+token check) for a site with protected routes, this module's otherwise. -/
+def feedFns (site : Spec.Srv.Http.Site) : List Fn :=
+  if Net.Auth.protected? site then [h_decide] ++ Net.Auth.fns else [h_decide, h_feed]
+
+/-- The HTTP application of `site` for `n` connections; `crypto`: with the
+globals and functions of SHA-256 and P-256 that the token check needs
+(`Net.Tls` has its own). -/
+def app (n : Nat) (site : Spec.Srv.Http.Site) (crypto : Bool := true) : Net.Srv.App :=
+  let prot := Net.Auth.protected? site
   let rs := responses site
   -- h_rom: header 0, body 0, header 1, body 1, …
   let (rom, hoff, boff) := rs.foldl (fun (rom, ho, bo) (h, b) =>
@@ -208,8 +225,11 @@ def app (n : Nat) (site : Spec.Srv.Http.Site) : Net.Srv.App :=
        { name := "h_crlf", ty := .arr .u8 n }, { name := "h_seen", ty := .arr .u16 n },
        scalar "HDR_MAX" .u16 site.hdrMax,
        { name := "h_kind", ty := .arr .u8 n }, { name := "h_head", ty := .arr .bool n },
-       { name := "h_pos", ty := .arr .u16 n }]
-    fns := [h_byte, h_total, app_reset, app_room, h_decide, h_feed, app_recv, app_avail, app_fill,
+       { name := "h_pos", ty := .arr .u16 n }] ++
+      (if prot then Net.Auth.globals n site else []) ++
+      (if prot && crypto then Net.Crypto.sha256Globals ++ Net.Crypto.p256Globals (verify := true) else [])
+    fns := (if prot && crypto then Net.Crypto.sha256Fns ++ Net.Crypto.p256CoreFns ++ Net.Crypto.p256VerifyFns else []) ++
+      [h_byte, h_total, app_reset, app_room] ++ feedFns site ++ [app_recv, app_avail, app_fill,
             app_acked, app_close] }
 
 /-- The HTTP server for `site` on `n` connections (SLIP, MTU 296). -/

@@ -316,4 +316,21 @@ def sign (d : Nat) (header payload : String) : ByteArray :=
   let (r, s) := p256SignRS d (ByteArray.mk input.toArray)
   ByteArray.mk (input ++ [46] ++ b64urlEncode (natBe r 32 ++ natBe s 32)).toArray
 
+/-! ## The demo identity provider (for `ember-host --auth` and the recorded sessions) -/
+
+/-- The demo provider's private scalar: a demo key, published here, never
+for a real provider. -/
+def demoIdpKey : Nat := 0x3c1e7a5d9b2f408e6a1c3b5d7f9e0a2c4e6b8d0f1a3c5e7b9d2f4a6c8e0b1d3f
+
+def demoCfg : Cfg :=
+  { keys := [{ kid := "demo", pub := p256Public demoIdpKey }], iss := "https://idp.ember.local", aud := "ember-drone" }
+
+/-- The time the recorded sessions were made at (2027-01-15). -/
+def demoNow : Nat := 1_800_000_000
+
+/-- A token of the demo provider with `scope`, valid for an hour from `now`. -/
+def demoToken (scope : String) (now : Nat := demoNow) : ByteArray :=
+  sign demoIdpKey "{\"alg\":\"ES256\",\"typ\":\"at+jwt\",\"kid\":\"demo\"}"
+    s!"\{\"iss\":\"https://idp.ember.local\",\"aud\":\"ember-drone\",\"sub\":\"pilot\",\"iat\":{now},\"exp\":{now + 3600},\"scope\":\"{scope}\"}"
+
 end Ember.Spec.Srv.Auth

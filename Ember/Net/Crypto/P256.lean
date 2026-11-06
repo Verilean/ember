@@ -525,6 +525,11 @@ def p256Fns : List Fn :=
   [pm_mul, pm_add, pm_sub, pm_copy, pm_const, pm_to, pm_from, pm_inv, p2_add, p2_cswap, p2_mul_g,
    pm_load, pm_store, pm_reduce_n, p2_hmac_v, p2_v_ok, p2_der_int, p2_sign]
 
+/-- What the verification needs of `p256Fns` (no signing, so no SHA-512
+or Ed25519 globals). -/
+def p256CoreFns : List Fn :=
+  [pm_mul, pm_add, pm_sub, pm_copy, pm_const, pm_to, pm_from, pm_inv, p2_add, pm_load, pm_store, pm_reduce_n, p2_v_ok]
+
 /-- The verification (M9.2), with `p256Globals (verify := true)`. -/
 def p256VerifyFns : List Fn := [pm_eq, p2_verify]
 

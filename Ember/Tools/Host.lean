@@ -23,6 +23,13 @@ site (`Spec.Srv.Http.demo`, port 80) instead of the echo stack (plan
 M8.2); `--https` the TLS 1.3 server of plan M8.6 with the same site on
 port 443 (`Spec.Srv.Tls.demo`, a self-signed Ed25519 demo certificate);
 `--conns N` gives either N connections (default 1).
+
+`--auth` (plan M9.3) takes the demo sites with protected routes instead
+(`Spec.Srv.Http.demoAuth`, `Spec.Srv.Tls.demoAuth`: tokens of the demo
+identity provider `Spec.Srv.Auth.demoCfg`); `--now T` sets their time
+(seconds since 1970; default `Auth.demoNow`, the time of the recorded
+sessions).  `--token SCOPE` prints a token of the demo provider with that
+scope, valid for an hour from that time, and exits.
 -/
 
 namespace Ember.Tools.Host
@@ -38,6 +45,9 @@ structure Opts where
   http    : Bool := false
   https   : Bool := false
   conns   : Nat := 1
+  auth    : Bool := false
+  now     : Nat := Srv.Auth.demoNow
+  token   : Option String := none
 
 partial def parseArgs : List String → Opts → Except String Opts
   | [], o => .ok o
@@ -45,6 +55,11 @@ partial def parseArgs : List String → Opts → Except String Opts
   | "--dhcp" :: r, o => parseArgs r { o with dhcp := true }
   | "--http" :: r, o => parseArgs r { o with http := true }
   | "--https" :: r, o => parseArgs r { o with https := true }
+  | "--auth" :: r, o => parseArgs r { o with auth := true }
+  | "--now" :: n :: r, o => match n.toNat? with
+    | some v => parseArgs r { o with now := v }
+    | none => .error s!"bad --now {n}"
+  | "--token" :: sc :: r, o => parseArgs r { o with token := some sc }
   | "--conns" :: n :: r, o => match n.toNat? with
     | some v => parseArgs r { o with conns := max 1 v }
     | none => .error s!"bad --conns {n}"
@@ -78,6 +93,9 @@ def main (args : List String) : IO UInt32 := do
     | .ok o => pure o
     | .error e => IO.eprintln e; return 2
   let cfg := configOf o
+  if let some sc := o.token then
+    IO.println (String.fromUTF8! (Srv.Auth.demoToken sc o.now))
+    return 0
   if let some f := o.replay then
     let t ← Trace.readFile f
     let cfg := Config.ofHeader t.header
@@ -90,10 +108,11 @@ def main (args : List String) : IO UInt32 := do
     | none => pure none
   if let some h := traceH then
     h.putStrLn (cfg.header).print
-  let app := Srv.Http.app Srv.Http.demo
+  let site := if o.auth then { Srv.Http.demoAuth with now := some o.now } else Srv.Http.demo
+  let app := Srv.Http.app site
   let st ← IO.mkRef (State.init cfg)
   let srv ← IO.mkRef (Srv.State.init app { toConfig := cfg, conns := o.conns })
-  let tapp := Srv.Tls.app Srv.Tls.demo
+  let tapp := Srv.Tls.app (if o.auth then { Srv.Tls.demoAuth with http := site } else Srv.Tls.demo)
   let tls ← IO.mkRef (Srv.State.init tapp { toConfig := cfg, conns := o.conns })
   let stepN ← IO.mkRef 0
   let lock ← Std.BaseMutex.new
