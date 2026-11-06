@@ -28,6 +28,9 @@ def main (args : List String) : IO UInt32 := do
   if let some d ← IO.getEnv "EMBER_HTTP_DUMP" then
     Ember.Tests.SrvTests.httpDump d
     return 0
+  if let some d ← IO.getEnv "EMBER_M9_DUMP" then
+    Ember.Tests.ControlNetTests.dump d
+    return 0
   if let some d ← IO.getEnv "EMBER_HTTPS_DUMP" then
     Ember.Tests.SrvTests.httpsDump d
     return 0

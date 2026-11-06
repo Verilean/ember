@@ -38,7 +38,12 @@ M8.5 behind a request/answer loop (`Net.Crypto.testProg`), and the HTTPS
 server of plan M8.7 on two connections (`Net.Tls`, the demo site). -/
 def extra : List (String × Prog) :=
   [("trapnote", Examples.TrapNote.prog), ("http", Net.Http.prog 2 Spec.Srv.Http.demo),
-   ("crypto", Net.Crypto.testProg), ("https", Net.Tls.prog 2 Spec.Srv.Tls.demo)]
+   ("crypto", Net.Crypto.testProg), ("https", Net.Tls.prog 2 Spec.Srv.Tls.demo),
+   -- plan M9: protected routes, control requests, kept connections; as shipped
+   -- (the RNG's bytes mixed in) and for replay; the site of M9.3's recordings for replay
+   ("https-ctl", Net.Tls.prog 2 { Spec.Srv.Tls.demoCtl with entropy := some (ByteArray.mk (Array.replicate 32 0)) }),
+   ("https-ctl-test", Net.Tls.prog 2 Spec.Srv.Tls.demoCtl),
+   ("https-auth-test", Net.Tls.prog 2 Spec.Srv.Tls.demoAuth)]
 
 def goldenDir : System.FilePath := "Tests/Ember/golden"
 

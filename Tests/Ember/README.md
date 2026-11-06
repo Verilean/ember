@@ -117,6 +117,21 @@ python3 tools/ember/record-linux.py client --name curl-qemu --out /tmp \
 and the exchanges of `HttpTests.lean`, mutated, re-chunked and with ticks,
 whose expected traces are `Spec.Srv`'s (`EMBER_HTTP_DUMP=DIR` writes them).
 
+For plan M9, `qemu-test.sh` also builds `stack-https-ctl` (protected
+routes, control requests, kept connections, the RNG's bytes mixed in, as
+shipped) and two images for replay, and replays on them the sessions
+recorded with curl and tokens of the demo provider (`Tests/Ember/https-auth`,
+`Tests/Ember/https-ctl`; as recorded, re-chunked, with ticks; `EMBER_M9_DUMP=DIR`
+writes them with `Spec.Srv.Tls`'s traces).  By hand, with a token from
+`ember-host --token "drone:control"`:
+
+```
+python3 tools/ember/record-linux.py client --name ctl-qemu --out /tmp --settle 3 \
+    --host "python3 tools/ember/qemu-bridge.py .lake/build/esp32c3/stack-https-ctl.bin" \
+    -- sh -c 'sleep 2; curl -sk -H "Authorization: Bearer $T" https://10.0.0.1/status \
+       --next -sk -H "Authorization: Bearer $T" -H "X-Ember-Seq: 1" --data-binary takeoff https://10.0.0.1/cmd'
+```
+
 `Tests/Ember/http/curl-session.trace` was recorded so (GET of the page and
 of a 2 110-byte file over several segments, a missing path, POST, HEAD;
 one connection, each client taking the previous one's TIME-WAIT).

@@ -121,4 +121,25 @@ def run : IO Nat := do
     (AuthNetTests.variants sfx 14))
   return bad
 
+/-- `EMBER_M9_DUMP=DIR`: the HTTPS sessions of M9 (recorded with protected
+routes, and with control requests; as recorded, re-chunked, with ticks)
+with `Spec.Srv.Tls`'s traces on two connections, for the replay on the
+ESP32-C3 images `stack-https-auth-test` (`DIR/auth`) and
+`stack-https-ctl-test` (`DIR/ctl`). -/
+def dump (dir : System.FilePath) : IO Unit := do
+  for (sub, src, site) in [("auth", "Tests/Ember/https-auth", Srv.Tls.demoAuth), ("ctl", "Tests/Ember/https-ctl", Srv.Tls.demoCtl)] do
+    let d := dir / sub
+    IO.FS.createDirAll d
+    let mut fx := #[]
+    for f in ← SpecTests.traceFiles src do
+      fx := fx.push (f.toString, (← Trace.readFile f).inputs)
+    let mut i := 0
+    for (name, ins) in AuthNetTests.variants fx 21 do
+      let t := Srv.run (Srv.Tls.app site) (srvCfg {} 2) ins
+      let lines := t.print.splitOn "\n"
+      IO.FS.writeFile (d / s!"{sub}-{i}.trace")
+        (lines.head! ++ s!"\n# {name}: Spec.Srv.Tls with the demo site of {sub}, 2 connections\n" ++ "\n".intercalate lines.tail!)
+      i := i + 1
+    IO.println s!"m9 {sub}: {i} sessions written to {d}"
+
 end Ember.Tests.ControlNetTests

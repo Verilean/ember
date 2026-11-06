@@ -42,3 +42,7 @@ esp32c3.https.code 34076
 esp32c3.https.rodata 14576
 esp32c3.https.ram 28860
 esp32c3.https.ping_instructions 17908
+esp32c3.https-ctl.code 47604
+esp32c3.https-ctl.rodata 24512
+esp32c3.https-ctl.ram 30848
+esp32c3.https-ctl.ping_instructions 17908
