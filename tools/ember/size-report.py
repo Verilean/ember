@@ -235,10 +235,12 @@ def main():
             metrics.update(de[0])
         # M8: the HTTP server (Net.Http, two connections), its own rows; the budgets of
         # docs/Ember-plan.md §M8 are the acceptance, the ±3 % the gate
-        for prof, key, fn in [("sdcc-z80", "z80.http", z80), ("rv32", "esp32c3.http", esp32c3)]:
-            src = emitted(tmp, "http", prof)
+        # and the HTTPS server (Net.Tls, two connections) on the ESP32-C3 (plan M8.7)
+        for prog, prof, key, fn in [("http", "sdcc-z80", "z80.http", z80), ("http", "rv32", "esp32c3.http", esp32c3),
+                                    ("https", "rv32", "esp32c3.https", esp32c3)]:
+            src = emitted(tmp, prog, prof)
             if src is not None:
-                r = fn(tmp, "http", key, src=src)
+                r = fn(tmp, prog, key, src=src)
                 if r is not None:
                     metrics.update(r[0])
         oh = z80own(tmp, "http", "z80own.http")

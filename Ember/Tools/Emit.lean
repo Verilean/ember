@@ -4,6 +4,7 @@ import Ember.Net.Loop
 import Ember.Net.Eth
 import Ember.Net.Http
 import Ember.Net.Crypto.Test
+import Ember.Net.Tls
 import Ember.Lang.Pretty
 import Ember.C.Compile
 import Ember.C.DropChecks
@@ -32,11 +33,12 @@ def registry : IO (List (String × Prog)) :=
 
 /-- Programs emitted by name, without a golden file: a test of the tools,
 and the HTTP server of plan M8 on two connections (`Net.Http`, the demo
-site), which the ESP32-C3 image `stack-http` runs, and the crypto of plan
-M8.5 behind a request/answer loop (`Net.Crypto.testProg`). -/
+site), which the ESP32-C3 image `stack-http` runs, the crypto of plan
+M8.5 behind a request/answer loop (`Net.Crypto.testProg`), and the HTTPS
+server of plan M8.7 on two connections (`Net.Tls`, the demo site). -/
 def extra : List (String × Prog) :=
   [("trapnote", Examples.TrapNote.prog), ("http", Net.Http.prog 2 Spec.Srv.Http.demo),
-   ("crypto", Net.Crypto.testProg)]
+   ("crypto", Net.Crypto.testProg), ("https", Net.Tls.prog 2 Spec.Srv.Tls.demo)]
 
 def goldenDir : System.FilePath := "Tests/Ember/golden"
 

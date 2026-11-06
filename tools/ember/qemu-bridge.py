@@ -4,7 +4,8 @@
     tools/ember/qemu-bridge.py IMAGE.bin [--trace FILE]
 
 Starts the image in Espressif's QEMU (`tools/ember/qemu-run.sh --dir`) and
-relays bytes between stdin/stdout and UART0, where the image speaks SLIP;
+relays bytes between stdin/stdout and UART0, where the image speaks SLIP
+(the ROM boot loader's banner before the first SLIP END is dropped);
 what the image writes on UART1 (its trace) goes to FILE when given, and
 is drained otherwise.  The image keeps its own time (SYSTIMER, 500 ms).
 It is the `--host` of `tools/ember/record-linux.py client`, so that a Linux
@@ -54,13 +55,26 @@ def main():
     u0 = connect(os.path.join(d, "uart0.sock"))
     u1 = connect(os.path.join(d, "uart1.sock"))
     out = open(trace, "wb") if trace else None
+    # EMBER_BRIDGE_LOG=FILE: every chunk each way, hex, for debugging the link
+    log = open(os.environ["EMBER_BRIDGE_LOG"], "w") if os.environ.get("EMBER_BRIDGE_LOG") else None
     stop = threading.Event()
 
     def from_uart0():
+        # the ROM boot loader writes its banner on UART0 before the image
+        # runs: everything before the first SLIP END (0xC0) is that text
+        started = False
         while not stop.is_set():
             b = u0.recv(4096)
             if not b:
                 return
+            if not started:
+                k = b.find(b"\xc0")
+                if k < 0:
+                    continue
+                b, started = b[k:], True
+            if log:
+                log.write(f"< {b.hex()}\n")
+                log.flush()
             os.write(1, b)
 
     def from_uart1():
@@ -78,6 +92,9 @@ def main():
         b = os.read(0, 4096)
         if not b:
             break
+        if log:
+            log.write(f"> {b.hex()}\n")
+            log.flush()
         u0.sendall(b)
     time.sleep(0.5)
     stop.set()

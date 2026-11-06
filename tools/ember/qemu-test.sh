@@ -18,6 +18,7 @@ lake exe ember-emit net --profile rv32 > $out/net.c
 lake exe ember-emit sliploop --profile rv32 > $out/sliploop.c
 lake exe ember-emit http --profile rv32 > $out/http.c
 lake exe ember-emit crypto --profile rv32 > $out/crypto.c
+lake exe ember-emit https --profile rv32 > $out/https.c
 cmp -s $out/net.c Tests/Ember/golden/net.rv32.c || { echo "Tests/Ember/golden/net.rv32.c is stale (lake exe ember-emit --golden)"; exit 1; }
 
 mk NAME=boot  DEFS="-DAPP=APP_BOOT"
@@ -38,6 +39,9 @@ mk NAME=stack-http      PROG=$out/http.c
 mk NAME=stack-http-test PROG=$out/http.c DEFS="-DEMBER_TICK_HOST=1"
 # the crypto of plan M8.5 behind a request/answer loop (Net.Crypto.testProg)
 mk NAME=crypto-test PROG=$out/crypto.c DEFS="-DEMBER_TICK_HOST=1"
+# the HTTPS server of plan M8.7 (Net.Tls, two connections): as shipped, and for replay
+mk NAME=stack-https      PROG=$out/https.c
+mk NAME=stack-https-test PROG=$out/https.c DEFS="-DEMBER_TICK_HOST=1"
 
 [ "$1" = build ] && exit 0
 if [ $# -gt 0 ]; then exec python3 tools/ember/esp32.py "$@"; fi
@@ -61,3 +65,8 @@ python3 tools/ember/esp32.py corpus --image stack-http-test Tests/Ember/http $ou
 rm -rf $out/crypto-sessions
 EMBER_CRYPTO_DUMP=$out/crypto-sessions .lake/build/bin/test
 python3 tools/ember/esp32.py corpus --image crypto-test $out/crypto-sessions
+# HTTPS (plan M8.7): the recorded curl and openssl sessions and the TLS
+# sessions of Tests/Ember/TlsTests.lean, with Spec.Srv.Tls's traces, on the image
+rm -rf $out/https-sessions
+EMBER_HTTPS_DUMP=$out/https-sessions .lake/build/bin/test
+python3 tools/ember/esp32.py corpus --image stack-https-test $out/https-sessions

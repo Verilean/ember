@@ -76,6 +76,16 @@ def okExts : ByteArray := versionsExt ++ sigExt ++ shareExt
 
 def std0 : ByteArray := hello 0 .empty 2 (b2 0x1303) 1 (b1 0) okExts.size okExts
 
+/-- A ClientHello of exactly `recMax` (2048) bytes whose last extension is an
+empty supported_versions: its data would start at the end of the record
+(and of the Ember program's buffer of the connection). -/
+def fullRecordEmptyVersions : ByteArray :=
+  let tail := ext 43 .empty
+  let fixed := 4 + 2 + 32 + 1 + 2 + 2 + 1 + 1 + 2 + (sigExt ++ shareExt).size + 4 + tail.size
+  let pad := ext 21 (zeros (2048 - fixed))
+  let exts := sigExt ++ shareExt ++ pad ++ tail
+  hello 0 .empty 2 (b2 0x1303) 1 (b1 0) exts.size exts
+
 /-- Each must be answered with `handshake_failure` alone. -/
 def malformed : List (String × ByteArray) :=
   let suites := b2 0x1303
@@ -107,7 +117,16 @@ def malformed : List (String × ByteArray) :=
    ("key_share entry past its list",
       std (versionsExt ++ sigExt ++ ext 51 (b2 36 ++ b2 0x001d ++ b2 40 ++ goodShare)) okExts.size),
    ("handshake length wrong", hello 0 .empty 2 suites 1 (b1 0) okExts.size okExts (some 10)),
-   ("a message of 3 bytes", record 22 (ByteArray.mk #[1, 0, 0]))]
+   ("a message of 3 bytes", record 22 (ByteArray.mk #[1, 0, 0])),
+   ("an empty supported_versions at the very end of a full record", fullRecordEmptyVersions)]
+
+/-- The sessions of the small-order shares and of a valid share, for the Ember checks. -/
+def sessions : List (String × Array Input) :=
+  let app := Srv.Tls.app Srv.Tls.demo
+  (lowOrder.map fun (name, share) => (s!"low-order share {name}", (HttpTests.exchange app (clientHello share)).inputs)) ++
+    [("valid share", (HttpTests.exchange app (clientHello (x25519 (natLe 12345 32) basepoint9))).inputs),
+     ("an empty supported_versions at the end of a full record", (HttpTests.exchange app fullRecordEmptyVersions).inputs)]
+
 
 def run : IO Nat := do
   let mut bad := 0
@@ -123,6 +142,10 @@ def run : IO Nat := do
       bad := bad + 1
       IO.println s!"FAIL tls low-order share {name}: got {toHex ex.resp} (fin {ex.fin}), want only {toHex alert}"
   let good := HttpTests.exchange app (clientHello (x25519 (natLe 12345 32) basepoint9))
+  -- the full record of the boundary case: 2048 bytes of body, as meant
+  if fullRecordEmptyVersions.size != 5 + 2048 then
+    bad := bad + 1
+    IO.println s!"FAIL tls: the full-record case is {fullRecordEmptyVersions.size} bytes, not 5 + 2048"
   -- malformed ClientHellos: handshake_failure and nothing else; the well-formed control gets a ServerHello
   for (name, raw) in malformed do
     let raw := if raw.size == 0 then std0 else raw

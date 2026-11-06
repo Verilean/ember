@@ -71,9 +71,9 @@ ember def fe_sq (o : u16) (a : u16) := do
 ember def fe_cswap (p : u16) (q : u16) (bit : u64) := do
   let mask : u64 := 0 - bit
   for i : u16 in [0, 16) do
-    let t : u64 := mask &&& (fe[p * 16 + i] ^^^ fe[q * 16 + i])
-    fe[p * 16 + i] := fe[p * 16 + i] ^^^ t
-    fe[q * 16 + i] := fe[q * 16 + i] ^^^ t
+    let dx : u64 := mask &&& (fe[p * 16 + i] ^^^ fe[q * 16 + i])
+    fe[p * 16 + i] := fe[p * 16 + i] ^^^ dx
+    fe[q * 16 + i] := fe[q * 16 + i] ^^^ dx
 
 /-- `o := a^(p-2)` (the exponent is public: the branch is not on a secret). -/
 ember def fe_inv (o : u16) (a : u16) := do

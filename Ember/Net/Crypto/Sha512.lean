@@ -27,11 +27,11 @@ ember def s5_init := do
   s5_len := 0
 
 ember def s5_block := do
-  for t : u16 in [0, 16) do
+  for t1w : u16 in [0, 16) do
     let mut w : u64 := 0
     for b : u16 in [0, 8) do
-      w := (w <<< 8) ||| (s5_blk[8 * t + b] : u64)
-    s5_w[t] := w
+      w := (w <<< 8) ||| (s5_blk[8 * t1w + b] : u64)
+    s5_w[t1w] := w
   for t2 : u16 in [16, 80) do
     let x : u64 := s5_w[t2 - 15]
     let y : u64 := s5_w[t2 - 2]

@@ -9,6 +9,7 @@ import Tests.Ember.HttpTests
 import Ember.Net.Http
 import Ember.Spec.Srv.Tls
 import Tests.Ember.TlsTests
+import Ember.Net.Tls
 
 /-!
 # `Ember.Spec.Srv` against `Ember.Spec` (plan M8.1)
@@ -323,6 +324,93 @@ def httpsFixtures : IO (Nat × Array (String × Array Input)) := do
   IO.println s!"https fixtures: {files.size} recorded sessions (curl, openssl s_client), Spec.Srv.Tls = recorded, {bad} failures"
   return (bad, out)
 
+/-! ## HTTPS: the Ember program (interpreted and as host C) against `Ember.Spec.Srv.Tls` -/
+
+def tlsApp : Srv.App := Srv.Tls.app Srv.Tls.demo
+def tlsProg (n : Nat) : Prog := Tools.NetCheck.checked (Net.Tls.prog n Srv.Tls.demo)
+
+/-- The recorded sessions and those of `TlsTests`, also re-chunked and with ticks. -/
+def httpsStreams (fixtures : Array (String × Array Input)) (seed : Nat) : IO (Array (String × Array Input)) := do
+  let made := TlsTests.sessions
+  let mut out := #[]
+  let mut rng := Rng.ofSeed (seed * 40503)
+  for (name, ins) in fixtures ++ made.toArray do
+    let s : Gen.Session := { kind := "https", inputs := ins }
+    let ((c, t), rng') := (do return (← Gen.rechunk s, ← Gen.midTicks s) : RandM _).run rng
+    rng := rng'
+    out := out ++ #[(name, ins), (name ++ " re-chunked", c.inputs), (name ++ " ticks", t.inputs)]
+  return out
+
+def httpsSame (n : Nat) (ins : Array Input) : Option String :=
+  let h := (Spec.Config.header {})
+  let s := Tools.NetCheck.comparable (Srv.run tlsApp (srvCfg {} n) ins)
+  let r := runMachine (Machine.init (tlsProg n) ins) { h with impl := "ember-interp" } (fuel := 4000000000)
+  if let some e := r.error then some s!"Ember stack trapped: {repr e}" else
+  let d := diff s (Tools.NetCheck.comparable r.trace) { observable := false, context := 2 }
+  if d.equal then none else some d.report
+
+/-- The interpreter runs the Ember crypto slowly (a handshake is two X25519
+and an Ed25519 signature, instruction by instruction), so it takes the
+sessions as made and recorded; their re-chunked and ticked forms go
+through the host C (`httpsHostC`). -/
+def httpsNet (streams : Array (String × Array Input)) : IO Nat := do
+  match (Net.Tls.prog 2 Srv.Tls.demo).check with
+  | .error e => IO.println s!"FAIL https net program does not check: {repr e}"; return 1
+  | .ok _ => pure ()
+  let mut bad := 0
+  for (name, ins) in streams.filter (fun (n, _) => !n.endsWith " re-chunked" && !n.endsWith " ticks") do
+    if let some d := httpsSame 1 ins then
+      bad := bad + 1
+      IO.println s!"FAIL https net {name}: {d}"
+  IO.println s!"https net (interpreter): the recorded sessions, the small-order shares and a valid share, Ember = Spec.Srv.Tls, {bad} failures"
+  return bad
+
+def httpsHostC (streams : Array (String × Array Input)) : IO Nat := do
+  if !(← Tools.Cc.available) then
+    IO.println "https host C: no C compiler, skipped"
+    return 0
+  let mut units := []
+  for n in [1, 2] do
+    match Tools.Cc.emit s!"https{n}" (tlsProg n) with
+    | .error e => IO.println s!"FAIL https host C: emit n={n}: {e}"; return 1
+    | .ok c => units := units ++ [(s!"https{n}", c)]
+  let exe ← match ← Tools.Cc.build { dir := ".lake/ember-https", flags := #["-O2", "-fsanitize=undefined,address",
+      "-fno-sanitize-recover=all"] } units with
+    | .error e => IO.println s!"FAIL https host C: build: {e}"; return 1
+    | .ok exe => pure exe
+  let tmp : System.FilePath := ".lake/ember-https/inputs.trace"
+  let mut bad := 0
+  let mut k := 0
+  for (name, ins) in streams do
+    for (n, idx) in [(1, 0), (2, 1)] do
+      k := k + 1
+      Tools.Cc.writeInputs tmp (Spec.Config.header {}) ins
+      let (t, rc) ← Tools.Cc.run exe idx tmp
+      let s := Tools.NetCheck.comparable (Srv.run tlsApp (srvCfg {} n) ins)
+      let d := diff s (Tools.NetCheck.comparable t) { observable := false, context := 2 }
+      if rc != 0 || !d.equal then
+        bad := bad + 1
+        IO.println s!"FAIL https host C n={n} {name} (exit {rc}): {d.report}"
+  IO.println s!"https host C: {k} runs (-O2, UBSan/ASan; 1 and 2 connections), C = Spec.Srv.Tls, {bad} failures"
+  return bad
+
+/-- `EMBER_HTTPS_DUMP=DIR`: the HTTPS sessions (recorded, made by
+`TlsTests`, re-chunked, with ticks) with `Spec.Srv.Tls`'s traces on two
+connections, for the replay on the ESP32-C3 image `stack-https-test`. -/
+def httpsDump (dir : System.FilePath) : IO Unit := do
+  IO.FS.createDirAll dir
+  let mut fixtures := #[]
+  for f in ← SpecTests.traceFiles "Tests/Ember/https" do
+    fixtures := fixtures.push (f.toString, (← Trace.readFile f).inputs)
+  let mut i := 0
+  for (name, ins) in ← httpsStreams fixtures 9 do
+    let t := Srv.run tlsApp (srvCfg {} 2) ins
+    let lines := t.print.splitOn "\n"
+    IO.FS.writeFile (dir / s!"https-{i}.trace")
+      (lines.head! ++ s!"\n# {name}: Spec.Srv.Tls with Spec.Srv.Tls.demo, 2 connections\n" ++ "\n".intercalate lines.tail!)
+    i := i + 1
+  IO.println s!"https: {i} sessions written to {dir}"
+
 /-- `EMBER_HTTP_DUMP=DIR`: write the HTTP sessions with `Spec.Srv`'s
 traces, for the replay on the ESP32-C3 image (`qemu-test.sh`). -/
 def httpDump (dir : System.FilePath) : IO Unit := do
@@ -347,10 +435,13 @@ def main : IO UInt32 := do
   let h ← hostC 50 3
   let i ← HttpTests.run
   let (l, fx) ← httpFixtures
-  let (m, _) ← httpsFixtures
+  let (m, hfx) ← httpsFixtures
   let t ← TlsTests.run
+  let hs ← httpsStreams hfx 9
+  let u ← httpsNet hs
+  let w ← httpsHostC hs
   let j ← httpNet fx
   let k ← httpHostC fx
-  return if a + b + c + d + e + f + g + h + i + j + k + l + m + t == 0 then 0 else 1
+  return if a + b + c + d + e + f + g + h + i + j + k + l + m + t + u + w == 0 then 0 else 1
 
 end Ember.Tests.SrvTests

@@ -24,6 +24,9 @@ def main (args : List String) : IO UInt32 := do
   if let some d ← IO.getEnv "EMBER_HTTP_DUMP" then
     Ember.Tests.SrvTests.httpDump d
     return 0
+  if let some d ← IO.getEnv "EMBER_HTTPS_DUMP" then
+    Ember.Tests.SrvTests.httpsDump d
+    return 0
   let only ← IO.getEnv "EMBER_ONLY"
   let want (name : String) : Bool := only.isNone || only == some name
   let mut rc : UInt32 := 0

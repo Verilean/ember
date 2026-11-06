@@ -38,3 +38,7 @@ z80own.http.ram 1933
 z80own.http.stack_bound 28
 z80own.http.stack 12
 z80own.http.ping_tstates 188834
+esp32c3.https.code 29216
+esp32c3.https.rodata 12056
+esp32c3.https.ram 27636
+esp32c3.https.ping_instructions 17908

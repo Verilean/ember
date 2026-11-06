@@ -39,6 +39,13 @@ retransmission needs no copy.  Per connection the request header is
 kept (`REQ_MAX` bytes).  The server closes first, so a SYN that finds no
 connection in LISTEN takes one in TIME-WAIT.
 
+`Tls.lean` is TLS 1.3 on it (`Tls.prog n site`, `Spec.Srv.Tls` record for
+record and alert for alert) with the crypto of `Crypto/` and the HTTP of
+`Http.lean` inside.  Per connection a buffer of records received and one
+of what is sent (the server's flight and the protected response, kept as
+the Spec keeps them), the transcript hash's SHA-256 context, the keys and
+sequence numbers; records are opened and sealed in place.
+
 ## Data layout
 
 | Global | Type | Bytes (host64) | Role |

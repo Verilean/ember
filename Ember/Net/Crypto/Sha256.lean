@@ -31,8 +31,8 @@ ember def sha_init := do
   sh_len := 0
 
 ember def sha_block := do
-  for t : u16 in [0, 16) do
-    sh_w[t] := ((sh_blk[4 * t] : u32) <<< 24) ||| ((sh_blk[4 * t + 1] : u32) <<< 16) ||| ((sh_blk[4 * t + 2] : u32) <<< 8) ||| (sh_blk[4 * t + 3] : u32)
+  for t1w : u16 in [0, 16) do
+    sh_w[t1w] := ((sh_blk[4 * t1w] : u32) <<< 24) ||| ((sh_blk[4 * t1w + 1] : u32) <<< 16) ||| ((sh_blk[4 * t1w + 2] : u32) <<< 8) ||| (sh_blk[4 * t1w + 3] : u32)
   for t2 : u16 in [16, 64) do
     let x : u32 := sh_w[t2 - 15]
     let y : u32 := sh_w[t2 - 2]
