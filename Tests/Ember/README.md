@@ -5,7 +5,7 @@ tshark) say "skipped" when it is missing.  The full set of tools comes
 with `nix-shell` (see `shell.nix`):
 
 ```
-nix-shell --run 'lake test'          # ≈ 6 minutes; EMBER_ONLY=spec|lang|net|esp32|z80 .lake/build/bin/test runs one suite
+nix-shell --run 'lake test'          # ≈ 6 minutes; EMBER_ONLY=spec|srv|lang|net|esp32|z80 .lake/build/bin/test runs one suite
 ```
 
 ## What `lake test` checks
@@ -13,6 +13,7 @@ nix-shell --run 'lake test'          # ≈ 6 minutes; EMBER_ONLY=spec|lang|net|e
 | Suite | Milestone | Contents |
 |---|---|---|
 | `Tests/Ember/SpecTests.lean` | M1 | checksum (RFC 1071/1624), SLIP, headers, trace format and `ember-diff`; **corpus replay** (`corpus/`, `regress/`); hand-written **scenarios** with their expectations; **1 000 generated sessions** per protocol, each also mutated and re-chunked, against the properties of `Ember.Spec.Gen`; the corpus through the `ember-host` binary; pcaps decoded by `tshark` |
+| `Tests/Ember/SrvTests.lean`, `HttpTests.lean` | M8.1, M8.2 | the stack with an application interface: `Spec.Srv` with echo and one connection = `Spec.Stack`, every trace line, on the corpus and on generated sessions (ICMP, UDP, TCP, DHCP; mutated, re-chunked, ticks mid-frame, Ethernet); the Ember program `Net.Srv` (interpreted, and as host C with `-O2` and UBSan/ASan) = `Spec.Srv` with 1 and 2 connections; a second client served with 2 connections, reset with 1. HTTP: a TCP client drives `Spec.Srv` with `Spec.Srv.Http.demo` (11 requests: routes, query, 404, HEAD, 501, HTTP/1.0, bad lines, a header longer than `reqMax`; in 1, 3 and 7 segments; three clients in a row on one connection, taking the one in TIME-WAIT) — the bytes received are `Http.answer`'s and the server closes; the recorded curl session `http/` replays; the Ember program `Net.Http` (interpreted and host C) = `Spec.Srv` on all of these, mutated, re-chunked and with ticks |
 | `Tests/Ember/LangTests.lean` | M2, M5.4, M5.7 | **the total semantics** `Lang.Sem` (what the proofs unfold) = interpreter, on random programs, the examples and every build of the stack on the corpus; **the emitted C under the C semantics** `Ember.C.Sem` = `Lang.Sem`, same programs, three profiles, never undefined, and a planted emitter bug noticed; type checker (one negative test per rule, with spans), interpreter (every construct, traps, fuel), surface syntax = hand-built AST, profiles, **golden C** (`golden/`), examples vs Lean references, **interpreter = host C** (−O0/−O2, UBSan/ASan, strict warnings), **SDCC** `--Werror`, **1 000 random programs** (`ember-fuzz`) |
 | `Tests/Ember/NetTests.lean` | M3 | `Ember.Net` functions vs `Ember.Spec` on 10 000 random inputs; the corpus (SLIP and Ethernet fixtures) and **1 000 generated sessions** per protocol × 3 variants, plus 1 000 Ethernet and 1 000 DHCP sessions: Spec = Ember interpreter (**lockstep**) = host C |
 | `Tests/Ember/TargetTests.lean` | M4 | `tools/ember/qemu-test.sh`: the bare-metal ESP32-C3 images in Espressif's QEMU — boot, trap handler, UART, interrupt-driven echo of 10 000 bytes, SLIP loopback, the SLIP corpus and **100 generated sessions** per protocol × 3 variants (target trace = Spec trace), SYSTIMER tick |
@@ -83,3 +84,20 @@ python3 tools/ember/record-linux.py client --name demo --out /tmp \
 ```
 
 (Recorded here: `ping` 0 % loss, `nc` echoed the line, Linux 6.18.)
+
+## Manual demo: HTTP from Linux (M8.2)
+
+`ember-host --http` runs `Spec.Srv` with the HTTP application and its demo
+site on port 80 (`--conns N` for N connections).  Without root, in a user
+namespace with a TUN device:
+
+```
+lake build ember-host
+python3 tools/ember/record-linux.py client --name curl --out /tmp \
+    --host ".lake/build/bin/ember-host --http" \
+    -- sh -c 'curl -sS http://10.0.0.1/ && curl -sS -I http://10.0.0.1/hello.txt'
+```
+
+`Tests/Ember/http/curl-session.trace` was recorded so (GET of the page and
+of a 2 110-byte file over several segments, a missing path, POST, HEAD;
+one connection, each client taking the previous one's TIME-WAIT).

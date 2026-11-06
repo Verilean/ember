@@ -1,0 +1,195 @@
+import Ember.Net.Srv
+import Ember.Spec.Srv.Http
+
+/-!
+# Ember.Net.Http — the HTTP application in Ember (plan M8.2)
+
+`Ember.Spec.Srv.Http` for `Ember.Net.Srv`.  The site is fixed when the
+program is built, so every response is known then up to the `HEAD`
+flag: its header (`Http.response … (head := true)`) and its body.  Both
+are put in one constant array `h_rom`, with tables of where each
+response's header and body are; the routes' paths are in `h_paths`.
+Response `k` is route `k`, or `404`, `400`, `501` after the routes.
+
+Per connection (index `cur`): the request so far (`h_req`, `REQ_MAX`
+bytes each, and its length `h_rlen`), whether it is answered
+(`h_dec`), with which response (`h_kind`) and whether for `HEAD`
+(`h_head`), and how much of the response is acknowledged (`h_pos`).
+A segment's bytes are computed from the tables (`h_byte`): nothing of
+the response is kept in RAM, a retransmission computes them again.
+-/
+
+namespace Ember.Net.Http
+open Ember.Lang
+
+/-- Byte `off` of the response of the connection `cur`. -/
+ember def h_byte (off : u16) : u8 := do
+  let k : u16 := (h_kind[cur] : u16)
+  if off < h_hlen[k] then
+    return h_rom[h_hoff[k] + off]
+  return h_rom[h_boff[k] + off - h_hlen[k]]
+
+ember def h_total : u16 := do
+  let k : u16 := (h_kind[cur] : u16)
+  let mut n : u16 := h_hlen[k]
+  if !h_head[cur] then
+    n := n + h_blen[k]
+  return n
+
+ember def app_reset := do
+  h_rlen[cur] := 0
+  h_dec[cur] := false
+  h_kind[cur] := 0
+  h_head[cur] := false
+  h_pos[cur] := 0
+
+ember def app_room (c : u16) : u16 := do
+  if h_dec[cur] then
+    return c
+  let r : u16 := REQ_MAX - h_rlen[cur]
+  if r < c then
+    return r
+  return c
+
+/-- Answer the request in `h_req` (its header is complete). -/
+ember def h_decide := do
+  let base : u16 := cur * REQ_MAX
+  let rlen : u16 := h_rlen[cur]
+  -- the request line: up to the first CR
+  let mut l : u16 := rlen
+  for j1 in [0, rlen) do
+    if l == rlen && h_req[base + j1] == 13 then
+      l := j1
+  -- exactly two spaces in it
+  let mut ns : u16 := 0
+  let mut s1 : u16 := 0
+  let mut s2 : u16 := 0
+  for j2 in [0, l) do
+    if h_req[base + j2] == 32 then
+      if ns == 0 then
+        s1 := j2
+      if ns == 1 then
+        s2 := j2
+      ns := ns + 1
+  h_head[cur] := false
+  if ns != 2 then
+    h_kind[cur] := (K_400 : u8)
+    return
+  let v : u16 := s2 + 1
+  if l - v != 8 || s2 - s1 < 2 then
+    h_kind[cur] := (K_400 : u8)
+    return
+  if h_req[base + v] != 72 || h_req[base + v + 1] != 84 || h_req[base + v + 2] != 84 || h_req[base + v + 3] != 80 || h_req[base + v + 4] != 47 || h_req[base + v + 5] != 49 || h_req[base + v + 6] != 46 || h_req[base + v + 7] < 48 || h_req[base + v + 7] > 57 then
+    h_kind[cur] := (K_400 : u8)
+    return
+  let get : bool := s1 == 3 && h_req[base] == 71 && h_req[base + 1] == 69 && h_req[base + 2] == 84
+  let head : bool := s1 == 4 && h_req[base] == 72 && h_req[base + 1] == 69 && h_req[base + 2] == 65 && h_req[base + 3] == 68
+  if !get && !head then
+    h_kind[cur] := (K_501 : u8)
+    return
+  h_head[cur] := head
+  -- the path: the target up to `?`
+  let t0 : u16 := s1 + 1
+  let mut plen : u16 := s2 - t0
+  for j3 in [0, s2 - t0) do
+    if plen == s2 - t0 && h_req[base + t0 + j3] == 63 then
+      plen := j3
+  let mut kind : u16 := K_404
+  for k in [0, N_ROUTES) do
+    if kind == K_404 && h_plen[k] == plen then
+      let mut same : bool := true
+      for j4 in [0, plen) do
+        if h_paths[h_poff[k] + j4] != h_req[base + t0 + j4] then
+          same := false
+      if same then
+        kind := k
+  h_kind[cur] := (kind : u8)
+
+ember def app_recv (off : u16) (n : u16) := do
+  if h_dec[cur] then
+    return
+  let base : u16 := cur * REQ_MAX
+  let old : u16 := h_rlen[cur]
+  for i in [0, n) do
+    h_req[base + old + i] := buf[off + i]
+  let rlen : u16 := old + n
+  h_rlen[cur] := rlen
+  let mut start : u16 := 0
+  if old > 3 then
+    start := old - 3
+  let mut ends : bool := false
+  if rlen >= 4 then
+    for j in [start, rlen - 3) do
+      if h_req[base + j] == 13 && h_req[base + j + 1] == 10 && h_req[base + j + 2] == 13 && h_req[base + j + 3] == 10 then
+        ends := true
+  if ends then
+    h_decide()
+    h_dec[cur] := true
+    return
+  if rlen >= REQ_MAX then
+    h_kind[cur] := (K_400 : u8)
+    h_head[cur] := false
+    h_dec[cur] := true
+
+ember def app_avail : u16 := do
+  if !h_dec[cur] then
+    return 0
+  let tot : u16 ← h_total()
+  return tot - h_pos[cur]
+
+ember def app_fill (src : u16) (n : u16) (dst : u16) := do
+  let p : u16 := h_pos[cur] + src
+  for i in [0, n) do
+    buf[dst + i] ← h_byte(p + i)
+
+ember def app_acked (n : u16) := do
+  h_pos[cur] := h_pos[cur] + n
+
+ember def app_close : bool := do
+  return h_dec[cur]
+
+open Ember.Spec.Srv.Http in
+/-- The responses of a site, in order: the routes, then 404, 400, 501 —
+headers (as for `HEAD`) and bodies. -/
+def responses (site : Site) : List (ByteArray × ByteArray) :=
+  site.routes.map (fun r => (response 200 "OK" r.ctype r.body true, r.body)) ++
+  [(errorText 404 "Not Found" true, str "Not Found\n"),
+   (errorText 400 "Bad Request" true, str "Bad Request\n"),
+   (errorText 501 "Not Implemented" true, str "Not Implemented\n")]
+
+def u16s (name : String) (xs : List Nat) : Global :=
+  { name, ty := .arr .u16 (max 1 xs.length), init := xs, const := true }
+
+def bytesG (name : String) (b : List Nat) : Global :=
+  { name, ty := .arr .u8 (max 1 b.length), init := b, const := true }
+
+def scalar (name : String) (ty : Ty) (v : Nat) : Global := { name, ty, init := [v], const := true }
+
+/-- The HTTP application of `site` for `n` connections. -/
+def app (n : Nat) (site : Spec.Srv.Http.Site) : Net.Srv.App :=
+  let rs := responses site
+  -- h_rom: header 0, body 0, header 1, body 1, …
+  let (rom, hoff, boff) := rs.foldl (fun (rom, ho, bo) (h, b) =>
+    (rom ++ h.toList.map (·.toNat) ++ b.toList.map (·.toNat), ho ++ [rom.length], bo ++ [rom.length + h.size]))
+    (([] : List Nat), ([] : List Nat), ([] : List Nat))
+  let paths := site.routes.map fun r => r.path.toUTF8.toList.map (·.toNat)
+  let poff := (paths.foldl (fun (acc, o) p => (acc ++ [o], o + p.length)) (([] : List Nat), 0)).1
+  let nr := site.routes.length
+  { globals :=
+      [scalar "APP_PORT" .u16 site.port.toNat, scalar "APP_IDLE_CLOSE" .bool 1, scalar "APP_REUSE_TW" .bool 1,
+       scalar "REQ_MAX" .u16 site.reqMax, scalar "N_ROUTES" .u16 nr,
+       scalar "K_404" .u16 nr, scalar "K_400" .u16 (nr + 1), scalar "K_501" .u16 (nr + 2),
+       bytesG "h_rom" rom, u16s "h_hoff" hoff, u16s "h_hlen" (rs.map (·.1.size)),
+       u16s "h_boff" boff, u16s "h_blen" (rs.map (·.2.size)),
+       bytesG "h_paths" paths.flatten, u16s "h_poff" poff, u16s "h_plen" (paths.map (·.length)),
+       { name := "h_req", ty := .arr .u8 (n * site.reqMax) },
+       { name := "h_rlen", ty := .arr .u16 n }, { name := "h_dec", ty := .arr .bool n },
+       { name := "h_kind", ty := .arr .u8 n }, { name := "h_head", ty := .arr .bool n },
+       { name := "h_pos", ty := .arr .u16 n }]
+    fns := [h_byte, h_total, app_reset, app_room, h_decide, app_recv, app_avail, app_fill,
+            app_acked, app_close] }
+
+/-- The HTTP server for `site` on `n` connections (SLIP, MTU 296). -/
+def prog (n : Nat) (site : Spec.Srv.Http.Site) : Prog := Net.Srv.prog n (app n site)
+
+end Ember.Net.Http

@@ -1,4 +1,6 @@
 import Ember.Spec.Stack
+import Ember.Spec.Srv.Http
+import Ember.Spec.Srv.Stack
 import Ember.Trace.Text
 import Std.Sync.Mutex
 
@@ -14,6 +16,10 @@ state machine, so the chunking only shapes the trace.  `--tick-ms N` feeds a `ti
 500; 0 disables).  `--trace FILE` writes the §3.1 trace.  `--replay
 TRACE` instead runs the inputs of a trace file and prints the resulting
 trace on stdout (no wall clock involved).
+
+`--http` runs `Ember.Spec.Srv` with the HTTP application and its demo
+site (`Spec.Srv.Http.demo`, port 80) instead of the echo stack (plan
+M8.2); `--conns N` gives it N connections (default 1).
 -/
 
 namespace Ember.Tools.Host
@@ -26,11 +32,17 @@ structure Opts where
   trace   : Option String := none
   replay  : Option String := none
   mtu     : Option Nat := none
+  http    : Bool := false
+  conns   : Nat := 1
 
 partial def parseArgs : List String → Opts → Except String Opts
   | [], o => .ok o
   | "--eth" :: r, o => parseArgs r { o with eth := true }
   | "--dhcp" :: r, o => parseArgs r { o with dhcp := true }
+  | "--http" :: r, o => parseArgs r { o with http := true }
+  | "--conns" :: n :: r, o => match n.toNat? with
+    | some v => parseArgs r { o with conns := max 1 v }
+    | none => .error s!"bad --conns {n}"
   | "--tick-ms" :: n :: r, o => match n.toNat? with
     | some v => parseArgs r { o with tickMs := v }
     | none => .error s!"bad --tick-ms {n}"
@@ -73,12 +85,20 @@ def main (args : List String) : IO UInt32 := do
     | none => pure none
   if let some h := traceH then
     h.putStrLn (cfg.header).print
+  let app := Srv.Http.app Srv.Http.demo
   let st ← IO.mkRef (State.init cfg)
+  let srv ← IO.mkRef (Srv.State.init app { toConfig := cfg, conns := o.conns })
   let stepN ← IO.mkRef 0
   let lock ← Std.BaseMutex.new
   let doStep' (i : Input) : IO Unit := do
-    let (s', es) := step (← st.get) i
-    st.set s'
+    let es ← if o.http then do
+        let (s', es) := Srv.step (← srv.get) i
+        srv.set s'
+        pure es
+      else do
+        let (s', es) := step (← st.get) i
+        st.set s'
+        pure es
     let n ← stepN.modifyGet fun n => (n, n + 1)
     if let some h := traceH then
       let e0 : Event := match i with | .rx b => .rx b | .tick => .tick

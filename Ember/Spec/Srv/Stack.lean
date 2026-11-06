@@ -10,7 +10,8 @@ IPv4, ICMP, the UDP echo, DHCP, ticks in the middle of a SLIP frame — is
 `Ember.Spec.Stack`'s, written over this state.
 
 A segment goes to the connection whose tuple it carries; otherwise to the
-first connection in LISTEN; when there is none it is answered with RST
+first connection in LISTEN — or, when the application allows it
+(`reuseTimeWait`), in TIME-WAIT; when there is none it is answered with RST
 (`unsupported-second-connection`), as the one-connection stack does.  A
 tick ticks every connection, in order.  With several connections the
 `tcb` lines start with `conn=i `; with one they are `Ember.Spec.Stack`'s.
@@ -96,7 +97,10 @@ def tcpInput (src : UInt32) (seg : Seg) : StackM A Unit := do
   | none =>
     match s.conns.findIdx? (·.st == .listen) with
     | some j => runTcp j (do listenInput src seg; logTcb)
-    | none => runTcp 0 (do busyInput src seg; logTcb)
+    | none =>
+      match (if A.reuseTimeWait then s.conns.findIdx? (·.st == .timeWait) else none) with
+      | some j => runTcp j (do closeConn; listenInput src seg; logTcb)
+      | none => runTcp 0 (do busyInput src seg; logTcb)
 
 def dhcpApply (o : Dhcp.Out) : StackM A Unit := do
   modifyS fun s => { s with dhcp := o.st, ip := o.ip }

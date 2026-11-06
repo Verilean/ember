@@ -5,6 +5,8 @@ import Tests.Ember.SpecTests
 import Ember.Net.Srv
 import Ember.Tools.NetCheck
 import Ember.Tools.Cc
+import Tests.Ember.HttpTests
+import Ember.Net.Http
 
 /-!
 # `Ember.Spec.Srv` against `Ember.Spec` (plan M8.1)
@@ -214,6 +216,92 @@ def hostC (count seed : Nat) : IO Nat := do
   IO.println s!"srv host C: {k} runs (-O2, UBSan/ASan), C = Spec.Srv, {bad} failures"
   return bad
 
+/-! ## HTTP: the Ember program (interpreted and as host C) against `Ember.Spec.Srv.Http` -/
+
+def httpProg (n : Nat) : Prog := Tools.NetCheck.checked (Net.Http.prog n Srv.Http.demo)
+def httpApp : Srv.App := Srv.Http.app Srv.Http.demo
+
+/-- The exchanges of `HttpTests`, each also mutated and re-chunked. -/
+def httpStreams (seed : Nat) : Array (String × Array Input) := Id.run do
+  let mut out := #[]
+  let mut rng := Rng.ofSeed (seed * 2654435761)
+  for (name, ins) in HttpTests.sessions do
+    let s : Gen.Session := { kind := "http", inputs := ins }
+    let ((m, c, t), rng') := (do return (← Gen.mutate s, ← Gen.rechunk s, ← Gen.midTicks s) : RandM _).run rng
+    rng := rng'
+    out := out ++ #[(name, ins), (name ++ " mutated", m.inputs), (name ++ " re-chunked", c.inputs),
+                    (name ++ " ticks", t.inputs)]
+  out := out.push ("three clients in a row", (HttpTests.series httpApp HttpTests.seriesReqs).2)
+  return out
+
+/-- The recorded HTTP sessions (`Tests/Ember/http`): `Spec.Srv` must give their trace. -/
+def httpFixtures : IO (Nat × Array (String × Array Input)) := do
+  let mut bad := 0
+  let mut out := #[]
+  let files ← SpecTests.traceFiles "Tests/Ember/http"
+  for f in files do
+    let t ← Trace.readFile f
+    let r := Srv.run httpApp (srvCfg (Spec.Config.ofHeader t.header)) t.inputs
+    let d := diff t r { observable := true, drops := true }
+    if !d.equal then
+      bad := bad + 1
+      IO.println s!"FAIL http fixture {f}\n{d.report}"
+    out := out.push (f.toString, t.inputs)
+  IO.println s!"http fixtures: {files.size} recorded sessions, Spec.Srv = recorded, {bad} failures"
+  return (bad, out)
+
+def httpSame (n : Nat) (ins : Array Input) : Option String :=
+  let h := (Spec.Config.header {})
+  let s := Tools.NetCheck.comparable (Srv.run httpApp (srvCfg {} n) ins)
+  let r := runMachine (Machine.init (httpProg n) ins) { h with impl := "ember-interp" } (fuel := 4000000)
+  if let some e := r.error then some s!"Ember stack trapped: {repr e}" else
+  let d := diff s (Tools.NetCheck.comparable r.trace) { observable := false, context := 2 }
+  if d.equal then none else some d.report
+
+def httpNet (extra : Array (String × Array Input)) : IO Nat := do
+  match (Net.Http.prog 2 Srv.Http.demo).check with
+  | .error e => IO.println s!"FAIL http net program does not check: {repr e}"; return 1
+  | .ok _ => pure ()
+  let mut bad := 0
+  let mut k := 0
+  for (name, ins) in httpStreams 5 ++ extra do
+    for n in [1, 2] do
+      k := k + 1
+      if let some d := httpSame n ins then
+        bad := bad + 1
+        IO.println s!"FAIL http net n={n} {name}: {d}"
+  IO.println s!"http net: {k} runs (exchanges, mutated, re-chunked, ticks × 1, 2 connections), Ember = Spec.Srv, {bad} failures"
+  return bad
+
+def httpHostC (extra : Array (String × Array Input)) : IO Nat := do
+  if !(← Tools.Cc.available) then
+    IO.println "http host C: no C compiler, skipped"
+    return 0
+  let mut units := []
+  for n in [1, 2] do
+    match Tools.Cc.emit s!"http{n}" (httpProg n) with
+    | .error e => IO.println s!"FAIL http host C: emit n={n}: {e}"; return 1
+    | .ok c => units := units ++ [(s!"http{n}", c)]
+  let exe ← match ← Tools.Cc.build { dir := ".lake/ember-http", flags := #["-O2", "-fsanitize=undefined,address",
+      "-fno-sanitize-recover=all"] } units with
+    | .error e => IO.println s!"FAIL http host C: build: {e}"; return 1
+    | .ok exe => pure exe
+  let tmp : System.FilePath := ".lake/ember-http/inputs.trace"
+  let mut bad := 0
+  let mut k := 0
+  for (name, ins) in httpStreams 6 ++ extra do
+    for (n, idx) in [(1, 0), (2, 1)] do
+      k := k + 1
+      Tools.Cc.writeInputs tmp (Spec.Config.header {}) ins
+      let (t, rc) ← Tools.Cc.run exe idx tmp
+      let s := Tools.NetCheck.comparable (Srv.run httpApp (srvCfg {} n) ins)
+      let d := diff s (Tools.NetCheck.comparable t) { observable := false, context := 2 }
+      if rc != 0 || !d.equal then
+        bad := bad + 1
+        IO.println s!"FAIL http host C n={n} {name} (exit {rc}): {d.report}"
+  IO.println s!"http host C: {k} runs (-O2, UBSan/ASan), C = Spec.Srv, {bad} failures"
+  return bad
+
 def main : IO UInt32 := do
   let a ← corpus
   let b ← generated 100 1
@@ -223,6 +311,10 @@ def main : IO UInt32 := do
   let f ← netGenerated 50 2
   let g ← netTwoClients
   let h ← hostC 50 3
-  return if a + b + c + d + e + f + g + h == 0 then 0 else 1
+  let i ← HttpTests.run
+  let (l, fx) ← httpFixtures
+  let j ← httpNet fx
+  let k ← httpHostC fx
+  return if a + b + c + d + e + f + g + h + i + j + k + l == 0 then 0 else 1
 
 end Ember.Tests.SrvTests

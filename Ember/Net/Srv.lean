@@ -30,7 +30,7 @@ globals, one slot per connection):
 | `app_acked(n : u16)` | `acked` |
 | `app_close() : bool` | `close` |
 
-and two constants, `APP_PORT` and `APP_IDLE_CLOSE`.  `echo n mss` is
+and three constants, `APP_PORT`, `APP_IDLE_CLOSE` and `APP_REUSE_TW`.  `echo n mss` is
 `Spec.Srv.echo` written so.
 -/
 
@@ -371,6 +371,14 @@ ember def tcp_segment := do
       listen_input()
       tcb_save()
       return
+  if APP_REUSE_TW then
+    for m in [0, N_CONNS) do
+      if c_st[m] == TIME_WAIT then
+        tcb_load(m)
+        tcb_reset()
+        listen_input()
+        tcb_save()
+        return
   busy_input()
 
 /-- One tick of the connection in `t` (`Net.tcp_tick`; the idle close is the application's). -/
@@ -497,6 +505,7 @@ def echo (n mss : Nat) : App where
   globals :=
     [{ name := "APP_PORT", ty := .u16, init := [7], const := true },
      { name := "APP_IDLE_CLOSE", ty := .bool, init := [1], const := true },
+     { name := "APP_REUSE_TW", ty := .bool, init := [0], const := true },
      { name := "e_len", ty := .arr .u16 n },
      { name := "pend", ty := .arr .u8 (n * mss) }]
   fns := [Echo.app_reset, Echo.app_room, Echo.app_recv, Echo.app_avail, Echo.app_fill,

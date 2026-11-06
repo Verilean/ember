@@ -55,6 +55,10 @@ structure App where
   close : σ → Bool
   /-- Close after `idleTicks` ticks with nothing in flight (echo does). -/
   idleClose : Bool
+  /-- A SYN that finds no connection in LISTEN takes one in TIME-WAIT
+  (a server that closes first, as HTTP does, would otherwise refuse
+  clients for `timeWaitTicks` after each one). -/
+  reuseTimeWait : Bool := false
 
 /-- The echo application of `Ember.Spec.Tcp`: the state is its buffer. -/
 def echo : App where
