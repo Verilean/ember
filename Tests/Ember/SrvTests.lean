@@ -302,6 +302,19 @@ def httpHostC (extra : Array (String × Array Input)) : IO Nat := do
   IO.println s!"http host C: {k} runs (-O2, UBSan/ASan), C = Spec.Srv, {bad} failures"
   return bad
 
+/-- `EMBER_HTTP_DUMP=DIR`: write the HTTP sessions with `Spec.Srv`'s
+traces, for the replay on the ESP32-C3 image (`qemu-test.sh`). -/
+def httpDump (dir : System.FilePath) : IO Unit := do
+  IO.FS.createDirAll dir
+  let mut i := 0
+  for (name, ins) in httpStreams 7 do
+    let t := Srv.run httpApp (srvCfg {} 2) ins
+    let lines := t.print.splitOn "\n"
+    IO.FS.writeFile (dir / s!"http-{i}.trace")
+      (lines.head! ++ s!"\n# {name}: Spec.Srv with Spec.Srv.Http.demo, 2 connections\n" ++ "\n".intercalate lines.tail!)
+    i := i + 1
+  IO.println s!"http: {i} sessions written to {dir}"
+
 def main : IO UInt32 := do
   let a ← corpus
   let b ← generated 100 1

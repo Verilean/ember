@@ -392,7 +392,7 @@ def test_corpus(args):
         name = "-".join(f.split(os.sep)[-2:])
         out = os.path.join(outdir, name)
         try:
-            text, _ = replay("stack-test", header, inputs)
+            text, _ = replay(args.image, header, inputs)
         except TargetError as e:
             return f, False, str(e)
         with open(out, "w") as o:
@@ -506,6 +506,8 @@ def main():
     p.add_argument("--jobs", type=int, default=min(8, os.cpu_count() or 1))
     p.add_argument("--only", default="")
     p.add_argument("--verbose", action="store_true")
+    p.add_argument("--image", default="stack-test",
+                   help="the image to replay on (stack-http-test for the HTTP fixtures of plan M8)")
     sub.add_parser("tick")
     sub.add_parser("ping")
     args = ap.parse_args()

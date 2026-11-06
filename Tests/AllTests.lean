@@ -17,6 +17,9 @@ open LSpec
 
 def main (args : List String) : IO UInt32 := do
   -- `EMBER_ONLY=spec|srv|lang|net|esp32|z80` runs one suite
+  if let some d ← IO.getEnv "EMBER_HTTP_DUMP" then
+    Ember.Tests.SrvTests.httpDump d
+    return 0
   let only ← IO.getEnv "EMBER_ONLY"
   let want (name : String) : Bool := only.isNone || only == some name
   let mut rc : UInt32 := 0

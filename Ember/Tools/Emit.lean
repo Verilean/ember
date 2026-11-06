@@ -2,6 +2,7 @@ import Ember.Lang.Examples
 import Ember.Net.Main
 import Ember.Net.Loop
 import Ember.Net.Eth
+import Ember.Net.Http
 import Ember.Lang.Pretty
 import Ember.C.Compile
 import Ember.C.DropChecks
@@ -28,8 +29,11 @@ def registry : IO (List (String × Prog)) :=
   pure (Examples.all ++ [("net", Net.prog), ("sliploop", Net.Loop.prog),
     ("net-eth", Net.Eth.prog), ("net-eth-dhcp", Net.Eth.progDhcp)])
 
-/-- Programs of a test of the tools: emitted by name, without a golden file. -/
-def extra : List (String × Prog) := [("trapnote", Examples.TrapNote.prog)]
+/-- Programs emitted by name, without a golden file: a test of the tools,
+and the HTTP server of plan M8 on two connections (`Net.Http`, the demo
+site), which the ESP32-C3 image `stack-http` runs. -/
+def extra : List (String × Prog) :=
+  [("trapnote", Examples.TrapNote.prog), ("http", Net.Http.prog 2 Spec.Srv.Http.demo)]
 
 def goldenDir : System.FilePath := "Tests/Ember/golden"
 

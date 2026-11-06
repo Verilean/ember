@@ -98,6 +98,21 @@ python3 tools/ember/record-linux.py client --name curl --out /tmp \
     -- sh -c 'curl -sS http://10.0.0.1/ && curl -sS -I http://10.0.0.1/hello.txt'
 ```
 
+The same on the ESP32-C3 in QEMU (inside `nix-shell`, after
+`tools/ember/qemu-test.sh build`): `tools/ember/qemu-bridge.py` runs an
+image and puts its UART0 on stdin/stdout, as `ember-host` is:
+
+```
+python3 tools/ember/record-linux.py client --name curl-qemu --out /tmp \
+    --host "python3 tools/ember/qemu-bridge.py .lake/build/esp32c3/stack-http.bin" \
+    -- sh -c 'sleep 2; curl -sS http://10.0.0.1/big.txt'
+```
+
+`qemu-test.sh` replays the HTTP sessions on the image `stack-http-test`
+(`esp32.py corpus --image stack-http-test`): the recorded curl session
+and the exchanges of `HttpTests.lean`, mutated, re-chunked and with ticks,
+whose expected traces are `Spec.Srv`'s (`EMBER_HTTP_DUMP=DIR` writes them).
+
 `Tests/Ember/http/curl-session.trace` was recorded so (GET of the page and
 of a 2 110-byte file over several segments, a missing path, POST, HEAD;
 one connection, each client taking the previous one's TIME-WAIT).
