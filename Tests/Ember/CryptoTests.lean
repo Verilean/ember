@@ -1,5 +1,7 @@
 import Ember.Spec.Crypto.Curve25519
 import Ember.Util.Rand
+import Ember.Net.Crypto.Test
+import Ember.Tools.Cc
 
 /-!
 # The crypto reference against the RFCs' test vectors (plan M8.5a)
@@ -148,6 +150,182 @@ def againstOpenssl (count seed : Nat) : IO Nat := do
   IO.println s!"crypto vs OpenSSL: {k} random cases (SHA-256, SHA-512, HMAC, Poly1305, ChaCha20, X25519, Ed25519), {bad} failures"
   return bad
 
+/-! ## The Ember crypto (interpreter and host C) against the reference -/
+
+def request (op : Nat) (data : ByteArray) : ByteArray :=
+  ByteArray.mk #[UInt8.ofNat op, UInt8.ofNat (data.size / 256), UInt8.ofNat (data.size % 256)] ++ data
+
+/-- Requests with the answers the reference gives. -/
+def emberCases (count seed : Nat) : Array (String × ByteArray × ByteArray) := Id.run do
+  let mut out := #[]
+  for m in [ByteArray.empty, str "abc", str "abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq",
+            ByteArray.mk (Array.replicate 55 97), ByteArray.mk (Array.replicate 56 97),
+            ByteArray.mk (Array.replicate 64 97), ByteArray.mk (Array.replicate 1000 97)] do
+    out := out.push (s!"sha256 {m.size} bytes", request 1 m, sha256 m)
+  let mut rng := Rng.ofSeed seed
+  for i in [0:count] do
+    let ((m, kl, key, prk, l, info), rng') := (do
+      let n ← randNat 400
+      let kl ← randNat 100
+      let l ← randNat 255
+      let il ← randNat 200
+      return (← randBytes n, kl, ← randBytes kl, ← randBytes 32, l, ← randBytes il) : RandM _).run rng
+    let ((nonce, ctr, aad), rng') := (do
+      let al ← randNat 40
+      return (← randBytes 12, ← randNat 100000, ← randBytes al) : RandM _).run rng'
+    out := out.push (s!"chacha20 random {i}", request 4 (prk ++ nonce ++ natLe ctr 4 ++ m), chacha20 prk (UInt32.ofNat ctr) nonce m)
+    out := out.push (s!"poly1305 random {i}", request 5 (prk ++ m), poly1305 prk m)
+    let sealed := aeadSeal prk nonce aad m
+    let openReq (ct : ByteArray) := request 10 (prk ++ nonce ++ ByteArray.mk #[UInt8.ofNat (aad.size / 256), UInt8.ofNat (aad.size % 256)] ++ aad ++ ct)
+    let openAns (ct : ByteArray) := match aeadOpen prk nonce aad ct with
+      | some pt => ByteArray.mk #[1] ++ pt
+      | none => ByteArray.mk #[0]
+    out := out.push (s!"aead open random {i}", openReq sealed, openAns sealed)
+    -- a changed byte of the cipher text, of the tag, of the AAD: rejected
+    if m.size > 0 then
+      let bad := sealed.set! (i % m.size) (sealed[i % m.size]! ^^^ 0x40)
+      out := out.push (s!"aead open changed text {i}", openReq bad, openAns bad)
+    let badTag := sealed.set! (sealed.size - 1 - i % 16) (sealed[sealed.size - 1 - i % 16]! ^^^ 1)
+    out := out.push (s!"aead open changed tag {i}", openReq badTag, openAns badTag)
+    let saltLen := i % 40
+    let salt := ByteArray.mk ((List.range saltLen).toArray.map fun k => UInt8.ofNat (k * 7 + i))
+    out := out.push (s!"hkdf-extract random {i} (salt {saltLen})",
+      request 11 (ByteArray.mk #[UInt8.ofNat saltLen] ++ salt ++ m), hkdfExtract salt m)
+    out := out.push (s!"aead random {i}", request 6 (prk ++ nonce ++ ByteArray.mk #[UInt8.ofNat (aad.size / 256), UInt8.ofNat (aad.size % 256)] ++ aad ++ m),
+      aeadSeal prk nonce aad m)
+    rng := rng'
+    out := out.push (s!"sha256 random {i}", request 1 m, sha256 m)
+    out := out.push (s!"hmac random {i} (key {kl})", request 2 (ByteArray.mk #[UInt8.ofNat kl] ++ key ++ m), hmac256 key m)
+    out := out.push (s!"hkdf-expand random {i} ({l} bytes)", request 3 (prk ++ ByteArray.mk #[UInt8.ofNat l] ++ info),
+      hkdfExpand prk info l)
+  out := out.push ("hmac 4231.1", request 2 (ByteArray.mk #[20] ++ ByteArray.mk (Array.replicate 20 0x0b) ++ str "Hi There"),
+    hmac256 (ByteArray.mk (Array.replicate 20 0x0b)) (str "Hi There"))
+  -- salts at and beyond a block: 64 bytes go in as they are, longer ones are hashed first
+  for sl in [63, 64, 65, 100, 200, 255] do
+    let salt := ByteArray.mk ((List.range sl).toArray.map fun k => UInt8.ofNat (k * 13 + 1))
+    let ikm := str "input keying material"
+    out := out.push (s!"hkdf-extract salt {sl}", request 11 (ByteArray.mk #[UInt8.ofNat sl] ++ salt ++ ikm), hkdfExtract salt ikm)
+  out := out.push ("hkdf 5869.1 prk", request 11 (ByteArray.mk #[13] ++ range 0 13 ++ ByteArray.mk (Array.replicate 22 0x0b)),
+    hex "077709362c2e32df0ddc3f0dc47bba6390b6c73bb50f9c3122ec844ad7c2b3e5")
+  out := out.push ("hkdf 5869.1 okm", request 3 (hex "077709362c2e32df0ddc3f0dc47bba6390b6c73bb50f9c3122ec844ad7c2b3e5" ++
+      ByteArray.mk #[42] ++ range 0xf0 10), hex "3cb25f25faacd57a90434f64d0362f2a2d2d0a90cf1a5a4c5db02d56ecc4c5bf34007208d5b887185865")
+  -- X25519: the RFC 7748 vectors, the key exchange, u values at and above p, and random ones
+  out := out.push ("x25519 7748 5.2.1", request 7 (hex "a546e36bf0527c9d3b16154b82465edd62144c0ac1fc5a18506a2244ba449ac4" ++
+      hex "e6db6867583030db3594c1a424b15f7c726624ec26b3353b10a903a6d0ab1c4c"),
+    hex "c3da55379de9c6908e94ea4df28d084f32eccf03491c71f754b4075577a28552")
+  out := out.push ("x25519 7748 5.2.2", request 7 (hex "4b66e9d4d1b4673c5ad22691957d6af5c11b6421e0ea01d42ca4169e7918ba0d" ++
+      hex "e5210f12786811d3f4b7959d0538ae2c31dbe7106fc03c3efc4cd549c715a493"),
+    hex "95cbde9476e8907d7aade45cb4b873f88b595a68799fa152e6f8f7647aac7957")
+  out := out.push ("x25519 shared", request 7 (hex "5dab087e624a8a4b79e17f8b83800ee66f3bb1292618b6fd1c2f8b27ff88e0eb" ++
+      hex "8520f0098930a754748b7ddcb43ef75a0dbf3a0d26381af4eba4a98eaa9b4e6a"),
+    hex "4a5d9d5ba4ce2de1728e3bf480350f25e07e21c947d19e3376f09b3c1e161742")
+  for (nm, u) in [("u = p", natLe p25519 32), ("u = p + 1", natLe (p25519 + 1) 32), ("u = 2^255 - 1", natLe (2 ^ 255 - 1) 32),
+                  ("u = 0", natLe 0 32), ("u = 1", natLe 1 32), ("u all ones", ByteArray.mk (Array.replicate 32 0xff))] do
+    let k := hex "77076d0a7318a57d3c16c17251b26645df4c2f87ebc0992ab177fba51db92c2a"
+    out := out.push (s!"x25519 {nm}", request 7 (k ++ u), x25519 k u)
+  let mut rng2 := Rng.ofSeed (seed + 7)
+  for i in [0:12] do
+    let ((k, u), r') := (do return (← randBytes 32, ← randBytes 32) : RandM _).run rng2
+    rng2 := r'
+    out := out.push (s!"x25519 random {i}", request 7 (k ++ u), x25519 k u)
+  -- Ed25519: the RFC 8032 vectors and random seeds and messages; reduction mod L at its edges
+  out := out.push ("ed25519 8032.1", request 8 (hex "9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60"),
+    hex "e5564300c360ac729086e2cc806e828a84877f1eb8e5d974d873e065224901555fb8821590a33bacc61e39701cf9b46bd25bf5f0595bbe24655141438e7a100b")
+  out := out.push ("ed25519 8032.2", request 8 (hex "4ccd089b28ff96da9db6c346ec114e0f5b8a319f35aba624da8cf6ed4fb8a6fb" ++ hex "72"),
+    hex "92a009a9f0d4cab8720e820b5f642540a2b27b5416503f8fb3762223ebdb69da085ac1e43e15996e458f3613d0f11d8c387b2eaeb4302aeeb00d291612bb0c00")
+  for i in [0:6] do
+    let ((sk, m), r') := (do let n ← randNat 300; return (← randBytes 32, ← randBytes n) : RandM _).run rng2
+    rng2 := r'
+    out := out.push (s!"ed25519 random {i}", request 8 (sk ++ m), edSign sk m)
+  for (nm, v) in [("0", 0), ("L - 1", edQ - 1), ("L", edQ), ("L + 1", edQ + 1), ("2^512 - 1", 2 ^ 512 - 1), ("L^2", edQ * edQ)] do
+    out := out.push (s!"mod L {nm}", request 9 (natLe v 64), natLe (v % edQ) 32)
+  for i in [0:10] do
+    let (b, r') := (randBytes 64 : RandM _).run rng2
+    rng2 := r'
+    out := out.push (s!"mod L random {i}", request 9 b, natLe (leNat b % edQ) 32)
+  out := out.push ("chacha20 2.4.2", request 4 (range 0 32 ++ hex "000000000000004a00000000" ++ natLe 1 4 ++
+      str "Ladies and Gentlemen of the class of '99: If I could offer you only one tip for the future, sunscreen would be it."),
+    chacha20 (range 0 32) 1 (hex "000000000000004a00000000")
+      (str "Ladies and Gentlemen of the class of '99: If I could offer you only one tip for the future, sunscreen would be it."))
+  out := out.push ("poly1305 2.5.2", request 5 (hex "85d6be7857556d337f4452fe42d506a80103808afb0db2fd4abff6af4149f51b" ++
+      str "Cryptographic Forum Research Group"), hex "a8061dc1305136c6c22b8baf0c0127a9")
+  -- Poly1305 edge: a key whose r is all ones in its allowed bits, and h near p
+  out := out.push ("poly1305 high", request 5 (ByteArray.mk (Array.replicate 32 0xff) ++ ByteArray.mk (Array.replicate 64 0xff)),
+    poly1305 (ByteArray.mk (Array.replicate 32 0xff)) (ByteArray.mk (Array.replicate 64 0xff)))
+  return out
+
+def emberProg : Ember.Lang.Prog := match Net.Crypto.testProg.check with
+  | .ok p => p
+  | .error _ => Net.Crypto.testProg
+
+def txs (t : Ember.Trace.Trace) : List ByteArray :=
+  t.lines.toList.filterMap fun l => match l.ev with | .tx b => some b | _ => none
+
+def emberRun : IO Nat := do
+  match Net.Crypto.testProg.check with
+  | .error e => IO.println s!"FAIL ember crypto: the program does not check: {repr e}"; return 1
+  | .ok _ => pure ()
+  let cs := emberCases 40 21
+  let input := cs.foldl (fun acc (_, r, _) => acc ++ r) ByteArray.empty
+  let ins : Array Ember.Trace.Input := #[.rx input]
+  let r := Ember.Lang.runMachine (Ember.Lang.Machine.init emberProg ins) {} (fuel := 100000000)
+  let mut bad := 0
+  if let some e := r.error then
+    IO.println s!"FAIL ember crypto interpreter: {repr e}"
+    return 1
+  let got := txs r.trace
+  for ((name, _, want), g) in cs.toList.zip got do
+    if g.toList != want.toList then
+      bad := bad + 1
+      IO.println s!"FAIL ember crypto interpreter {name}: {toHex g} want {toHex want}"
+  if got.length != cs.size then
+    bad := bad + 1
+    IO.println s!"FAIL ember crypto interpreter: {got.length} answers for {cs.size} requests"
+  IO.println s!"ember crypto (interpreter): {cs.size} requests (SHA-256, HMAC, HKDF-Expand, ChaCha20, Poly1305, AEAD, X25519, Ed25519, mod L, AEAD open, HKDF-Extract), = reference, {bad} failures"
+  -- the emitted C
+  if !(← Tools.Cc.available) then
+    IO.println "ember crypto (host C): no C compiler, skipped"
+    return bad
+  let c ← match Tools.Cc.emit "crypto" emberProg with
+    | .error e => IO.println s!"FAIL ember crypto: emit: {e}"; return bad + 1
+    | .ok c => pure c
+  let exe ← match ← Tools.Cc.build { dir := ".lake/ember-crypto-c", flags := #["-O2", "-fsanitize=undefined,address",
+      "-fno-sanitize-recover=all"] } [("crypto", c)] with
+    | .error e => IO.println s!"FAIL ember crypto: build: {e}"; return bad + 1
+    | .ok exe => pure exe
+  let f : System.FilePath := ".lake/ember-crypto-c/inputs.trace"
+  Tools.Cc.writeInputs f {} ins
+  let (t, rc) ← Tools.Cc.run exe 0 f
+  let gotC := txs t
+  let mut badC := 0
+  for ((name, _, want), g) in cs.toList.zip gotC do
+    if g.toList != want.toList then
+      badC := badC + 1
+      IO.println s!"FAIL ember crypto host C {name}: {toHex g} want {toHex want}"
+  if rc != 0 || gotC.length != cs.size then
+    badC := badC + 1
+    IO.println s!"FAIL ember crypto host C: exit {rc}, {gotC.length} answers for {cs.size} requests"
+  IO.println s!"ember crypto (host C, -O2, UBSan/ASan): {cs.size} requests, = reference, {badC} failures"
+  return bad + badC
+
+/-- `EMBER_CRYPTO_DUMP=DIR`: the requests with the reference's answers as
+fixtures (20 requests each), for the replay on the ESP32-C3 image
+`crypto-test` (`qemu-test.sh`). -/
+def dump (dir : System.FilePath) : IO Unit := do
+  IO.FS.createDirAll dir
+  let cs := emberCases 40 21
+  let groups := (List.range ((cs.size + 19) / 20)).map fun g => cs.extract (20 * g) (20 * g + 20)
+  let mut i := 0
+  for grp in groups do
+    let input := grp.foldl (fun acc (_, r, _) => acc ++ r) ByteArray.empty
+    let evs : List Ember.Trace.Event := grp.toList.map fun (_, _, a) => .tx a
+    let t := Ember.Trace.Trace.ofSteps { profile := "rv32" } #[(.rx input, evs)]
+    let lines := t.print.splitOn "\n"
+    IO.FS.writeFile (dir / s!"crypto-{i}.trace")
+      (lines.head! ++ s!"\n# crypto requests {20 * i}..: answers of Ember.Spec.Crypto\n" ++ "\n".intercalate lines.tail!)
+    i := i + 1
+  IO.println s!"crypto: {cs.size} requests in {i} fixtures written to {dir}"
+
 def run : IO Nat := do
   let mut bad := 0
   for (name, got, want) in cases do
@@ -187,6 +365,7 @@ def run : IO Nat := do
       bad := bad + 1
       IO.println s!"FAIL crypto {name}"
   bad := bad + (← againstOpenssl 30 11)
+  bad := bad + (← emberRun)
   IO.println s!"crypto: {cases.length + checks.length} RFC vectors and checks (SHA-256/512, HMAC, HKDF, ChaCha20-Poly1305, X25519, Ed25519), {bad} failures"
   return bad
 

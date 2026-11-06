@@ -31,6 +31,7 @@ import Ember.Net.Loop
 import Ember.Net.Eth
 import Ember.Net.Srv
 import Ember.Net.Http
+import Ember.Net.Crypto.Test
 import Ember.Z80.Cpu
 import Ember.Z80.Asm
 import Ember.Z80.AsmSem

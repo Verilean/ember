@@ -18,6 +18,9 @@ open LSpec
 
 def main (args : List String) : IO UInt32 := do
   -- `EMBER_ONLY=spec|srv|crypto|lang|net|esp32|z80` runs one suite
+  if let some d ← IO.getEnv "EMBER_CRYPTO_DUMP" then
+    Ember.Tests.CryptoTests.dump d
+    return 0
   if let some d ← IO.getEnv "EMBER_HTTP_DUMP" then
     Ember.Tests.SrvTests.httpDump d
     return 0
