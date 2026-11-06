@@ -1,5 +1,6 @@
 import Ember.Spec.Srv.Http
 import Ember.Spec.Crypto.Curve25519
+import Ember.Spec.Crypto.P256
 
 /-!
 # Ember.Spec.Srv.Tls — a TLS 1.3 server as an `App`, HTTP inside (plan M8.6)
@@ -9,7 +10,9 @@ The reference for the HTTPS server of plan M8.  RFC 8446, reduced:
 * server only, full handshake only (no resumption, no 0-RTT, no
   HelloRetryRequest, no client certificate);
 * one suite, `TLS_CHACHA20_POLY1305_SHA256`; key exchange X25519; the
-  certificate's key and the `CertificateVerify` signature Ed25519;
+  certificate's key and the `CertificateVerify` signature Ed25519 when
+  the client offers it, otherwise ECDSA P-256 with SHA-256 when the site
+  has such a certificate (browsers; plan M8.8);
 * the ClientHello must come in one record, every length in it inside
   what contains it; records up to `recMax` bytes are accepted;
 * after the handshake, the application data is one HTTP request
@@ -38,6 +41,10 @@ structure Site where
   /-- The certificate (DER) and the Ed25519 seed of its key. -/
   cert   : ByteArray
   key    : ByteArray
+  /-- A second certificate with a P-256 key (its private scalar), for
+  clients that do not offer Ed25519 — browsers (plan M8.8); none when empty. -/
+  certP256 : ByteArray := .empty
+  keyP256  : Nat := 0
   seed   : ByteArray
   recMax : Nat := 2048
   chunk  : Nat := 1024
@@ -65,7 +72,8 @@ structure Conn where
   cFin   : ByteArray := .empty
   cAp    : ByteArray := .empty
   sAp    : ByteArray := .empty
-  req    : ByteArray := .empty
+  /-- The HTTP request inside, as `Spec.Srv.Http` takes it. -/
+  http   : Http.Conn := {}
   done   : Bool := false
   deriving Inhabited
 
@@ -120,6 +128,9 @@ structure Hello where
   random : ByteArray
   sid    : ByteArray
   share  : ByteArray
+  /-- The signature algorithms offered: ed25519 (0x0807), ecdsa_secp256r1_sha256 (0x0403). -/
+  ed     : Bool
+  p256   : Bool
 
 /-- The parts of a ClientHello this server needs, or `none` when it cannot be
 served.  Every length is checked against what contains it (a field that
@@ -156,6 +167,8 @@ def parseHello (m : ByteArray) : Option Hello := do
   guard (stop == size)
   let mut versions := false
   let mut sigOk := false
+  let mut sigEd := false
+  let mut sigP := false
   let mut share : Option ByteArray := none
   while i + 4 ≤ stop do
     let ty := get16 m i
@@ -169,7 +182,9 @@ def parseHello (m : ByteArray) : Option Hello := do
     if ty == 13 then
       -- a list of 2-byte algorithms: its length even, at least one
       guard (len ≥ 2 && get16 d 0 + 2 == len && get16 d 0 % 2 == 0 && get16 d 0 ≥ 2)
-      sigOk := (List.range (get16 d 0 / 2)).any fun k => get16 d (2 + 2 * k) == 0x0807
+      sigOk := true
+      sigEd := (List.range (get16 d 0 / 2)).any fun k => get16 d (2 + 2 * k) == 0x0807
+      sigP := (List.range (get16 d 0 / 2)).any fun k => get16 d (2 + 2 * k) == 0x0403
     if ty == 51 then
       guard (len ≥ 2 && get16 d 0 + 2 == len)
       let mut j := 2
@@ -183,7 +198,7 @@ def parseHello (m : ByteArray) : Option Hello := do
     i := i + 4 + len
   guard (i == stop && versions && sigOk)
   let s ← share
-  return { random, sid, share := s }
+  return { random, sid, share := s, ed := sigEd, p256 := sigP }
 
 /-! ## The server's flight -/
 
@@ -204,8 +219,13 @@ def serverFlight (site : Site) (c : Conn) (chMsg : ByteArray) (h : Hello) : Conn
   let eph := sha256 (site.seed ++ str "ecdhe" ++ h.random)
   let pub := x25519 eph basepoint9
   let shared := x25519 eph h.share
+  -- Ed25519 when offered, else P-256 when offered and there is such a
+  -- certificate; neither is handshake_failure, before anything else
+  let useP := !h.ed && h.p256 && site.certP256.size > 0
+  if !h.ed && !useP then fail c 40 else
   -- a share of small order gives zeros: RFC 8446 §7.4.2, abort with illegal_parameter
   if shared.toList.all (· == 0) then fail c 47 else
+  let certBytes := if useP then site.certP256 else site.cert
   let exts := b2 43 ++ b2 2 ++ b2 0x0304 ++ b2 51 ++ b2 36 ++ b2 0x001d ++ b2 32 ++ pub
   let sh := handshake 2 (b2 0x0303 ++ srand ++ b1 h.sid.size ++ h.sid ++ b2 0x1303 ++ b1 0 ++ b2 exts.size ++ exts)
   let t1 := chMsg ++ sh
@@ -214,11 +234,12 @@ def serverFlight (site : Site) (c : Conn) (chMsg : ByteArray) (h : Hello) : Conn
   let cHs := deriveSecret hsSecret "c hs traffic" t1
   let sHs := deriveSecret hsSecret "s hs traffic" t1
   let ee := handshake 8 (b2 0)
-  let entry := b3 site.cert.size ++ site.cert ++ b2 0
+  let entry := b3 certBytes.size ++ certBytes ++ b2 0
   let cert := handshake 11 (b1 0 ++ b3 entry.size ++ entry)
   let t2 := t1 ++ ee ++ cert
-  let sig := edSign site.key (certVerifyContent (sha256 t2))
-  let cv := handshake 15 (b2 0x0807 ++ b2 sig.size ++ sig)
+  let sig := if useP then p256Sign site.keyP256 (certVerifyContent (sha256 t2))
+    else edSign site.key (certVerifyContent (sha256 t2))
+  let cv := handshake 15 (b2 (if useP then 0x0403 else 0x0807) ++ b2 sig.size ++ sig)
   let t3 := t2 ++ cv
   let sFin := handshake 20 (hmac256 (expandLabel sHs "finished" .empty 32) (sha256 t3))
   let t4 := t3 ++ sFin
@@ -271,11 +292,8 @@ def onRecord (site : Site) (c : Conn) (hdr body : ByteArray) : Conn :=
       if ity == 21 then respond site c .empty
       else if ity != 23 then fail c 10
       else
-        let req := c.req ++ m
-        let first := req.extract 0 site.http.reqMax
-        if Http.headerEnds first then respond site c (Http.answer site.http req)
-        else if req.size ≥ site.http.reqMax then respond site c (Http.errorText 400 "Bad Request" false)
-        else { c with req }
+        let hc := Http.recv site.http c.http m
+        if hc.decided then respond site c hc.resp else { c with http := hc }
 
 /-- Take every whole record from `inb`. -/
 partial def drain (site : Site) (c : Conn) : Conn :=
@@ -315,10 +333,20 @@ def demoCert : ByteArray := hexBytes
 
 def demoKey : ByteArray := hexBytes "548be1fd94c375e3ac74f69b842a44817f2918b076d9e2d1059b5be52d4aac92"
 
+/-- A self-signed demo certificate for `ember.local` (and 10.0.0.1) with a
+P-256 key, and that key's private scalar (`openssl req -x509` once; a demo
+key, published here). -/
+def demoCertP256 : ByteArray := hexBytes
+  "308201a130820147a00302010202142a7e65bc3b4797ca59a6e8d5d86df25fc454e5c5300a06082a8648ce3d04030230163114301206035504030c0b656d6265722e6c6f63616c3020170d3236313130363037353133395a180f32313236313031333037353133395a30163114301206035504030c0b656d6265722e6c6f63616c3059301306072a8648ce3d020106082a8648ce3d03010703420004a6b2980f6806e1c20c18baf70d5d40e5143dc84cf58e0b9e061b9e09c24f64747e3fdbe1bc1b1414692432f9c3800040af4abbd4e13b2eca10930ab7e2ac5f56a371306f301d0603551d0e041604145bc16637eb5cfec58502862563c8d7f39e8a6fc3301f0603551d230418301680145bc16637eb5cfec58502862563c8d7f39e8a6fc3300f0603551d130101ff040530030101ff301c0603551d1104153013820b656d6265722e6c6f63616c87040a000001300a06082a8648ce3d0403020348003045022041ffdfe99c92be23b2e844ab6b99ffe01c61f4792dd7ea61206627d94832de9f0221008afd3809aadafa29a78f515b9beeeae1b6c52c47f95748841a8db19646095254"
+
+def demoKeyP256 : Nat := 0xfa0a49c1c8cfbd402e655dd050d28ec0721a5e16a8db9e8baf0a60702a542a75
+
 def demo : Site where
   http := Http.demo
   cert := demoCert
   key := demoKey
+  certP256 := demoCertP256
+  keyP256 := demoKeyP256
   seed := str "ember demo seed: not for production"
 
 end Ember.Spec.Srv.Tls

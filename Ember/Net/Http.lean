@@ -11,8 +11,9 @@ are put in one constant array `h_rom`, with tables of where each
 response's header and body are; the routes' paths are in `h_paths`.
 Response `k` is route `k`, or `404`, `400`, `501` after the routes.
 
-Per connection (index `cur`): the request so far (`h_req`, `REQ_MAX`
-bytes each, and its length `h_rlen`), whether it is answered
+Per connection (index `cur`): the first `REQ_MAX` bytes of the request
+(`h_req`, their number `h_rlen`), how much of `CRLF CRLF` was just seen
+(`h_crlf`) and how many bytes the header has so far (`h_seen`), whether it is answered
 (`h_dec`), with which response (`h_kind`) and whether for `HEAD`
 (`h_head`), and how much of the response is acknowledged (`h_pos`).
 A segment's bytes are computed from the tables (`h_byte`): nothing of
@@ -38,17 +39,14 @@ ember def h_total : u16 := do
 
 ember def app_reset := do
   h_rlen[cur] := 0
+  h_crlf[cur] := 0
+  h_seen[cur] := 0
   h_dec[cur] := false
   h_kind[cur] := 0
   h_head[cur] := false
   h_pos[cur] := 0
 
 ember def app_room (c : u16) : u16 := do
-  if h_dec[cur] then
-    return c
-  let r : u16 := REQ_MAX - h_rlen[cur]
-  if r < c then
-    return r
   return c
 
 /-- Answer the request in `h_req` (its header is complete). -/
@@ -105,31 +103,49 @@ ember def h_decide := do
         kind := k
   h_kind[cur] := (kind : u8)
 
-ember def app_recv (off : u16) (n : u16) := do
-  if h_dec[cur] then
-    return
+/-- One byte of the request (`Spec.Srv.Http.step`): its first `REQ_MAX`
+bytes kept, the end of the header found by a four-state matcher
+(`h_crlf`), the bytes counted (`h_seen`, at most `HDR_MAX`). -/
+ember def h_feed (x : u8) := do
   let base : u16 := cur * REQ_MAX
-  let old : u16 := h_rlen[cur]
-  for i in [0, n) do
-    h_req[base + old + i] := buf[off + i]
-  let rlen : u16 := old + n
-  h_rlen[cur] := rlen
-  let mut start : u16 := 0
-  if old > 3 then
-    start := old - 3
-  let mut ends : bool := false
-  if rlen >= 4 then
-    for j in [start, rlen - 3) do
-      if h_req[base + j] == 13 && h_req[base + j + 1] == 10 && h_req[base + j + 2] == 13 && h_req[base + j + 3] == 10 then
-        ends := true
-  if ends then
-    h_decide()
+  let rl : u16 := h_rlen[cur]
+  if rl < REQ_MAX then
+    h_req[base + rl] := x
+    h_rlen[cur] := rl + 1
+  let st : u8 := h_crlf[cur]
+  let mut ns : u8 := 0
+  if (st == 0 || st == 2) && x == 13 then
+    ns := st + 1
+  else
+    if (st == 1 || st == 3) && x == 10 then
+      ns := st + 1
+    else
+      if x == 13 then
+        ns := 1
+  h_crlf[cur] := ns
+  h_seen[cur] := h_seen[cur] + 1
+  if ns == 4 then
+    -- the request line must end within the bytes kept
+    let mut cr : bool := false
+    for i : u16 in [0, h_rlen[cur]) do
+      if h_req[base + i] == 13 then
+        cr := true
+    if cr then
+      h_decide()
+    else
+      h_kind[cur] := KB_400
+      h_head[cur] := false
     h_dec[cur] := true
     return
-  if rlen >= REQ_MAX then
+  if h_seen[cur] >= HDR_MAX then
     h_kind[cur] := KB_400
     h_head[cur] := false
     h_dec[cur] := true
+
+ember def app_recv (off : u16) (n : u16) := do
+  for i : u16 in [0, n) do
+    if !h_dec[cur] then
+      h_feed(buf[off + i])
 
 ember def app_avail : u16 := do
   if !h_dec[cur] then
@@ -189,9 +205,11 @@ def app (n : Nat) (site : Spec.Srv.Http.Site) : Net.Srv.App :=
        bytesG "h_paths" paths.flatten, u16s "h_poff" poff, u16s "h_plen" (paths.map (·.length)),
        { name := "h_req", ty := .arr .u8 (n * site.reqMax) },
        { name := "h_rlen", ty := .arr .u16 n }, { name := "h_dec", ty := .arr .bool n },
+       { name := "h_crlf", ty := .arr .u8 n }, { name := "h_seen", ty := .arr .u16 n },
+       scalar "HDR_MAX" .u16 site.hdrMax,
        { name := "h_kind", ty := .arr .u8 n }, { name := "h_head", ty := .arr .bool n },
        { name := "h_pos", ty := .arr .u16 n }]
-    fns := [h_byte, h_total, app_reset, app_room, h_decide, app_recv, app_avail, app_fill,
+    fns := [h_byte, h_total, app_reset, app_room, h_decide, h_feed, app_recv, app_avail, app_fill,
             app_acked, app_close] }
 
 /-- The HTTP server for `site` on `n` connections (SLIP, MTU 296). -/

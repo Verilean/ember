@@ -35,13 +35,15 @@ Its reference is `Ember.Spec.Srv` (`Spec/Srv/*.lean`).
 `HEAD` of fixed routes, 404, 400, 501, `Content-Length`, `Connection:
 close`.  The site's responses — headers and bodies — are constants
 (`h_rom`); a segment's bytes are computed from them by offset, so a
-retransmission needs no copy.  Per connection the request header is
-kept (`REQ_MAX` bytes).  The server closes first, so a SYN that finds no
+retransmission needs no copy.  Per connection the first `REQ_MAX` bytes of the
+request header (the request line) are kept; its end is found as the
+bytes come (`h_feed`), up to `HDR_MAX` bytes.  The server closes first, so a SYN that finds no
 connection in LISTEN takes one in TIME-WAIT.
 
 `Tls.lean` is TLS 1.3 on it (`Tls.prog n site`, `Spec.Srv.Tls` record for
 record and alert for alert) with the crypto of `Crypto/` and the HTTP of
-`Http.lean` inside.  Per connection a buffer of records received and one
+`Http.lean` inside; the certificate is Ed25519's when the client offers it,
+P-256's (ECDSA, `Crypto/P256.lean`) otherwise — a browser.  Per connection a buffer of records received and one
 of what is sent (the server's flight and the protected response, kept as
 the Spec keeps them), the transcript hash's SHA-256 context, the keys and
 sequence numbers; records are opened and sealed in place.

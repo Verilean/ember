@@ -1,4 +1,5 @@
 import Ember.Spec.Crypto.Curve25519
+import Ember.Spec.Crypto.P256
 import Ember.Util.Rand
 import Ember.Net.Crypto.Test
 import Ember.Tools.Cc
@@ -243,6 +244,15 @@ def emberCases (count seed : Nat) : Array (String × ByteArray × ByteArray) := 
     let (b, r') := (randBytes 64 : RandM _).run rng2
     rng2 := r'
     out := out.push (s!"mod L random {i}", request 9 b, natLe (leNat b % edQ) 32)
+  -- P-256: RFC 6979 A.2.5 and random keys and messages
+  let d6979 := 0xC9AFA9D845BA75166B5C215767B1D6934E50C3DB36E89B127B8A622B120F6721
+  for m in [str "sample", str "test"] do
+    out := out.push (s!"p256 RFC 6979 {String.fromUTF8! m}", request 12 (natBe d6979 32 ++ m), p256Sign d6979 m)
+  for i in [0:4] do
+    let ((kb, m), r') := (do let n ← randNat 200; return (← randBytes 32, ← randBytes n) : RandM _).run rng2
+    rng2 := r'
+    let d := beNat kb % (n256 - 1) + 1
+    out := out.push (s!"p256 random {i}", request 12 (natBe d 32 ++ m), p256Sign d m)
   out := out.push ("chacha20 2.4.2", request 4 (range 0 32 ++ hex "000000000000004a00000000" ++ natLe 1 4 ++
       str "Ladies and Gentlemen of the class of '99: If I could offer you only one tip for the future, sunscreen would be it."),
     chacha20 (range 0 32) 1 (hex "000000000000004a00000000")
@@ -281,7 +291,7 @@ def emberRun : IO Nat := do
   if got.length != cs.size then
     bad := bad + 1
     IO.println s!"FAIL ember crypto interpreter: {got.length} answers for {cs.size} requests"
-  IO.println s!"ember crypto (interpreter): {cs.size} requests (SHA-256, HMAC, HKDF-Expand, ChaCha20, Poly1305, AEAD, X25519, Ed25519, mod L, AEAD open, HKDF-Extract), = reference, {bad} failures"
+  IO.println s!"ember crypto (interpreter): {cs.size} requests (SHA-256, HMAC, HKDF-Expand, ChaCha20, Poly1305, AEAD, X25519, Ed25519, mod L, AEAD open, HKDF-Extract, P-256), = reference, {bad} failures"
   -- the emitted C
   if !(← Tools.Cc.available) then
     IO.println "ember crypto (host C): no C compiler, skipped"
@@ -326,6 +336,57 @@ def dump (dir : System.FilePath) : IO Unit := do
     i := i + 1
   IO.println s!"crypto: {cs.size} requests in {i} fixtures written to {dir}"
 
+/-! ## P-256 ECDSA against RFC 6979 A.2.5 and OpenSSL (plan M8.8) -/
+
+def p256Cases : List (String × Bool) :=
+  let d := 0xC9AFA9D845BA75166B5C215767B1D6934E50C3DB36E89B127B8A622B120F6721
+  let pub := p256Public d
+  let (r1, s1) := p256SignRS d (str "sample")
+  let (r2, s2) := p256SignRS d (str "test")
+  [("p256 public key (RFC 6979 A.2.5)", toHex pub ==
+      "04" ++ "60fed4ba255a9d31c961eb74c6356d68c049b8923b61fa6ce669622e60f29fb6" ++
+      "7903fe1008b8bc99a41ae9e95628bc64f2f1b20c2d7e9f5177a3c294d4462299"),
+   ("p256 nonce for sample", (rfc6979 d (sha256 (str "sample")) 1).head? ==
+      some 0xA6E3C57DD01ABE90086538398355DD4C3B17AA873382B0F24D6129493D8AAD60),
+   ("p256 sign sample", (r1, s1) == (0xEFD48B2AACB6A8FD1140DD9CD45E81D69D2C877B56AAF991C34D0EA84EAF3716,
+      0xF7CB1C942D657C41D436C7A1B6E29F65F3E900DBB9AFF4064DC4AB2F843ACDA8)),
+   ("p256 sign test", (r2, s2) == (0xF1ABB023518351CD71D881567B1EA663ED3EFCF6C5132B354F28D3B0B7D38367,
+      0x019F4113742A2B14BD25926B49C649155F267E60D3814B4C0CC84250E46F0083)),
+   ("p256 verify", p256Verify pub (str "sample") r1 s1),
+   ("p256 verify rejects another message", !p256Verify pub (str "samplf") r1 s1),
+   ("p256 verify rejects s + 1", !p256Verify pub (str "sample") r1 (s1 + 1)),
+   -- the complete projective ladder (the Ember form) = the affine reference
+   ("p256 complete ladder", [1, 2, 3, d, n256 - 1, n256 - 2, 2 ^ 255 + 12345, 0xdeadbeef].all fun k =>
+      ppMulG k == ptMul k (some g256)),
+   ("p256 complete ladder of n is the point at infinity", ppMulG n256 == none)]
+
+/-- Signatures of random messages under random keys, verified by OpenSSL
+(`openssl pkeyutl -verify` with the DER signature). -/
+def p256Openssl (count seed : Nat) : IO Nat := do
+  if !(← haveOpenssl) then
+    IO.println "p256 vs OpenSSL: no openssl, skipped"
+    return 0
+  IO.FS.createDirAll tmp
+  let mut bad := 0
+  let mut rng := Rng.ofSeed seed
+  for i in [0:count] do
+    let ((kb, m), r') := (do let n ← randNat 200; return (← randBytes 32, ← randBytes n) : RandM _).run rng
+    rng := r'
+    let d := beNat kb % (n256 - 1) + 1
+    let pub := p256Public d
+    -- the public key as SubjectPublicKeyInfo (id-ecPublicKey, prime256v1)
+    IO.FS.writeBinFile (tmp / "p.der") (hex "3059301306072a8648ce3d020106082a8648ce3d030107034200" ++ pub)
+    IO.FS.writeBinFile (tmp / "m.bin") m
+    IO.FS.writeBinFile (tmp / "s.der") (p256Sign d m)
+    let _ ← IO.Process.output { cmd := "openssl", args := #["pkey", "-pubin", "-inform", "DER", "-in", (tmp / "p.der").toString, "-out", (tmp / "p.pem").toString] }
+    let r ← IO.Process.output { cmd := "openssl", args := #["dgst", "-sha256", "-verify", (tmp / "p.pem").toString,
+      "-signature", (tmp / "s.der").toString, (tmp / "m.bin").toString] }
+    if r.exitCode != 0 then
+      bad := bad + 1
+      IO.println s!"FAIL p256 vs OpenSSL #{i}: {r.stdout}{r.stderr}"
+  IO.println s!"p256 vs OpenSSL: {count} random signatures verified by openssl, {bad} failures"
+  return bad
+
 def run : IO Nat := do
   let mut bad := 0
   for (name, got, want) in cases do
@@ -365,6 +426,11 @@ def run : IO Nat := do
       bad := bad + 1
       IO.println s!"FAIL crypto {name}"
   bad := bad + (← againstOpenssl 30 11)
+  for (name, ok) in p256Cases do
+    if !ok then
+      bad := bad + 1
+      IO.println s!"FAIL crypto {name}"
+  bad := bad + (← p256Openssl 12 13)
   bad := bad + (← emberRun)
   IO.println s!"crypto: {cases.length + checks.length} RFC vectors and checks (SHA-256/512, HMAC, HKDF, ChaCha20-Poly1305, X25519, Ed25519), {bad} failures"
   return bad

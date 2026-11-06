@@ -1,5 +1,5 @@
 import Ember.Net.Http
-import Ember.Net.Crypto.Ed25519
+import Ember.Net.Crypto.P256
 import Ember.Spec.Srv.Tls
 
 /-!
@@ -357,6 +357,8 @@ ember def parse_hello (size : u16) : bool := do
     return false
   let mut versions : bool := false
   let mut sigok : bool := false
+  tl_sig_ed := false
+  tl_sig_p := false
   let mut share : bool := false
   loop (max := 1024) do
     if i + 4 > stop then
@@ -384,11 +386,15 @@ ember def parse_hello (size : u16) : bool := do
       let al : u16 ← ib16(d)
       if al + 2 != el2 || (al &&& 1) != 0 || al < 2 then
         return false
-      sigok := false
+      sigok := true
+      tl_sig_ed := false
+      tl_sig_p := false
       for k5 : u16 in [0, al / 2) do
         let a : u16 ← ib16(d + 2 + 2 * k5)
         if a == 0x0807 then
-          sigok := true
+          tl_sig_ed := true
+        if a == 0x0403 then
+          tl_sig_p := true
     if ty == 51 then
       if el2 < 2 then
         return false
@@ -433,6 +439,12 @@ ember def hs_head (ty : u8) (n : u16) := do
   ob16(n)
 
 ember def flight (size : u16) := do
+  -- Ed25519 when offered, else P-256 when offered and there is such a
+  -- certificate; neither is handshake_failure, before anything else
+  tl_usep := !tl_sig_ed && tl_sig_p && CERT2_LEN > 0
+  if !tl_sig_ed && !tl_usep then
+    fail(40)
+    return
   -- the transcript starts with the ClientHello
   sha_init()
   for i : u16 in [0, size) do
@@ -527,14 +539,20 @@ ember def flight (size : u16) := do
   let p0 : u16 := t_outl[cur]
   hs_head(8, 2)
   ob16(0)
-  hs_head(11, CERT_LEN + 9)
+  let mut cl : u16 := CERT_LEN
+  if tl_usep then
+    cl := CERT2_LEN
+  hs_head(11, cl + 9)
   ob(0)
   ob(0)
-  ob16(CERT_LEN + 5)
+  ob16(cl + 5)
   ob(0)
-  ob16(CERT_LEN)
-  for c : u16 in [0, CERT_LEN) do
-    ob(TL_CERT[c])
+  ob16(cl)
+  for c : u16 in [0, cl) do
+    if tl_usep then
+      ob(TL_CERT2[c])
+    else
+      ob(TL_CERT[c])
   ob16(0)
   tr_out(p0, t_outl[cur])
   tr_hash()
@@ -547,15 +565,25 @@ ember def flight (size : u16) := do
   for e3 : u16 in [0, 32) do
     ed_msg[98 + e3] := tl_th[e3]
   ed_mlen := 130
-  for e4 : u16 in [0, 32) do
-    ed_sk[e4] := TL_KEY[e4]
-  ed_sign()
   let p1 : u16 := t_outl[cur]
-  hs_head(15, 68)
-  ob16(0x0807)
-  ob16(64)
-  for e5 : u16 in [0, 64) do
-    ob(ed_sig[e5])
+  if tl_usep then
+    for e4 : u16 in [0, 32) do
+      p2_d[e4] := TL_KEY2[e4]
+    p2_sign()
+    hs_head(15, 4 + p2_siglen)
+    ob16(0x0403)
+    ob16(p2_siglen)
+    for e6 : u16 in [0, p2_siglen) do
+      ob(p2_sig[e6])
+  else
+    for e7 : u16 in [0, 32) do
+      ed_sk[e7] := TL_KEY[e7]
+    ed_sign()
+    hs_head(15, 68)
+    ob16(0x0807)
+    ob16(64)
+    for e5 : u16 in [0, 64) do
+      ob(ed_sig[e5])
   tr_out(p1, t_outl[cur])
   tr_hash()
   -- the server's Finished
@@ -672,28 +700,11 @@ ember def on_record (bl : u16) := do
   if tl_ity != 23 then
     fail(10)
     return
-  -- the request: its first REQ_MAX bytes are kept, its length counted
-  let base : u16 := cur * REQ_MAX
+  -- the request, byte by byte, as `Net.Http` takes it
   for r : u16 in [0, tl_ilen) do
-    if t_reql[cur] + r < REQ_MAX then
-      h_req[base + t_reql[cur] + r] := t_inb[cur * INB + 5 + r]
-  t_reql[cur] := t_reql[cur] + tl_ilen
-  let mut kept : u16 := t_reql[cur]
-  if kept > REQ_MAX then
-    kept := REQ_MAX
-  let mut ends : bool := false
-  if kept >= 4 then
-    for s : u16 in [0, kept - 3) do
-      if h_req[base + s] == 13 && h_req[base + s + 1] == 10 && h_req[base + s + 2] == 13 && h_req[base + s + 3] == 10 then
-        ends := true
-  if ends then
-    h_rlen[cur] := kept
-    h_decide()
-    respond(true)
-    return
-  if t_reql[cur] >= REQ_MAX then
-    h_kind[cur] := KB_400
-    h_head[cur] := false
+    if !h_dec[cur] then
+      h_feed(t_inb[cur * INB + 5 + r])
+  if h_dec[cur] then
     respond(true)
 
 /-- Take every whole record from `t_inb` (as `Spec.Srv.Tls.drain`). -/
@@ -725,8 +736,9 @@ ember def app_reset := do
   t_wset[cur] := false
   t_rseq[cur] := 0
   t_wseq[cur] := 0
-  t_reql[cur] := 0
   h_rlen[cur] := 0
+  h_crlf[cur] := 0
+  h_seen[cur] := 0
   h_dec[cur] := false
   h_kind[cur] := 0
   h_head[cur] := false
@@ -800,6 +812,9 @@ def app (n : Nat) (site : Tls.Site) (outb : Nat := 4096) : Net.Srv.App :=
        table "TL_LABELS" .u8 labs.flatten, table "TL_LOFF" .u16 loff, table "TL_LLEN" .u16 (labs.map (·.length)),
        table "TL_TLS13" .u8 (bytesOf "tls13 "), table "TL_CVCTX" .u8 (bytesOf "TLS 1.3, server CertificateVerify"),
        table "TL_CERT" .u8 (site.cert.toList.map (·.toNat)), table "TL_KEY" .u8 (site.key.toList.map (·.toNat)),
+       table "TL_CERT2" .u8 (site.certP256.toList.map (·.toNat)), scalar "CERT2_LEN" .u16 site.certP256.size,
+       table "TL_KEY2" .u8 ((natBe site.keyP256 32).toList.map (·.toNat)),
+       { name := "tl_sig_ed", ty := .bool }, { name := "tl_sig_p", ty := .bool }, { name := "tl_usep", ty := .bool },
        table "TL_SEED" .u8 (site.seed.toList.map (·.toNat)), scalar "TL_SEEDLEN" .u16 site.seed.size,
        table "TL_DERIVED1" .u8 (derived1.toList.map (·.toNat)),
        table "TL_EMPTYH" .u8 ((sha256 .empty).toList.map (·.toNat)),
@@ -814,7 +829,6 @@ def app (n : Nat) (site : Tls.Site) (outb : Nat := 4096) : Net.Srv.App :=
        { name := "t_wseq", ty := .arr .u32 n }, { name := "t_wset", ty := .arr .bool n },
        { name := "t_cfin", ty := .arr .u8 (32 * n) }, { name := "t_cap", ty := .arr .u8 (32 * n) },
        { name := "t_sap", ty := .arr .u8 (32 * n) }, { name := "t_th", ty := .arr .u8 (32 * n) },
-       { name := "t_reql", ty := .arr .u16 n },
        { name := "tl_th", ty := .arr .u8 32 }, { name := "tl_sec", ty := .arr .u8 32 },
        { name := "tl_salt", ty := .arr .u8 32 }, { name := "tl_ikm", ty := .arr .u8 32 },
        { name := "tl_hs", ty := .arr .u8 32 }, { name := "tl_chs", ty := .arr .u8 32 },
@@ -824,10 +838,10 @@ def app (n : Nat) (site : Tls.Site) (outb : Nat := 4096) : Net.Srv.App :=
        { name := "tl_share", ty := .arr .u8 32 }, { name := "tl_pub", ty := .arr .u8 32 },
        { name := "tl_msg", ty := .arr .u8 8 }, { name := "tl_ity", ty := .u8 }, { name := "tl_ilen", ty := .u16 }] ++
       Net.Crypto.sha256Globals ++ Net.Crypto.chachaGlobals ++ Net.Crypto.x25519Globals ++
-      Net.Crypto.sha512Globals ++ Net.Crypto.ed25519Globals
-    fns := [Net.Http.h_byte, Net.Http.h_total, Net.Http.h_decide] ++
+      Net.Crypto.sha512Globals ++ Net.Crypto.ed25519Globals ++ Net.Crypto.p256Globals
+    fns := [Net.Http.h_byte, Net.Http.h_total, Net.Http.h_decide, Net.Http.h_feed] ++
       Net.Crypto.sha256Fns ++ Net.Crypto.chachaFns ++ Net.Crypto.x25519Fns ++ Net.Crypto.sha512Fns ++
-      Net.Crypto.ed25519Fns ++
+      Net.Crypto.ed25519Fns ++ Net.Crypto.p256Fns ++
       [ib, ib16, ob, ob16, tr_load, tr_store, tr_hash, tr_out, expand_label, extract, derive, set_keys,
        use_keys, rec_seal, seal_msg, open_rec, fail, respond, parse_hello, seeded, hs_head, flight, on_record,
        drain, app_reset, app_room, app_recv, app_avail, app_fill, app_acked, app_close] }

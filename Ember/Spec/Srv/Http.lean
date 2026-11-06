@@ -5,11 +5,13 @@ import Ember.Spec.Srv.Tcp
 
 The reference for `Ember.Net.Srv.Http`.  One request per connection:
 
-* the request is kept until its header ends (`CRLF CRLF`), at most
-  `reqMax` bytes; a body is not read (nothing here takes one);
+* the request header is taken until it ends (`CRLF CRLF`), at most
+  `hdrMax` bytes, and its first `reqMax` bytes are kept for the request
+  line; a body is not read (nothing here takes one);
 * the request line is `METHOD SP target SP HTTP/1.d`, `d` a digit; `GET` and `HEAD`
   are served, another method gets `501 Not Implemented`, a line that is
-  not of that form, or a header longer than `reqMax`, `400 Bad Request`;
+  not of that form or does not end within `reqMax` bytes, or a header
+  longer than `hdrMax`, `400 Bad Request`;
 * the target's path (the query is ignored) is looked up in the site's
   routes, exactly; a path that is not there gets `404 Not Found`;
 * the response is the status line, `Content-Type`, `Content-Length`,
@@ -33,8 +35,10 @@ structure Route where
 
 structure Site where
   routes : List Route
-  /-- Most bytes of a request header kept. -/
+  /-- Most bytes of a request header kept (the request line must end within them). -/
   reqMax : Nat := 512
+  /-- Most bytes of a request header taken. -/
+  hdrMax : Nat := 8192
   port   : UInt16 := 80
   deriving Inhabited
 
@@ -44,6 +48,9 @@ structure Conn where
   /-- The response, once decided: the part from `snd.una` on. -/
   resp    : ByteArray := .empty
   decided : Bool := false
+  /-- How much of `CRLF CRLF` the last bytes are; the bytes of the header so far. -/
+  crlf    : Nat := 0
+  seen    : Nat := 0
   deriving Inhabited
 
 def crlf2 : List UInt8 := [13, 10, 13, 10]
@@ -86,20 +93,31 @@ def answer (site : Site) (req : ByteArray) : ByteArray :=
     else errorText 501 "Not Implemented" false
   | _ => errorText 400 "Bad Request" false
 
+/-- One byte of the request.  The header ends at `CRLF CRLF`, found by a
+four-state matcher (`crlf`: how much of it the last bytes are), over
+however many bytes the header has; only its first `reqMax` bytes are
+kept, for the request line.  A request line that does not end within
+them, or a header longer than `hdrMax`, is answered with 400. -/
+def step (site : Site) (c : Conn) (b : UInt8) : Conn :=
+  if c.decided then c else
+  let req := if c.req.size < site.reqMax then c.req.push b else c.req
+  let want : List UInt8 := [13, 10, 13, 10]
+  let crlf := if b == want.getD c.crlf 0 then c.crlf + 1 else if b == 13 then 1 else 0
+  let seen := c.seen + 1
+  if crlf == 4 then
+    { req := .empty, decided := true,
+      resp := if req.toList.contains 13 then answer site req else errorText 400 "Bad Request" false }
+  else if seen ≥ site.hdrMax then { req := .empty, decided := true, resp := errorText 400 "Bad Request" false }
+  else { c with req, crlf, seen }
+
 def recv (site : Site) (c : Conn) (d : ByteArray) : Conn :=
-  if c.decided then c
-  else
-    let req := c.req ++ d
-    if headerEnds req then { req := .empty, resp := answer site req, decided := true }
-    else if req.size ≥ site.reqMax then
-      { req := .empty, resp := errorText 400 "Bad Request" false, decided := true }
-    else { c with req }
+  d.foldl (step site) c
 
 def app (site : Site) : App where
   σ := Conn
   port := site.port
   init := {}
-  room c cap := if c.decided then cap else min cap (site.reqMax - c.req.size)
+  room _ cap := cap
   recv := recv site
   avail c := c.resp.size
   bytes c off n := Bytes.slice c.resp off n
