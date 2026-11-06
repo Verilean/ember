@@ -237,11 +237,58 @@ def recorded : IO Nat := do
   let d ← emberRuns "https-auth" tlsApp (fun n => Tools.NetCheck.checked (Net.Tls.prog n Srv.Tls.demoAuth)) (variants sfx 12)
   return a + b + c + d
 
+/-! ## The RNG's bytes in the handshake (plan M9.4) -/
+
+/-- Eight reads of a register that holds `c`, as the target stores them. -/
+def entropyOf (c : UInt32) : ByteArray :=
+  ByteArray.mk ((List.replicate 8 [c.toUInt8, (c >>> 8).toUInt8, (c >>> 16).toUInt8, (c >>> 24).toUInt8]).flatten.toArray)
+
+/-- With `entropy` the server's random and key share change, and the Ember
+program, reading the RNG register, gives `Spec.Srv.Tls`'s trace: the
+interpreter with the register set to a value, the host C (whose register
+reads 0) with zeros. -/
+def rng : IO Nat := do
+  let mut bad := 0
+  let t ← Trace.readFile "Tests/Ember/https/curl-get.trace"
+  let ins := t.inputs
+  let c : UInt32 := 0x9e3779b9
+  let site := { Srv.Tls.demo with entropy := some (entropyOf c) }
+  let plain := Tools.NetCheck.comparable (Srv.run (Srv.Tls.app Srv.Tls.demo) (srvCfg {} 1) ins)
+  let mixed := Tools.NetCheck.comparable (Srv.run (Srv.Tls.app site) (srvCfg {} 1) ins)
+  if (diff plain mixed { observable := false }).equal then
+    IO.println "FAIL rng: the RNG's bytes change nothing"; bad := bad + 1
+  let p1 := Tools.NetCheck.checked (Net.Tls.prog 1 site)
+  let m0 := Machine.init p1 ins
+  let m0 := { m0 with world := { m0.world with mmio := m0.world.mmio.insert 0x600260B0 c } }
+  let r := runMachine m0 { Spec.Config.header {} with impl := "ember-interp" } (fuel := 4000000000)
+  let d := diff mixed (Tools.NetCheck.comparable r.trace) { observable := false, context := 2 }
+  if r.error.isSome || !d.equal then
+    IO.println s!"FAIL rng interpreter: {d.report}"; bad := bad + 1
+  if ← Tools.Cc.available then
+    let z := { Srv.Tls.demo with entropy := some (ByteArray.mk (Array.replicate 32 0)) }
+    match Tools.Cc.emit "rng1" (Tools.NetCheck.checked (Net.Tls.prog 1 z)) with
+    | .error e => IO.println s!"FAIL rng host C: emit: {e}"; bad := bad + 1
+    | .ok code =>
+      match ← Tools.Cc.build { dir := ".lake/ember-rng", flags := #["-O2", "-fsanitize=undefined,address",
+          "-fno-sanitize-recover=all"] } [("rng1", code)] with
+      | .error e => IO.println s!"FAIL rng host C: build: {e}"; bad := bad + 1
+      | .ok exe =>
+        let tmp : System.FilePath := ".lake/ember-rng/inputs.trace"
+        Tools.Cc.writeInputs tmp (Spec.Config.header {}) ins
+        let (tc, rc) ← Tools.Cc.run exe 0 tmp
+        let s := Tools.NetCheck.comparable (Srv.run (Srv.Tls.app z) (srvCfg {} 1) ins)
+        let d2 := diff s (Tools.NetCheck.comparable tc) { observable := false, context := 2 }
+        if rc != 0 || !d2.equal then
+          IO.println s!"FAIL rng host C (exit {rc}): {d2.report}"; bad := bad + 1
+  IO.println s!"rng: the RNG's bytes change the handshake; Ember reading the register = Spec.Srv.Tls (interpreter, host C), {bad} failures"
+  return bad
+
 def run : IO Nat := do
   let a ← answers
   let b ← interp
   let c ← hostC
   let d ← recorded
-  return a + b + c + d
+  let e ← rng
+  return a + b + c + d + e
 
 end Ember.Tests.AuthNetTests

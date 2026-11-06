@@ -24,9 +24,13 @@ The reference for the HTTPS server of plan M8.  RFC 8446, reduced:
 
 **Randomness.**  The trace must be a function of the inputs, so the
 server's random and its ephemeral X25519 key are derived from the site's
-`seed` and the ClientHello's random (SHA-256 of both).  A board seeds
-them from its RNG; with a fixed seed a ClientHello replayed byte for byte
-gets the same key share — a test configuration, not a secure one.
+`seed` and the ClientHello's random (SHA-256 of both).  With a fixed seed
+alone a ClientHello replayed byte for byte gets the same key share — a
+test configuration, not a secure one.  With `entropy` (plan M9.4) 32 bytes
+read from the board's random number generator for each handshake go in
+between the seed and the label: the Spec takes them as a value of the
+site (what eight reads of the RNG register give), the target reads the
+register, so the tests can set it and the board gets fresh bytes.
 
 The bytes to send are kept as they are made (`out`): the Spec states what
 is sent; how a small machine regenerates them for a retransmission is
@@ -46,6 +50,10 @@ structure Site where
   certP256 : ByteArray := .empty
   keyP256  : Nat := 0
   seed   : ByteArray
+  /-- The 32 bytes of the board's RNG for a handshake (eight 32-bit reads of
+  its data register, little-endian), mixed into the server random and the
+  ephemeral key (plan M9.4); none: the seed alone (the tests of M8). -/
+  entropy : Option ByteArray := none
   recMax : Nat := 2048
   chunk  : Nat := 1024
   port   : UInt16 := 443
@@ -215,8 +223,9 @@ def fail (c : Conn) (desc : Nat) : Conn :=
 
 /-- Answer a ClientHello: the bytes to send and the connection after it. -/
 def serverFlight (site : Site) (c : Conn) (chMsg : ByteArray) (h : Hello) : Conn :=
-  let srand := sha256 (site.seed ++ str "server random" ++ h.random)
-  let eph := sha256 (site.seed ++ str "ecdhe" ++ h.random)
+  let ent := site.entropy.getD .empty
+  let srand := sha256 (site.seed ++ ent ++ str "server random" ++ h.random)
+  let eph := sha256 (site.seed ++ ent ++ str "ecdhe" ++ h.random)
   let pub := x25519 eph basepoint9
   let shared := x25519 eph h.share
   -- Ed25519 when offered, else P-256 when offered and there is such a

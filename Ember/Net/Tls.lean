@@ -426,6 +426,9 @@ ember def seeded (off : u16) (n : u16) := do
   sha_init()
   for i : u16 in [0, TL_SEEDLEN) do
     sha_byte(TL_SEED[i])
+  if TL_HWRNG then
+    for e : u16 in [0, 32) do
+      sha_byte(tl_ent[e])
   for j : u16 in [0, n) do
     sha_byte(TL_LABELS[off + j])
   for k : u16 in [0, 32) do
@@ -450,6 +453,14 @@ ember def flight (size : u16) := do
   for i : u16 in [0, size) do
     sha_byte(t_inb[cur * INB + 5 + i])
   tr_store()
+  -- the RNG's bytes for this handshake (plan M9.4)
+  if TL_HWRNG then
+    for w : u16 in [0, 8) do
+      let v : u32 ← mmio.read32(RNG_DATA)
+      tl_ent[4 * w] := (v : u8)
+      tl_ent[4 * w + 1] := (v >>> 8 : u8)
+      tl_ent[4 * w + 2] := (v >>> 16 : u8)
+      tl_ent[4 * w + 3] := (v >>> 24 : u8)
   -- server random, ephemeral key, its public key, the shared secret
   seeded(TL_L_RANDOM, 13)
   for j : u16 in [0, 32) do
@@ -817,6 +828,9 @@ def app (n : Nat) (site : Tls.Site) (outb : Nat := 4096) : Net.Srv.App :=
        table "TL_KEY2" .u8 ((natBe site.keyP256 32).toList.map (·.toNat)),
        { name := "tl_sig_ed", ty := .bool }, { name := "tl_sig_p", ty := .bool }, { name := "tl_usep", ty := .bool },
        table "TL_SEED" .u8 (site.seed.toList.map (·.toNat)), scalar "TL_SEEDLEN" .u16 site.seed.size,
+       { name := "TL_HWRNG", ty := .bool, init := [if site.entropy.isSome then 1 else 0], const := true },
+       -- the ESP32-C3's RNG data register (plan M9.4), and the bytes read from it
+       scalar "RNG_DATA" .u32 0x600260B0, { name := "tl_ent", ty := .arr .u8 32 },
        table "TL_DERIVED1" .u8 (derived1.toList.map (·.toNat)),
        table "TL_EMPTYH" .u8 ((sha256 .empty).toList.map (·.toNat)),
        { name := "t_phase", ty := .arr .u8 n }, { name := "t_done", ty := .arr .bool n },
