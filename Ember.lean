@@ -12,6 +12,7 @@ import Ember.Spec.Scenario
 import Ember.Spec.Gen
 import Ember.Spec.Srv.Stack
 import Ember.Spec.Srv.Http
+import Ember.Spec.Srv.Auth
 import Ember.Spec.Srv.Tls
 import Ember.Spec.Crypto.Curve25519
 import Ember.Lang.Syntax
