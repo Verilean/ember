@@ -146,12 +146,15 @@ one connection, each client taking the previous one's TIME-WAIT).
 the same demo site on port 443.  The certificate is a self-signed demo
 (`Spec.Srv.Tls.demoCert`, its key in the source): use `curl -k` or
 `openssl s_client`.  The server's random and ephemeral key come from a
-fixed seed and the client's random, so traces are reproducible; this is
-a test configuration, not a secure one.
+seed, 32 bytes of the system's randomness taken at start (plan M9.4;
+`Tools.HostEntropy`: the host does not start without them) and the
+client's random.  Fixtures are recorded with `--no-entropy` (the fixed
+seed alone, so traces are reproducible and `Spec.Srv.Tls.demo` replays
+them; a test configuration, not a secure one):
 
 ```
 nix-shell --run 'python3 tools/ember/record-linux.py client --name tls --out /tmp \
-    --host ".lake/build/bin/ember-host --https" \
+    --host ".lake/build/bin/ember-host --https --no-entropy" \
     -- sh -c "curl -sS -k -v https://10.0.0.1/"'
 ```
 

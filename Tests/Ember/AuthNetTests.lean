@@ -1,6 +1,7 @@
 import Tests.Ember.SrvTests
 import Tests.Ember.AuthTests
 import Tests.Ember.TlsTests
+import Ember.Tools.HostEntropy
 
 /-!
 # The token check in Ember against the reference (plan M9.3)
@@ -302,7 +303,31 @@ def rng : IO Nat := do
         let d2 := diff s (Tools.NetCheck.comparable tc) { observable := false, context := 2 }
         if rc != 0 || !d2.equal then
           IO.println s!"FAIL rng host C (exit {rc}): {d2.report}"; bad := bad + 1
-  IO.println s!"rng: the RNG's bytes change the handshake; eight equal reads refuse it; Ember reading the register = Spec.Srv.Tls (interpreter, host C), {bad} failures"
+  -- the host's entropy (plan M9.4): the system's, two runs differ, a ServerHello
+  -- with it; given, none; a failing or stuck provider stops the host
+  let a ← Tools.HostEntropy.get .os
+  let b ← Tools.HostEntropy.get .os
+  match a, b with
+  | .ok (some x), .ok (some y) =>
+    if x.size != 32 || x == y then
+      IO.println "FAIL rng host: the system's bytes"; bad := bad + 1
+    let hs := HttpTests.exchange (Srv.Tls.app { Srv.Tls.demo with entropy := some x }) ch
+    if hs.resp.size < 6 || hs.resp[0]! != 22 || hs.resp[5]! != 2 then
+      IO.println "FAIL rng host: no ServerHello with the system's bytes"; bad := bad + 1
+  | _, _ => IO.println "FAIL rng host: no bytes from the system"; bad := bad + 1
+  let hex := String.join ((List.range 32).map fun i => let s := Nat.toDigits 16 (i * 7 + 1); String.ofList (if s.length == 1 then '0' :: s else s))
+  match ← Tools.HostEntropy.get (.given hex) with
+  | .ok (some g) => if g.size != 32 || g[1]! != 8 then IO.println "FAIL rng host: --entropy"; bad := bad + 1
+  | _ => IO.println "FAIL rng host: --entropy"; bad := bad + 1
+  match ← Tools.HostEntropy.get .none with
+  | .ok none => pure ()
+  | _ => IO.println "FAIL rng host: --no-entropy"; bad := bad + 1
+  let refused (r : Except String (Option ByteArray)) : Bool := match r with | .error _ => true | .ok _ => false
+  if !refused (← Tools.HostEntropy.get (.given "zz")) || !refused (← Tools.HostEntropy.get .os (fun _ => throw (IO.userError "no getrandom"))) ||
+     !refused (← Tools.HostEntropy.get .os (fun _ => pure (ByteArray.mk (Array.replicate 32 0)))) ||
+     !refused (← Tools.HostEntropy.get .os (fun _ => pure (ByteArray.mk (Array.replicate 16 1)))) then
+    IO.println "FAIL rng host: a bad source must stop the host"; bad := bad + 1
+  IO.println s!"rng: the RNG's bytes change the handshake; eight equal reads refuse it; Ember reading the register = Spec.Srv.Tls (interpreter, host C); the host's entropy from the system (two runs differ, a failing or stuck source stops it), {bad} failures"
   return bad
 
 def run : IO Nat := do

@@ -1,6 +1,7 @@
 import Ember.Spec.Stack
 import Ember.Spec.Srv.Http
 import Ember.Spec.Srv.Tls
+import Ember.Tools.HostEntropy
 import Ember.Spec.Srv.Stack
 import Ember.Trace.Text
 import Std.Sync.Mutex
@@ -32,6 +33,12 @@ sessions).  `--token SCOPE` prints a token of the demo provider with that
 scope, valid for an hour from that time, and exits.  `--ctl` (plan M9.5)
 takes the demo sites with a control route (`POST /cmd`, `X-Ember-Seq`)
 and kept connections instead (`Spec.Srv.Http.demoCtl`).
+
+With `--https` the TLS entropy (plan M9.4) is 32 bytes from the system's
+generator, taken at start (`Tools.HostEntropy`); without them the host
+does not start (exit 3).  `--entropy HEX` gives the 32 bytes (tests);
+`--no-entropy` keeps the fixed seed of M8 alone, as the recorded HTTPS
+fixtures were made (a test configuration only).
 -/
 
 namespace Ember.Tools.Host
@@ -51,6 +58,8 @@ structure Opts where
   ctl     : Bool := false
   now     : Nat := Srv.Auth.demoNow
   token   : Option String := none
+  /-- The TLS entropy (plan M9.4): the system's by default. -/
+  entropy : Tools.HostEntropy.Source := .os
 
 partial def parseArgs : List String → Opts → Except String Opts
   | [], o => .ok o
@@ -64,6 +73,8 @@ partial def parseArgs : List String → Opts → Except String Opts
     | some v => parseArgs r { o with now := v }
     | none => .error s!"bad --now {n}"
   | "--token" :: sc :: r, o => parseArgs r { o with token := some sc }
+  | "--entropy" :: h :: r, o => parseArgs r { o with entropy := .given h }
+  | "--no-entropy" :: r, o => parseArgs r { o with entropy := .none }
   | "--conns" :: n :: r, o => match n.toNat? with
     | some v => parseArgs r { o with conns := max 1 v }
     | none => .error s!"bad --conns {n}"
@@ -117,7 +128,13 @@ def main (args : List String) : IO UInt32 := do
   let app := Srv.Http.app site
   let st ← IO.mkRef (State.init cfg)
   let srv ← IO.mkRef (Srv.State.init app { toConfig := cfg, conns := o.conns })
-  let tapp := Srv.Tls.app (if o.auth || o.ctl then { Srv.Tls.demoAuth with http := site } else Srv.Tls.demo)
+  -- the TLS entropy: the system's, or the host does not serve HTTPS (plan M9.4)
+  let ent ← if o.https then Tools.HostEntropy.get o.entropy else pure (.ok none)
+  let ent ← match ent with
+    | .ok e => pure e
+    | .error e => IO.eprintln s!"ember-host: {e}"; return 3
+  let tsite := if o.auth || o.ctl then { Srv.Tls.demoAuth with http := site } else Srv.Tls.demo
+  let tapp := Srv.Tls.app { tsite with entropy := ent }
   let tls ← IO.mkRef (Srv.State.init tapp { toConfig := cfg, conns := o.conns })
   let stepN ← IO.mkRef 0
   let lock ← Std.BaseMutex.new
