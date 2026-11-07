@@ -4,6 +4,8 @@ import Tests.Ember.LangTests
 import Tests.Ember.NetTests
 import Tests.Ember.TargetTests
 import Tests.Ember.Z80Tests
+import Tests.Ember.SrvTests
+import Tests.Ember.CryptoTests
 
 /-!
 # `lake test` — everything
@@ -15,13 +17,28 @@ first and fail the run with a non-zero exit; then the LSpec unit tests.
 open LSpec
 
 def main (args : List String) : IO UInt32 := do
-  -- `EMBER_ONLY=spec|lang|net|esp32|z80` runs one suite
+  -- `EMBER_ONLY=spec|srv|crypto|lang|net|esp32|z80` runs one suite
+  if let some d ← IO.getEnv "EMBER_CRYPTO_DUMP" then
+    Ember.Tests.CryptoTests.dump d
+    return 0
+  if let some d ← IO.getEnv "EMBER_HTTP_DUMP" then
+    Ember.Tests.SrvTests.httpDump d
+    return 0
+  if let some d ← IO.getEnv "EMBER_HTTPS_DUMP" then
+    Ember.Tests.SrvTests.httpsDump d
+    return 0
   let only ← IO.getEnv "EMBER_ONLY"
   let want (name : String) : Bool := only.isNone || only == some name
   let mut rc : UInt32 := 0
   if want "spec" then
     IO.println "== Ember.Spec (M1)"
     if (← Ember.Tests.SpecTests.main) != 0 then rc := 1
+  if want "srv" then
+    IO.println "== Ember.Spec.Srv: the stack with an application interface (M8.1)"
+    if (← Ember.Tests.SrvTests.main) != 0 then rc := 1
+  if want "crypto" then
+    IO.println "== Ember.Spec.Crypto: the reference against the RFCs (M8.5)"
+    if (← Ember.Tests.CryptoTests.run) != 0 then rc := 1
   if want "lang" then
     IO.println "== Ember.Lang / Ember.C (M2)"
     if (← Ember.Tests.LangTests.main) != 0 then rc := 1

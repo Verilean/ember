@@ -10,6 +10,10 @@ import Ember.Spec.Stack
 import Ember.Spec.Peer
 import Ember.Spec.Scenario
 import Ember.Spec.Gen
+import Ember.Spec.Srv.Stack
+import Ember.Spec.Srv.Http
+import Ember.Spec.Srv.Tls
+import Ember.Spec.Crypto.Curve25519
 import Ember.Lang.Syntax
 import Ember.Lang.Types
 import Ember.Lang.Eval
@@ -26,6 +30,10 @@ import Ember.C.Sem
 import Ember.Net.Main
 import Ember.Net.Loop
 import Ember.Net.Eth
+import Ember.Net.Srv
+import Ember.Net.Http
+import Ember.Net.Tls
+import Ember.Net.Crypto.Test
 import Ember.Z80.Cpu
 import Ember.Z80.Asm
 import Ember.Z80.AsmSem

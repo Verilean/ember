@@ -19,6 +19,33 @@ are needed for Wi-Fi (M4w), which is not part of this pass.
 | `Tcp.lean` | `tcp_input` (parse), `tcp_segment` (input), `listen_input`, `ack_input`, `output`, `rexmit`, `tcp_tick` | `Spec/Tcp/*.lean` |
 | `Main.lean` | `main`: one input item per call; the `Prog` | `Spec.step` |
 
+## With an application interface (`Srv.lean`, `Http.lean`; plan M8)
+
+`Net.prog` above is the echo stack the proofs are about; it is unchanged.
+`Srv.lean` is the same TCP with the application taken out and given as
+Ember functions with fixed names (`app_reset`, `app_room`, `app_recv`,
+`app_avail`, `app_fill`, `app_acked`, `app_close`; constants `APP_PORT`,
+`APP_IDLE_CLOSE`, `APP_REUSE_TW`), and with `n` connections — `n` is a
+parameter of the program (`Srv.prog n app`).  Ember has no arrays of
+records, so the TCB fields are arrays `c_<field> : [_; n]`, and the
+connection being worked on is copied into `t` (`tcb_load`, `tcb_save`).
+Its reference is `Ember.Spec.Srv` (`Spec/Srv/*.lean`).
+
+`Http.lean` is an HTTP/1.1 server on it (`Http.prog n site`): `GET` and
+`HEAD` of fixed routes, 404, 400, 501, `Content-Length`, `Connection:
+close`.  The site's responses — headers and bodies — are constants
+(`h_rom`); a segment's bytes are computed from them by offset, so a
+retransmission needs no copy.  Per connection the request header is
+kept (`REQ_MAX` bytes).  The server closes first, so a SYN that finds no
+connection in LISTEN takes one in TIME-WAIT.
+
+`Tls.lean` is TLS 1.3 on it (`Tls.prog n site`, `Spec.Srv.Tls` record for
+record and alert for alert) with the crypto of `Crypto/` and the HTTP of
+`Http.lean` inside.  Per connection a buffer of records received and one
+of what is sent (the server's flight and the protected response, kept as
+the Spec keeps them), the transcript hash's SHA-256 context, the keys and
+sequence numbers; records are opened and sealed in place.
+
 ## Data layout
 
 | Global | Type | Bytes (host64) | Role |

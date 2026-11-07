@@ -364,6 +364,30 @@ void ember_note(uint8_t code, uint32_t value) {
 uint32_t ember_mmio_read32(uint32_t addr) { return REG(addr); }
 void ember_mmio_write32(uint32_t addr, uint32_t value) { REG(addr) = value; }
 
+/* Shifts of 64-bit values by a variable amount (plan M8.5: SHA-512, the
+   field arithmetic of the crypto).  GCC calls these from libgcc, and the
+   libgcc of the toolchain is built for the double-float ABI, which does
+   not link with this image's soft-float one.  With -ffunction-sections
+   and --gc-sections an image that shifts no u64 keeps neither. */
+uint64_t __lshrdi3(uint64_t a, int b);
+uint64_t __ashldi3(uint64_t a, int b);
+
+uint64_t __lshrdi3(uint64_t a, int b) {
+  uint32_t lo = (uint32_t)a, hi = (uint32_t)(a >> 32);
+  if (b == 0) return a;
+  if (b >= 32) { lo = hi >> (b - 32); hi = 0; }
+  else { lo = (lo >> b) | (hi << (32 - b)); hi >>= b; }
+  return ((uint64_t)hi << 32) | lo;
+}
+
+uint64_t __ashldi3(uint64_t a, int b) {
+  uint32_t lo = (uint32_t)a, hi = (uint32_t)(a >> 32);
+  if (b == 0) return a;
+  if (b >= 32) { hi = lo << (b - 32); lo = 0; }
+  else { hi = (hi << b) | (lo >> (32 - b)); lo <<= b; }
+  return ((uint64_t)hi << 32) | lo;
+}
+
 /* ---- main loops ---------------------------------------------------------- */
 
 #if APP == APP_STACK || APP == APP_ECHO

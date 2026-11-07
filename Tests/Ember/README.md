@@ -5,7 +5,7 @@ tshark) say "skipped" when it is missing.  The full set of tools comes
 with `nix-shell` (see `shell.nix`):
 
 ```
-nix-shell --run 'lake test'          # ≈ 6 minutes; EMBER_ONLY=spec|lang|net|esp32|z80 .lake/build/bin/test runs one suite
+nix-shell --run 'lake test'          # ≈ 6 minutes; EMBER_ONLY=spec|srv|crypto|lang|net|esp32|z80 .lake/build/bin/test runs one suite
 ```
 
 ## What `lake test` checks
@@ -13,10 +13,12 @@ nix-shell --run 'lake test'          # ≈ 6 minutes; EMBER_ONLY=spec|lang|net|e
 | Suite | Milestone | Contents |
 |---|---|---|
 | `Tests/Ember/SpecTests.lean` | M1 | checksum (RFC 1071/1624), SLIP, headers, trace format and `ember-diff`; **corpus replay** (`corpus/`, `regress/`); hand-written **scenarios** with their expectations; **1 000 generated sessions** per protocol, each also mutated and re-chunked, against the properties of `Ember.Spec.Gen`; the corpus through the `ember-host` binary; pcaps decoded by `tshark` |
+| `Tests/Ember/SrvTests.lean`, `HttpTests.lean` | M8.1, M8.2, M8.6 | the stack with an application interface: `Spec.Srv` with echo and one connection = `Spec.Stack`, every trace line, on the corpus and on generated sessions (ICMP, UDP, TCP, DHCP; mutated, re-chunked, ticks mid-frame, Ethernet); the Ember program `Net.Srv` (interpreted, and as host C with `-O2` and UBSan/ASan) = `Spec.Srv` with 1 and 2 connections; a second client served with 2 connections, reset with 1. HTTP: a TCP client drives `Spec.Srv` with `Spec.Srv.Http.demo` (11 requests: routes, query, 404, HEAD, 501, HTTP/1.0, bad lines, a header longer than `reqMax`; in 1, 3 and 7 segments; three clients in a row on one connection, taking the one in TIME-WAIT) — the bytes received are `Http.answer`'s and the server closes; the recorded curl session `http/` replays; the Ember program `Net.Http` (interpreted and host C) = `Spec.Srv` on all of these, mutated, re-chunked and with ticks; HTTPS: the sessions recorded from Linux clients (`https/`: curl and `openssl s_client` against `ember-host --https`, and a ClientHello without ChaCha20, answered with `handshake_failure`) replay through `Spec.Srv.Tls` line for line; `TlsTests.lean`: the key schedule against RFC 8448 §3 (early, handshake and master secrets, the handshake traffic secrets, the server's handshake key — 16 bytes there — and IV, its finished key; that trace's AES-GCM records and RSA signature are not this server's and are not checked), and key shares of small order (u = 0, 1, a point of order 8) answered with `illegal_parameter` only (RFC 8446 §7.4.2), and 15 malformed ClientHellos (a length past or short of what contains it) with `handshake_failure` only; **the HTTPS server in Ember** (`Net.Tls`, M8.7): the interpreter on the recorded and made sessions, the host C (`-O2`, UBSan/ASan, 1 and 2 connections) on those and on their re-chunked and ticked forms = `Spec.Srv.Tls`; `qemu-test.sh` replays them on the ESP32-C3 image `stack-https-test` (`EMBER_HTTPS_DUMP=DIR`) |
+| `Tests/Ember/CryptoTests.lean` | M8.5a, M8.5b | the crypto reference (`Ember/Spec/Crypto`) against the RFCs' test vectors: SHA-256 and SHA-512 (FIPS 180-2, a million `a`), HMAC-SHA256 (RFC 4231), HKDF (RFC 5869), ChaCha20, Poly1305 and the AEAD (RFC 8439), X25519 (RFC 7748), Ed25519 (RFC 8032), verification and rejection; and against OpenSSL on 30 random inputs each (SHA-256, SHA-512, HMAC, Poly1305, ChaCha20 from a random counter, X25519, Ed25519 signatures; skipped without `openssl`); **the crypto in Ember** (`Ember/Net/Crypto`: SHA-256, HMAC, HKDF-Extract and -Expand, ChaCha20, Poly1305, the AEAD — sealing, and opening with the tag compared without a branch —, X25519, SHA-512, Ed25519 signing, reduction mod L) behind a request/answer program (`Net.Crypto.testProg`), interpreted and as host C with `-O2` and UBSan/ASan: about 460 requests (the RFC vectors, edge values, cipher texts and tags with a changed byte — padding lengths, Poly1305 near p, X25519 u at and above p, scalars at L − 1, L, L + 1, 2^512 − 1 — and random inputs) = the reference; `qemu-test.sh` replays the same requests on the ESP32-C3 image `crypto-test` (`EMBER_CRYPTO_DUMP=DIR` writes them) |
 | `Tests/Ember/LangTests.lean` | M2, M5.4, M5.7 | **the total semantics** `Lang.Sem` (what the proofs unfold) = interpreter, on random programs, the examples and every build of the stack on the corpus; **the emitted C under the C semantics** `Ember.C.Sem` = `Lang.Sem`, same programs, three profiles, never undefined, and a planted emitter bug noticed; type checker (one negative test per rule, with spans), interpreter (every construct, traps, fuel), surface syntax = hand-built AST, profiles, **golden C** (`golden/`), examples vs Lean references, **interpreter = host C** (−O0/−O2, UBSan/ASan, strict warnings), **SDCC** `--Werror`, **1 000 random programs** (`ember-fuzz`) |
 | `Tests/Ember/NetTests.lean` | M3 | `Ember.Net` functions vs `Ember.Spec` on 10 000 random inputs; the corpus (SLIP and Ethernet fixtures) and **1 000 generated sessions** per protocol × 3 variants, plus 1 000 Ethernet and 1 000 DHCP sessions: Spec = Ember interpreter (**lockstep**) = host C |
 | `Tests/Ember/TargetTests.lean` | M4 | `tools/ember/qemu-test.sh`: the bare-metal ESP32-C3 images in Espressif's QEMU — boot, trap handler, UART, interrupt-driven echo of 10 000 bytes, SLIP loopback, the SLIP corpus and **100 generated sessions** per protocol × 3 variants (target trace = Spec trace), SYSTIMER tick |
-| `Tests/Ember/Z80Tests.lean` | M4z, M6.1 | the Z80 CPU model (interrupt modes, `EI` delay, `HALT`, `R`; random instruction streams against `z88dk-ticks`); SDCC's code on the model of the machine: the examples (interpreter = Z80), echo, SLIP loopback, the corpus and generated sessions (target trace = Spec trace) on the SLIP build's image and on its image without bounds checks (M5.9), random programs; the **own back end** (M6): assembler vs `z88dk-z80asm`, runtime routines vs their specifications, random programs through the IR and through generated code, index-check programs that must still trap, the corpus and sessions on the image it builds (`tools/ember/z80-test.sh`) |
+| `Tests/Ember/Z80Tests.lean` | M4z, M6.1 | the Z80 CPU model (interrupt modes, `EI` delay, `HALT`, `R`; random instruction streams against `z88dk-ticks`); SDCC's code on the model of the machine: the examples (interpreter = Z80), echo, SLIP loopback, the corpus and generated sessions (target trace = Spec trace) on the SLIP build's image and on its image without bounds checks (M5.9), random programs; the **own back end** (M6): assembler vs `z88dk-z80asm`, runtime routines vs their specifications, random programs through the IR and through generated code, index-check programs that must still trap, the corpus and sessions on the image it builds (`tools/ember/z80-test.sh`); **HTTP on the Z80** (plan M8.3): `Net.Http` (two connections) through SDCC and through the own back end, the recorded curl session and the HTTP exchanges replayed on the model = `Spec.Srv` |
 | `Tests/Ember/Z80RegressW.lean` | M7.3 | `#guard`s when built (`tools/ember/ci.sh`; not imported by `lake test`): the lowering of `regress_wide_store` is the IR written out in `Ember/Proof/Z80RegressWIR.lean`, and what is computable of the checked program holds (entry, `progOkB`, `irOkB` of the layout of `Z80RegressWHItems`, no drop reasons or notes: the parts of `RegressSrc`), and, for two inputs, calls that end and a call that traps in `Lang.Sem` — evaluation, not a theorem; the theorems on its image, which take `RegressSrc`, are in `Ember/Proof/Z80RegressWH*.lean` |
 | `Tests/Ember/Z80Cover.lean` | M7.3 | `#guard` when built (`tools/ember/ci.sh`; not imported by `lake test`): the instruction theorems cover all 30 instructions of `regress_wide_store` (`Ember.Proof.Z80Gen.coverage`) — evaluation, not a theorem, and nothing about its image |
 | `lake build` | M5 | `Ember/Proof` is part of the library: the proofs are checked by building — properties of the Spec (M5.1–M5.3), refinement of the stack in Ember against it (M5.4–M5.6), the emitted C against the Ember semantics (M5.8), the IR of the Z80 back end against it (M7.1, M7.2), and the Z80 encoder against the CPU model (M7.4); the build also evaluates the `#guard`s that tie the theorems to the programs (the checked stack is the program the theorems are about; the checkers accept every build of the stack: `progOkB` for every profile of the C, `progOkB` and `irOkB` for the IR).  `Ember/Proof/README.md` lists the theorems and which links to the running code are tests, not theorems |
@@ -83,3 +85,61 @@ python3 tools/ember/record-linux.py client --name demo --out /tmp \
 ```
 
 (Recorded here: `ping` 0 % loss, `nc` echoed the line, Linux 6.18.)
+
+## Manual demo: HTTP from Linux (M8.2)
+
+`ember-host --http` runs `Spec.Srv` with the HTTP application and its demo
+site on port 80 (`--conns N` for N connections).  Without root, in a user
+namespace with a TUN device:
+
+```
+lake build ember-host
+python3 tools/ember/record-linux.py client --name curl --out /tmp \
+    --host ".lake/build/bin/ember-host --http" \
+    -- sh -c 'curl -sS http://10.0.0.1/ && curl -sS -I http://10.0.0.1/hello.txt'
+```
+
+The same on the ESP32-C3 in QEMU (inside `nix-shell`, after
+`tools/ember/qemu-test.sh build`): `tools/ember/qemu-bridge.py` runs an
+image and puts its UART0 on stdin/stdout, as `ember-host` is:
+
+```
+python3 tools/ember/record-linux.py client --name curl-qemu --out /tmp \
+    --host "python3 tools/ember/qemu-bridge.py .lake/build/esp32c3/stack-http.bin" \
+    -- sh -c 'sleep 2; curl -sS http://10.0.0.1/big.txt'
+```
+
+`qemu-test.sh` replays the HTTP sessions on the image `stack-http-test`
+(`esp32.py corpus --image stack-http-test`): the recorded curl session
+and the exchanges of `HttpTests.lean`, mutated, re-chunked and with ticks,
+whose expected traces are `Spec.Srv`'s (`EMBER_HTTP_DUMP=DIR` writes them).
+
+`Tests/Ember/http/curl-session.trace` was recorded so (GET of the page and
+of a 2 110-byte file over several segments, a missing path, POST, HEAD;
+one connection, each client taking the previous one's TIME-WAIT).
+
+## Manual demo: HTTPS from Linux (M8.6)
+
+`ember-host --https` runs `Spec.Srv.Tls` (TLS 1.3 with
+`TLS_CHACHA20_POLY1305_SHA256`, X25519 and an Ed25519 certificate) with
+the same demo site on port 443.  The certificate is a self-signed demo
+(`Spec.Srv.Tls.demoCert`, its key in the source): use `curl -k` or
+`openssl s_client`.  The server's random and ephemeral key come from a
+fixed seed and the client's random, so traces are reproducible; this is
+a test configuration, not a secure one.
+
+```
+nix-shell --run 'python3 tools/ember/record-linux.py client --name tls --out /tmp \
+    --host ".lake/build/bin/ember-host --https" \
+    -- sh -c "curl -sS -k -v https://10.0.0.1/"'
+```
+
+`Tests/Ember/https/` holds sessions recorded so.
+
+The same on the ESP32-C3 in QEMU: `tools/ember/qemu-bridge.py
+.lake/build/esp32c3/stack-https.bin` as `--host` (inside `nix-shell`, after
+`tools/ember/qemu-test.sh build`), then `curl -sS -k https://10.0.0.1/`.
+The bridge drops the ROM boot loader's banner on UART0 (before the first
+SLIP END); `record-linux.py` keeps the bytes after the last END undecoded
+between reads (a data byte 0xC0, sent escaped, split a frame when the
+decoded rest was read again).

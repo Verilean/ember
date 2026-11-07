@@ -77,8 +77,14 @@ def slip(pkt):
 
 
 def unslip(stream):
+    """The whole frames in `stream`, and the raw bytes after its last END:
+    the rest is kept undecoded (decoded bytes fed back in would be read as
+    SLIP again — a data byte 0xC0, sent as ESC ESC_END, would end a frame)."""
+    last = stream.rfind(bytes([END]))
+    if last < 0:
+        return [], stream
     frames, cur, esc = [], bytearray(), False
-    for b in stream:
+    for b in stream[:last + 1]:
         if b == END:
             if cur:
                 frames.append(bytes(cur))
@@ -90,7 +96,7 @@ def unslip(stream):
             esc = True
         else:
             cur.append(b)
-    return frames, bytes(cur)
+    return frames, stream[last + 1:]
 
 
 def csum(data):
@@ -295,7 +301,10 @@ def client(name, outdir, host_cmd, command, settle, eth=False, dnsmasq=None):
             else:
                 frames, buf = unslip(buf)
                 for f in frames:
-                    os.write(fd, f)
+                    try:
+                        os.write(fd, f)
+                    except OSError as e:
+                        print(f"record-linux: a frame the kernel refused ({e}): {f.hex()}", file=sys.stderr)
     threading.Thread(target=from_host, daemon=True).start()
 
     def to_host():
