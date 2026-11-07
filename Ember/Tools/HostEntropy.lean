@@ -4,26 +4,27 @@ import Ember.Spec.Srv.Tls
 # Ember.Tools.HostEntropy — the TLS randomness of `ember-host` (plan M9.4)
 
 `ember-host --https` serves `Spec.Srv.Tls`, whose server random and
-ephemeral key come from the site's seed, the site's `entropy` and the
-client's random.  The host takes the 32 bytes of `entropy` from the
-operating system's cryptographic generator when it starts
-(`IO.getRandomBytes`: `/dev/urandom` on Linux, the Lean runtime's source);
-if that fails, or gives 32 bytes that are eight equal words (which
-`Spec.Srv.Tls.stuck` would refuse handshake by handshake), the host does
-not start.  For the tests the bytes can be given (`--entropy HEX`), and
-`--no-entropy` keeps the fixed seed of M8 alone, which the recorded
-fixtures were made with (a test configuration: a replayed ClientHello
-then gets the same key share).
+ephemeral key come from the site's seed, the entropy of the handshake and
+the client's random.  By default the host takes fresh entropy for every
+handshake: before each input it puts 32 bytes from the operating system's
+cryptographic generator (`IO.getRandomBytes`: `/dev/urandom` on Linux,
+the Lean runtime's source) in the shared state (`Http.Ctl.ent`), and the
+site is `fresh` (`Spec.Srv.Tls.Site.fresh`): a handshake takes them once,
+and a handshake without them ends with `internal_error`.  So a ClientHello
+sent twice, byte for byte, gets two different server randoms and key
+shares (RFC 8446 §4.1.3).  If the system gives no bytes, fewer than 32,
+or eight equal words, the host stops (at start, or at that input).
 
-Within one run of the host the entropy is fixed: two handshakes differ by
-the clients' randoms, so a ClientHello replayed byte for byte gets the
-same ServerHello (it cannot finish without the client's private key).
-The ESP32-C3 reads its RNG for every handshake.
+For the tests only: `--entropy HEX` gives fixed bytes for every handshake
+(as the board's tests set the RNG register), and `--no-entropy` keeps the
+fixed seed of M8 alone, which the recorded fixtures were made with.  Both
+make a replayed ClientHello get the same key share; the host says so on
+stderr.
 -/
 
 namespace Ember.Tools.HostEntropy
 
-/-- Where the 32 bytes come from. -/
+/-- Where the entropy comes from. -/
 inductive Source where
   | os
   | given (hex : String)
@@ -47,21 +48,38 @@ def ofHex (s : String) : Option ByteArray := do
     out := out.push (hi * 16 + lo).toUInt8
   return out
 
-/-- The site's `entropy` for `src`, or why the host must not start. -/
-def get (src : Source) (random : Nat → IO ByteArray := fun n => IO.getRandomBytes n.toUSize) :
-    IO (Except String (Option ByteArray)) := do
+/-- The system's generator. -/
+def system : Nat → IO ByteArray := fun n => IO.getRandomBytes n.toUSize
+
+/-- 32 fresh bytes from `random`, or why there are none. -/
+def next (random : Nat → IO ByteArray := system) : IO (Except String ByteArray) := do
+  let b ← match ← (random 32).toBaseIO with
+    | .ok b => pure b
+    | .error e => return .error s!"no randomness from the system: {e}"
+  if b.size != 32 then return .error s!"the system gave {b.size} random bytes, not 32"
+  if Spec.Srv.Tls.stuck b then return .error "the system's random bytes are eight equal words"
+  return .ok b
+
+/-- The TLS site for `src`: fresh entropy per handshake from the system
+(checked once here, so that a host without a working generator does not
+start), fixed bytes, or none; or why the host must not start. -/
+def site (base : Spec.Srv.Tls.Site) (src : Source) (random : Nat → IO ByteArray := system) :
+    IO (Except String Spec.Srv.Tls.Site) := do
   match src with
-  | .none => return .ok none
+  | .none => return .ok { base with entropy := none, fresh := false }
   | .given hex =>
     match ofHex hex with
-    | some b => return .ok (some b)
+    | some b => return .ok { base with entropy := some b, fresh := false }
     | none => return .error s!"--entropy wants 64 hexadecimal digits, not {hex}"
   | .os =>
-    let b ← match ← (random 32).toBaseIO with
-      | .ok b => pure b
-      | .error e => return .error s!"no randomness from the system: {e}"
-    if b.size != 32 then return .error s!"the system gave {b.size} random bytes, not 32"
-    if Spec.Srv.Tls.stuck b then return .error "the system's random bytes are eight equal words"
-    return .ok (some b)
+    match ← next random with
+    | .ok _ => return .ok { base with entropy := none, fresh := true }
+    | .error e => return .error e
+
+/-- The shared state with fresh entropy for the next handshake. -/
+def refill (g : Spec.Srv.Http.Ctl) (random : Nat → IO ByteArray := system) : IO (Except String Spec.Srv.Http.Ctl) := do
+  match ← next random with
+  | .ok b => return .ok { g with ent := some b }
+  | .error e => return .error e
 
 end Ember.Tools.HostEntropy

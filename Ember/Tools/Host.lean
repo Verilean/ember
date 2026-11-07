@@ -34,11 +34,11 @@ scope, valid for an hour from that time, and exits.  `--ctl` (plan M9.5)
 takes the demo sites with a control route (`POST /cmd`, `X-Ember-Seq`)
 and kept connections instead (`Spec.Srv.Http.demoCtl`).
 
-With `--https` the TLS entropy (plan M9.4) is 32 bytes from the system's
-generator, taken at start (`Tools.HostEntropy`); without them the host
-does not start (exit 3).  `--entropy HEX` gives the 32 bytes (tests);
-`--no-entropy` keeps the fixed seed of M8 alone, as the recorded HTTPS
-fixtures were made (a test configuration only).
+With `--https` every TLS handshake takes 32 fresh bytes from the system's
+generator (plan M9.4, `Tools.HostEntropy`); without a working generator
+the host does not start (exit 3), or stops.  `--entropy HEX` gives fixed
+bytes and `--no-entropy` keeps the fixed seed of M8 alone, as the recorded
+HTTPS fixtures were made: test configurations only, said on stderr.
 -/
 
 namespace Ember.Tools.Host
@@ -128,19 +128,28 @@ def main (args : List String) : IO UInt32 := do
   let app := Srv.Http.app site
   let st ← IO.mkRef (State.init cfg)
   let srv ← IO.mkRef (Srv.State.init app { toConfig := cfg, conns := o.conns })
-  -- the TLS entropy: the system's, or the host does not serve HTTPS (plan M9.4)
-  let ent ← if o.https then Tools.HostEntropy.get o.entropy else pure (.ok none)
-  let ent ← match ent with
-    | .ok e => pure e
+  -- the TLS entropy (plan M9.4): fresh from the system for every handshake,
+  -- or the host does not serve HTTPS
+  let base := if o.auth || o.ctl then { Srv.Tls.demoAuth with http := site } else Srv.Tls.demo
+  let tsite ← if o.https then Tools.HostEntropy.site base o.entropy else pure (.ok base)
+  let tsite ← match tsite with
+    | .ok t => pure t
     | .error e => IO.eprintln s!"ember-host: {e}"; return 3
-  let tsite := if o.auth || o.ctl then { Srv.Tls.demoAuth with http := site } else Srv.Tls.demo
-  let tapp := Srv.Tls.app { tsite with entropy := ent }
+  if o.https && !tsite.fresh then
+    IO.eprintln "ember-host: fixed TLS randomness (--entropy or --no-entropy): a test configuration, not a secure one"
+  let tapp := Srv.Tls.app tsite
   let tls ← IO.mkRef (Srv.State.init tapp { toConfig := cfg, conns := o.conns })
   let stepN ← IO.mkRef 0
   let lock ← Std.BaseMutex.new
   let doStep' (i : Input) : IO Unit := do
     let es ← if o.https then do
-        let (s', es) := Srv.step (← tls.get) i
+        let mut s ← tls.get
+        if tsite.fresh then
+          -- fresh entropy before each input; without it the host stops
+          match ← Tools.HostEntropy.refill (s.g : Srv.Http.Ctl) with
+          | .ok g => s := { s with g := g }
+          | .error e => throw (IO.userError s!"ember-host: {e}")
+        let (s', es) := Srv.step s i
         tls.set s'
         pure es
       else if o.http then do

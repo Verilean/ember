@@ -57,6 +57,11 @@ structure Site where
   its data register, little-endian), mixed into the server random and the
   ephemeral key (plan M9.4); none: the seed alone (the tests of M8). -/
   entropy : Option ByteArray := none
+  /-- Plan M9.4 (`ember-host`): every handshake takes fresh entropy from the
+  shared state (`Http.Ctl.ent`, filled by the host from the system before
+  each input) and uses it once; with none there, the handshake ends with
+  `internal_error` (RFC 8446 §4.1.3: a fresh server random each time). -/
+  fresh   : Bool := false
   recMax : Nat := 2048
   chunk  : Nat := 1024
   port   : UInt16 := 443
@@ -229,8 +234,9 @@ def stuck (e : ByteArray) : Bool :=
   (List.range 28).all fun i => e[i + 4]! == e[i]!
 
 /-- Answer a ClientHello: the bytes to send and the connection after it. -/
-def serverFlight (site : Site) (c : Conn) (chMsg : ByteArray) (h : Hello) : Conn :=
-  let ent := site.entropy.getD .empty
+def serverFlight (site : Site) (c : Conn) (chMsg : ByteArray) (h : Hello) (fresh : Option ByteArray := none) : Conn :=
+  let entropy := if site.fresh then fresh else site.entropy
+  let ent := entropy.getD .empty
   let srand := sha256 (site.seed ++ ent ++ str "server random" ++ h.random)
   let eph := sha256 (site.seed ++ ent ++ str "ecdhe" ++ h.random)
   let pub := x25519 eph basepoint9
@@ -240,7 +246,7 @@ def serverFlight (site : Site) (c : Conn) (chMsg : ByteArray) (h : Hello) : Conn
   let useP := !h.ed && h.p256 && site.certP256.size > 0
   if !h.ed && !useP then fail c 40 else
   -- the eight reads of the RNG all equal: a dead generator, internal_error
-  if site.entropy.any stuck then fail c 80 else
+  if entropy.any stuck || (site.fresh && fresh.isNone) then fail c 80 else
   -- a share of small order gives zeros: RFC 8446 §7.4.2, abort with illegal_parameter
   if shared.toList.all (· == 0) then fail c 47 else
   let certBytes := if useP then site.certP256 else site.cert
@@ -315,7 +321,8 @@ def onRecord (site : Site) (g : Http.Ctl) (c : Conn) (hdr body : ByteArray) : Ht
   | .hello =>
     if ty != 22 then (g, fail c 10) else
     match parseHello body with
-    | some h => (g, serverFlight site c body h)
+    -- fresh entropy is used once (plan M9.4)
+    | some h => ({ g with ent := none }, serverFlight site c body h g.ent)
     | none => (g, fail c 40)
   | .finished =>
     if ty == 20 then (if body.toList == [1] then (g, c) else (g, fail c 10)) else

@@ -303,31 +303,56 @@ def rng : IO Nat := do
         let d2 := diff s (Tools.NetCheck.comparable tc) { observable := false, context := 2 }
         if rc != 0 || !d2.equal then
           IO.println s!"FAIL rng host C (exit {rc}): {d2.report}"; bad := bad + 1
-  -- the host's entropy (plan M9.4): the system's, two runs differ, a ServerHello
-  -- with it; given, none; a failing or stuck provider stops the host
-  let a ← Tools.HostEntropy.get .os
-  let b ← Tools.HostEntropy.get .os
-  match a, b with
-  | .ok (some x), .ok (some y) =>
-    if x.size != 32 || x == y then
-      IO.println "FAIL rng host: the system's bytes"; bad := bad + 1
-    let hs := HttpTests.exchange (Srv.Tls.app { Srv.Tls.demo with entropy := some x }) ch
-    if hs.resp.size < 6 || hs.resp[0]! != 22 || hs.resp[5]! != 2 then
-      IO.println "FAIL rng host: no ServerHello with the system's bytes"; bad := bad + 1
-  | _, _ => IO.println "FAIL rng host: no bytes from the system"; bad := bad + 1
+  -- the host's entropy (plan M9.4): fresh from the system for every handshake
+  let base := Srv.Tls.demo
+  let fs ← Tools.HostEntropy.site base .os
+  match fs with
+  | .ok fsite =>
+    let fapp := Srv.Tls.app fsite
+    -- the same ClientHello twice, each on a host state refilled as ember-host does
+    let once : IO (Option ByteArray) := do
+      let s0 := Srv.State.init fapp {}
+      match ← Tools.HostEntropy.refill (s0.g : Srv.Http.Ctl) with
+      | .ok g => pure (some (HttpTests.exchangeFrom fapp { s0 with g := g } ch).1.resp)
+      | .error _ => pure none
+    match ← once, ← once with
+    | some r1, some r2 =>
+      if r1.size < 6 || r1[0]! != 22 || r1[5]! != 2 then
+        IO.println "FAIL rng host: no ServerHello with fresh entropy"; bad := bad + 1
+      -- the ServerHello's random (bytes 11..43 of the record) and the whole flight differ
+      if r1.extract 11 43 == r2.extract 11 43 || r1 == r2 then
+        IO.println "FAIL rng host: a ClientHello sent twice got the same server random"; bad := bad + 1
+    | _, _ => IO.println "FAIL rng host: no bytes from the system"; bad := bad + 1
+    -- a fresh site without fresh entropy: internal_error, never the seed alone
+    let no := HttpTests.exchange fapp ch
+    if no.resp.toList != (Srv.Tls.record 21 (Srv.Tls.b1 2 ++ Srv.Tls.b1 80)).toList then
+      IO.println s!"FAIL rng host: no fresh entropy must refuse: {CryptoTests.toHex no.resp}"; bad := bad + 1
+    -- the entropy is used once: a second handshake on the same state, not refilled, is refused
+    let s0 := Srv.State.init fapp { conns := 2 }
+    match ← Tools.HostEntropy.refill (s0.g : Srv.Http.Ctl) with
+    | .ok g =>
+      let (e1, s1) := HttpTests.exchangeFrom fapp { s0 with g := g } ch
+      let (e2, _) := HttpTests.exchangeFrom fapp s1 ch (peerPort := 40001)
+      if e1.resp.size < 6 || e1.resp[5]! != 2 || (s1.g : Srv.Http.Ctl).ent.isSome ||
+         e2.resp.toList != (Srv.Tls.record 21 (Srv.Tls.b1 2 ++ Srv.Tls.b1 80)).toList then
+        IO.println "FAIL rng host: fresh entropy must be used once"; bad := bad + 1
+    | .error _ => IO.println "FAIL rng host: no bytes from the system"; bad := bad + 1
+  | .error e => IO.println s!"FAIL rng host: {e}"; bad := bad + 1
+  -- fixed bytes and none are test configurations; a bad source stops the host
   let hex := String.join ((List.range 32).map fun i => let s := Nat.toDigits 16 (i * 7 + 1); String.ofList (if s.length == 1 then '0' :: s else s))
-  match ← Tools.HostEntropy.get (.given hex) with
-  | .ok (some g) => if g.size != 32 || g[1]! != 8 then IO.println "FAIL rng host: --entropy"; bad := bad + 1
-  | _ => IO.println "FAIL rng host: --entropy"; bad := bad + 1
-  match ← Tools.HostEntropy.get .none with
-  | .ok none => pure ()
-  | _ => IO.println "FAIL rng host: --no-entropy"; bad := bad + 1
-  let refused (r : Except String (Option ByteArray)) : Bool := match r with | .error _ => true | .ok _ => false
-  if !refused (← Tools.HostEntropy.get (.given "zz")) || !refused (← Tools.HostEntropy.get .os (fun _ => throw (IO.userError "no getrandom"))) ||
-     !refused (← Tools.HostEntropy.get .os (fun _ => pure (ByteArray.mk (Array.replicate 32 0)))) ||
-     !refused (← Tools.HostEntropy.get .os (fun _ => pure (ByteArray.mk (Array.replicate 16 1)))) then
+  match ← Tools.HostEntropy.site base (.given hex) with
+  | .ok t => if t.fresh || (t.entropy.map (·[1]!)) != some 8 then IO.println "FAIL rng host: --entropy"; bad := bad + 1
+  | .error _ => IO.println "FAIL rng host: --entropy"; bad := bad + 1
+  match ← Tools.HostEntropy.site base .none with
+  | .ok t => if t.fresh || t.entropy.isSome then IO.println "FAIL rng host: --no-entropy"; bad := bad + 1
+  | .error _ => IO.println "FAIL rng host: --no-entropy"; bad := bad + 1
+  let refused (r : Except String Srv.Tls.Site) : Bool := match r with | .error _ => true | .ok _ => false
+  if !refused (← Tools.HostEntropy.site base (.given "zz")) ||
+     !refused (← Tools.HostEntropy.site base .os (fun _ => throw (IO.userError "no getrandom"))) ||
+     !refused (← Tools.HostEntropy.site base .os (fun _ => pure (ByteArray.mk (Array.replicate 32 0)))) ||
+     !refused (← Tools.HostEntropy.site base .os (fun _ => pure (ByteArray.mk (Array.replicate 16 1)))) then
     IO.println "FAIL rng host: a bad source must stop the host"; bad := bad + 1
-  IO.println s!"rng: the RNG's bytes change the handshake; eight equal reads refuse it; Ember reading the register = Spec.Srv.Tls (interpreter, host C); the host's entropy from the system (two runs differ, a failing or stuck source stops it), {bad} failures"
+  IO.println s!"rng: the RNG's bytes change the handshake; eight equal reads refuse it; Ember reading the register = Spec.Srv.Tls (interpreter, host C); the host's entropy fresh from the system for every handshake (a ClientHello sent twice gets two server randoms, none refuses, a bad source stops it), {bad} failures"
   return bad
 
 def run : IO Nat := do

@@ -109,6 +109,10 @@ structure Ctl where
   device started at, for the control routes (decision 8-4). -/
   now      : Option Nat := none
   boot     : Option Nat := none
+  /-- Plan M9.4: fresh entropy for the next TLS handshake of a `fresh` site
+  (`Spec.Srv.Tls.Site.fresh`: the host refills it from the system before
+  each input; a handshake takes it and leaves none). -/
+  ent      : Option ByteArray := none
   deriving Inhabited
 
 /-- The shared state at the start: the site's time, if it has one (the tests). -/
