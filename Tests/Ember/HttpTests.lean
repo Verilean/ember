@@ -133,7 +133,10 @@ def cases : List (String × ByteArray) :=
    ("garbage", str "hello there\r\n\r\n"),
    ("bad version", str "GET / HTTP/2.0\r\n\r\n"),
    ("version not a digit", str "GET / HTTP/1.A\r\n\r\n"),
-   ("too long", str ("GET /" ++ String.mk (List.replicate 600 'a') ++ " HTTP/1.1\r\n\r\n"))]
+   ("too long", str ("GET /" ++ String.mk (List.replicate 600 'a') ++ " HTTP/1.1\r\n\r\n")),
+   -- a browser's header: longer than `reqMax`, its request line short
+   ("long header", str ("GET /hello.txt HTTP/1.1\r\nHost: 10.0.0.1\r\n" ++
+      String.join ((List.range 24).map fun i => s!"X-Header-{i}: {String.mk (List.replicate 50 'v')}\r\n") ++ "\r\n"))]
 
 /-- Run every case whole and in pieces; the sessions, for the Ember checks. -/
 def sessions : List (String × Array Input) :=
@@ -151,9 +154,9 @@ def run : IO Nat := do
     for pieces in [1, 3, 7] do
       k := k + 1
       let ex := exchange app r pieces
-      -- the server sees at most `reqMax` bytes of the request
-      let first := Bytes.slice r 0 Srv.Http.demo.reqMax
-      let want := if Srv.Http.headerEnds first then Srv.Http.answer Srv.Http.demo r
+      -- the header ends somewhere; the request line must end within `reqMax` bytes
+      let lineEnds := (Bytes.slice r 0 Srv.Http.demo.reqMax).toList.contains 13
+      let want := if Srv.Http.headerEnds r && lineEnds then Srv.Http.answer Srv.Http.demo r
         else Srv.Http.errorText 400 "Bad Request" false
       if ex.resp.toList != want.toList || !ex.fin || ex.rst then
         bad := bad + 1
@@ -162,7 +165,7 @@ def run : IO Nat := do
   let status : List (String × String) :=
     [("GET /", "200"), ("GET /hello.txt", "200"), ("GET /big.txt", "200"), ("GET /hello.txt?x=1", "200"),
      ("GET /missing", "404"), ("HEAD /", "200"), ("POST /", "501"), ("HTTP/1.0", "200"),
-     ("garbage", "400"), ("bad version", "400"), ("version not a digit", "400"), ("too long", "400")]
+     ("garbage", "400"), ("bad version", "400"), ("version not a digit", "400"), ("too long", "400"), ("long header", "200")]
   for (n, code) in status do
     if let some (_, r) := cases.find? (·.1 == n) then
       let ex := exchange app r 1
@@ -180,7 +183,7 @@ def run : IO Nat := do
   if !okSeries then
     bad := bad + 1
     IO.println s!"FAIL http series: {exs.map fun e => (e.fin, e.rst, e.resp.size)}"
-  IO.println s!"http: {k} exchanges (12 requests × 1, 3, 7 pieces), response = Http.answer and the expected status, closed by the server, {bad} failures"
+  IO.println s!"http: {k} exchanges (13 requests × 1, 3, 7 pieces), response = Http.answer and the expected status, closed by the server, {bad} failures"
   return bad
 
 end Ember.Tests.HttpTests

@@ -31,6 +31,13 @@ def registry : IO (List (String × Prog)) :=
   pure (Examples.all ++ [("net", Net.prog), ("sliploop", Net.Loop.prog),
     ("net-eth", Net.Eth.prog), ("net-eth-dhcp", Net.Eth.progDhcp)])
 
+/-- The site of the shipped `https-ctl` image: the demo control site, the
+RNG's bytes mixed in, no time until a datagram gives it. -/
+def shippedCtl : Spec.Srv.Tls.Site :=
+  let d := Spec.Srv.Tls.demoCtl
+  let h : Spec.Srv.Http.Site := { d.http with now := none }
+  { d with http := h, entropy := some (ByteArray.mk (Array.replicate 32 0)) }
+
 /-- Programs emitted by name, without a golden file: a test of the tools,
 and the HTTP server of plan M8 on two connections (`Net.Http`, the demo
 site), which the ESP32-C3 image `stack-http` runs, the crypto of plan
@@ -38,7 +45,13 @@ M8.5 behind a request/answer loop (`Net.Crypto.testProg`), and the HTTPS
 server of plan M8.7 on two connections (`Net.Tls`, the demo site). -/
 def extra : List (String × Prog) :=
   [("trapnote", Examples.TrapNote.prog), ("http", Net.Http.prog 2 Spec.Srv.Http.demo),
-   ("crypto", Net.Crypto.testProg), ("https", Net.Tls.prog 2 Spec.Srv.Tls.demo)]
+   ("crypto", Net.Crypto.testProg), ("https", Net.Tls.prog 2 Spec.Srv.Tls.demo),
+   -- plan M9: protected routes, control requests, kept connections; as shipped
+   -- (the RNG's bytes mixed in, the time from the network) and for replay; the site of M9.3's recordings for replay
+   -- as shipped: no time until a datagram on port 37 gives it (decision 7)
+   ("https-ctl", Net.Tls.prog 2 shippedCtl),
+   ("https-ctl-test", Net.Tls.prog 2 Spec.Srv.Tls.demoCtl),
+   ("https-auth-test", Net.Tls.prog 2 Spec.Srv.Tls.demoAuth)]
 
 def goldenDir : System.FilePath := "Tests/Ember/golden"
 

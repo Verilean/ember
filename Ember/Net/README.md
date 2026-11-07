@@ -35,16 +35,71 @@ Its reference is `Ember.Spec.Srv` (`Spec/Srv/*.lean`).
 `HEAD` of fixed routes, 404, 400, 501, `Content-Length`, `Connection:
 close`.  The site's responses — headers and bodies — are constants
 (`h_rom`); a segment's bytes are computed from them by offset, so a
-retransmission needs no copy.  Per connection the request header is
-kept (`REQ_MAX` bytes).  The server closes first, so a SYN that finds no
+retransmission needs no copy.  Per connection the first `REQ_MAX` bytes of the
+request header (the request line) are kept; its end is found as the
+bytes come (`h_feed`), up to `HDR_MAX` bytes.  The server closes first, so a SYN that finds no
 connection in LISTEN takes one in TIME-WAIT.
 
 `Tls.lean` is TLS 1.3 on it (`Tls.prog n site`, `Spec.Srv.Tls` record for
 record and alert for alert) with the crypto of `Crypto/` and the HTTP of
-`Http.lean` inside.  Per connection a buffer of records received and one
+`Http.lean` inside; the certificate is Ed25519's when the client offers it,
+P-256's (ECDSA, `Crypto/P256.lean`) otherwise — a browser.  Per connection a buffer of records received and one
 of what is sent (the server's flight and the protected response, kept as
 the Spec keeps them), the transcript hash's SHA-256 context, the keys and
 sequence numbers; records are opened and sealed in place.
+
+`Crypto/P256.lean` also verifies ECDSA P-256 signatures (`p2_verify`, plan
+M9.2) on a SHA-256 hash: `r`, `s` in [1, n), the key on the curve,
+`u1·G + u2·Q` by double and add with `G + Q` over the same complete
+addition (the data are public), `x(R) mod n = r`.  It and its two
+registers and inputs are in a program only when asked for
+(`p256VerifyFns`, `p256Globals (verify := true)`): the HTTPS image of M8
+does not carry them.
+
+`Auth.lean` (plan M9.3) checks OIDC access tokens on the protected routes
+of a site (`Spec.Srv.Http`'s `scope`), as `Spec.Srv.Auth.check` and
+`Spec.Srv.Http.guard` do, while the header arrives: the `Authorization`
+fields are followed byte by byte, the token's base64url is decoded by
+segment, the signing input goes into a SHA-256 context of the connection,
+the two JSON texts into a scanner that keeps a depth and a bit per level
+and compares the top-level claims with the configuration as they come;
+the signature is checked (`p2_verify`) only when the header is complete
+and the route is protected.  Per connection about 250 bytes (the SHA-256
+context, the 64-byte signature, the reader's state), whatever the token's
+length.  It takes the place of `Http.lean`'s `h_feed` in a program whose
+site has protected routes (`Http.feedFns`), in HTTP and in HTTPS; a site
+without them gets the functions of M8, unchanged.
+
+`Ctl.lean` (plan M9.5) serves control requests and kept connections for a
+site that has them (`Spec.Srv.Http.Site.ctl`), as `Spec.Srv.Http.stepCtl`
+does: the header is read for `authorization`, `content-length`,
+`transfer-encoding`, `x-ember-seq` and `connection` at once; a control
+request's body goes into a buffer of the connection (at most `bodyMax`
+bytes) and into its SHA-256 context; the shared state (`ctl_last`,
+`ctl_hash`) decides whether it is executed (its body copied to `ctl_cmd`,
+`ctl_new` set for the device), answered again, or refused with 409; the
+answer `200 ok N` is the one response made in RAM (`h_dyn`).  A kept
+connection takes no data while a response is out (`app_room` 0) and the
+next request once it is acknowledged; over plain HTTP the bytes of a
+request that come in the same segment after the previous one are
+dropped (no pipelining), over TLS they are the next request (`h_kept`
+seals the response and resets the request at once).
+
+Plan M9.4.  The time: a site with control routes takes datagrams on UDP
+port 37 (`Ctl.time_in`, in place of `Ip.lean`'s `udp_input`, as
+`Spec.Srv.Http.timeIn`): 8 bytes, seconds since 1970, big-endian; the
+first sets the time and the start, later ones only move it forward.
+Between them `Auth.clock` adds the board's uptime, which the ESP32-C3's
+runtime answers at `UPTIME` (SYSTIMER; 0 in the interpreter and the host
+C, where the time stays as set, as in the Spec).  Until the time is set
+protected routes answer 503; a control request needs a token whose `iat`
+is at or after the start (decision 8-4).  The RNG: `Tls.flight` reads the
+RNG data register eight times per handshake and refuses the handshake
+with `internal_error` when the eight reads are equal; with
+`EMBER_ENTROPY` the runtime turns on the SAR ADC noise source as
+ESP-IDF's `bootloader_random_enable` does and paces the reads as
+`esp_random` does (decision 9).  QEMU says nothing about the entropy;
+that needs a board.
 
 ## Data layout
 

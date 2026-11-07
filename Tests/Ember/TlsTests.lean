@@ -45,9 +45,9 @@ def rfc8448 : List (String × ByteArray × String) :=
    ("server finished key", expandLabel sHs "finished" .empty 32, "008d3b66f816ea559f96b537e885c31fc068bf492c652f01f288a1d8cdc19fc8")]
 
 /-- A ClientHello this server accepts but for the key share. -/
-def clientHello (share : ByteArray) : ByteArray :=
+def clientHello (share : ByteArray) (sigalg : Nat := 0x0807) : ByteArray :=
   let ext (ty : Nat) (d : ByteArray) := b2 ty ++ b2 d.size ++ d
-  let exts := ext 43 (b1 2 ++ b2 0x0304) ++ ext 13 (b2 2 ++ b2 0x0807) ++ ext 10 (b2 2 ++ b2 0x001d) ++
+  let exts := ext 43 (b1 2 ++ b2 0x0304) ++ ext 13 (b2 2 ++ b2 sigalg) ++ ext 10 (b2 2 ++ b2 0x001d) ++
     ext 51 (b2 (4 + share.size) ++ b2 0x001d ++ b2 share.size ++ share)
   let body := b2 0x0303 ++ ByteArray.mk (Array.replicate 32 7) ++ b1 0 ++ b2 2 ++ b2 0x1303 ++ b1 1 ++ b1 0 ++
     b2 exts.size ++ exts
@@ -125,7 +125,11 @@ def sessions : List (String × Array Input) :=
   let app := Srv.Tls.app Srv.Tls.demo
   (lowOrder.map fun (name, share) => (s!"low-order share {name}", (HttpTests.exchange app (clientHello share)).inputs)) ++
     [("valid share", (HttpTests.exchange app (clientHello (x25519 (natLe 12345 32) basepoint9))).inputs),
-     ("an empty supported_versions at the end of a full record", (HttpTests.exchange app fullRecordEmptyVersions).inputs)]
+     ("an empty supported_versions at the end of a full record", (HttpTests.exchange app fullRecordEmptyVersions).inputs),
+     ("P-256 only (ecdsa_secp256r1_sha256)",
+       (HttpTests.exchange app (clientHello (x25519 (natLe 12345 32) basepoint9) 0x0403)).inputs),
+     ("neither Ed25519 nor P-256 (rsa_pss_rsae_sha256)",
+       (HttpTests.exchange app (clientHello (x25519 (natLe 12345 32) basepoint9) 0x0804)).inputs)]
 
 
 def run : IO Nat := do
@@ -157,6 +161,15 @@ def run : IO Nat := do
     if !ok then
       bad := bad + 1
       IO.println s!"FAIL tls malformed ClientHello: {name}: got {toHex (ex.resp.extract 0 16)} (fin {ex.fin})"
+  -- a client offering P-256 only gets the P-256 certificate; one offering neither, handshake_failure
+  let pOnly := HttpTests.exchange app (clientHello (x25519 (natLe 12345 32) basepoint9) 0x0403)
+  if pOnly.resp.size < 6 || pOnly.resp[0]! != 22 || pOnly.resp[5]! != 2 then
+    bad := bad + 1
+    IO.println s!"FAIL tls P-256 only: no ServerHello: {toHex (pOnly.resp.extract 0 16)}"
+  let neither := HttpTests.exchange app (clientHello (x25519 (natLe 12345 32) basepoint9) 0x0804)
+  if neither.resp.toList != (record 21 (b1 2 ++ b1 40)).toList then
+    bad := bad + 1
+    IO.println s!"FAIL tls neither signature: {toHex neither.resp}"
   -- a handshake record (22, 3 3) whose message is a ServerHello (2)
   if good.resp.size < 6 || (good.resp.extract 0 3).toList != [22, 3, 3] || good.resp[5]! != 2 then
     bad := bad + 1
