@@ -30,7 +30,10 @@ test configuration, not a secure one.  With `entropy` (plan M9.4) 32 bytes
 read from the board's random number generator for each handshake go in
 between the seed and the label: the Spec takes them as a value of the
 site (what eight reads of the RNG register give), the target reads the
-register, so the tests can set it and the board gets fresh bytes.
+register, so the tests can set it and the board gets fresh bytes.  If
+the eight reads are all the same the generator is taken to be dead and
+the handshake ends with `internal_error` (decision 9: fail closed); the
+ESP32-C3's runtime reads a register that did not change at all as 0.
 
 The bytes to send are kept as they are made (`out`): the Spec states what
 is sent; how a small machine regenerates them for a retransmission is
@@ -221,6 +224,10 @@ def fail (c : Conn) (desc : Nat) : Conn :=
     let (r, tx) := protect c.tx 21 (b1 2 ++ b1 desc)
     { c with out := c.out ++ r, tx, phase := .closed, done := true }
 
+/-- Eight 4-byte reads that are all the same (plan M9.4, decision 9). -/
+def stuck (e : ByteArray) : Bool :=
+  (List.range 28).all fun i => e[i + 4]! == e[i]!
+
 /-- Answer a ClientHello: the bytes to send and the connection after it. -/
 def serverFlight (site : Site) (c : Conn) (chMsg : ByteArray) (h : Hello) : Conn :=
   let ent := site.entropy.getD .empty
@@ -232,6 +239,8 @@ def serverFlight (site : Site) (c : Conn) (chMsg : ByteArray) (h : Hello) : Conn
   -- certificate; neither is handshake_failure, before anything else
   let useP := !h.ed && h.p256 && site.certP256.size > 0
   if !h.ed && !useP then fail c 40 else
+  -- the eight reads of the RNG all equal: a dead generator, internal_error
+  if site.entropy.any stuck then fail c 80 else
   -- a share of small order gives zeros: RFC 8446 §7.4.2, abort with illegal_parameter
   if shared.toList.all (· == 0) then fail c 47 else
   let certBytes := if useP then site.certP256 else site.cert
@@ -356,8 +365,10 @@ def app (site : Site) : App where
   idleClose := true
   reuseTimeWait := true
   G := Http.Ctl
-  ginit := {}
+  ginit := Http.ctlInit site.http
   recvG g c d := if c.phase == .closed then (g, c) else drain site g { c with inb := c.inb ++ d }
+  udpPort := if site.http.ctl then some Http.timePort else none
+  udpG := Http.timeIn
 
 def hexBytes (s : String) : ByteArray := Id.run do
   let v (c : Char) : Nat := if c.isDigit then c.toNat - 48 else c.toLower.toNat - 87

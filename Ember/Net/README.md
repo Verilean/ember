@@ -85,6 +85,22 @@ request that come in the same segment after the previous one are
 dropped (no pipelining), over TLS they are the next request (`h_kept`
 seals the response and resets the request at once).
 
+Plan M9.4.  The time: a site with control routes takes datagrams on UDP
+port 37 (`Ctl.time_in`, in place of `Ip.lean`'s `udp_input`, as
+`Spec.Srv.Http.timeIn`): 8 bytes, seconds since 1970, big-endian; the
+first sets the time and the start, later ones only move it forward.
+Between them `Auth.clock` adds the board's uptime, which the ESP32-C3's
+runtime answers at `UPTIME` (SYSTIMER; 0 in the interpreter and the host
+C, where the time stays as set, as in the Spec).  Until the time is set
+protected routes answer 503; a control request needs a token whose `iat`
+is at or after the start (decision 8-4).  The RNG: `Tls.flight` reads the
+RNG data register eight times per handshake and refuses the handshake
+with `internal_error` when the eight reads are equal; with
+`EMBER_ENTROPY` the runtime turns on the SAR ADC noise source as
+ESP-IDF's `bootloader_random_enable` does and paces the reads as
+`esp_random` does (decision 9).  QEMU says nothing about the entropy;
+that needs a board.
+
 ## Data layout
 
 | Global | Type | Bytes (host64) | Role |

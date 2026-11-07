@@ -45,7 +45,7 @@ mk NAME=stack-https      PROG=$out/https.c
 mk NAME=stack-https-test PROG=$out/https.c DEFS="-DEMBER_TICK_HOST=1"
 # plan M9: protected routes, control requests and kept connections: as
 # shipped (the RNG's bytes mixed in), and the demo sites for replay
-mk NAME=stack-https-ctl       PROG=$out/https-ctl.c
+mk NAME=stack-https-ctl       PROG=$out/https-ctl.c DEFS="-DEMBER_ENTROPY=1"
 mk NAME=stack-https-ctl-test  PROG=$out/https-ctl-test.c DEFS="-DEMBER_TICK_HOST=1"
 mk NAME=stack-https-auth-test PROG=$out/https-auth-test.c DEFS="-DEMBER_TICK_HOST=1"
 

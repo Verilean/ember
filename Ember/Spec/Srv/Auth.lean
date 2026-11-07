@@ -30,7 +30,8 @@ The token is accepted when (RFC 7515, 7519, 9068):
 * `iss` equals the configured issuer; `aud` equals the configured
   audience, or is an array of strings that contains it;
 * `exp` is there and `now < exp + skew`; `nbf`, if there, has
-  `nbf ≤ now + skew`;
+  `nbf ≤ now + skew`; `iat`, if there, is a number (`checkIat` returns
+  it: a control request needs one at or after the device's start, plan M9.4);
 * `scope`, if there, is a string; its words (split at spaces) are the
   scopes the token grants.
 -/
@@ -264,8 +265,8 @@ def isStr (v : Option JVal) (s : String) : Bool :=
   | some (.str (some x)) => x == s.toUTF8
   | _ => false
 
-/-- The scopes a token grants, if it is accepted at time `now`. -/
-def check (cfg : Cfg) (now : Nat) (tok : ByteArray) : Option (List ByteArray) := do
+/-- The scopes a token grants and its `iat`, if it is accepted at time `now`. -/
+def checkIat (cfg : Cfg) (now : Nat) (tok : ByteArray) : Option (List ByteArray × Option Nat) := do
   let [h, p, s] := splitOn 46 tok.toList | none
   let hb ← b64urlDecode h
   let pb ← b64urlDecode p
@@ -303,11 +304,21 @@ def check (cfg : Cfg) (now : Nat) (tok : ByteArray) : Option (List ByteArray) :=
   | none => pure ()
   | some (.num n) => if n ≤ now + cfg.skew then pure () else none
   | some _ => none
+  -- `iat`, when there, a number (plan M9.4: control needs one after the start)
+  let iat ← field pj "iat"
+  let iat ← match iat with
+    | none => pure none
+    | some (.num i) => pure (some i)
+    | some _ => none
   let scope ← field pj "scope"
   match scope with
-  | none => pure []
-  | some (.str (some x)) => pure (words x)
+  | none => pure ([], iat)
+  | some (.str (some x)) => pure (words x, iat)
   | some _ => none
+
+/-- The scopes of an accepted token. -/
+def check (cfg : Cfg) (now : Nat) (tok : ByteArray) : Option (List ByteArray) :=
+  (checkIat cfg now tok).map (·.1)
 
 /-- A signed token, for the tests: the compact serialization of `header`
 and `payload` (JSON texts) signed with the private scalar `d` (RFC 6979). -/

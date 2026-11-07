@@ -461,6 +461,14 @@ ember def flight (size : u16) := do
       tl_ent[4 * w + 1] := (v >>> 8 : u8)
       tl_ent[4 * w + 2] := (v >>> 16 : u8)
       tl_ent[4 * w + 3] := (v >>> 24 : u8)
+    -- eight equal reads: a dead generator, internal_error (decision 9)
+    let mut moved : bool := false
+    for qe : u16 in [4, 32) do
+      if tl_ent[qe] != tl_ent[qe - 4] then
+        moved := true
+    if !moved then
+      fail(80)
+      return
   -- server random, ephemeral key, its public key, the shared secret
   seeded(TL_L_RANDOM, 13)
   for j : u16 in [0, 32) do

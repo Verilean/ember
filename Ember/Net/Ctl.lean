@@ -408,6 +408,10 @@ ember def hc_decide := do
     ha_guard()
     if (h_kind[cur] : u16) != kind then
       return
+    -- no token issued before the device started (decision 8-4)
+    if !j_iatok[cur] || j_iat[cur] < h_boot then
+      h_kind[cur] := K_401I
+      return
   -- read the body
   h_close[cur] := !keep
   c_body[cur] := true
@@ -541,9 +545,74 @@ end Ember.Net.Ctl.Tls
 namespace Ember.Net.Ctl
 open Ember.Lang
 
+/-! ## The time (plan M9.4, decision 7) -/
+
+/-- A datagram of 8 bytes on the time port (`buf[28, 36)`, seconds since
+1970, big-endian): `Spec.Srv.Http.timeIn`.  The first one sets the time
+and the start (the time less the board's uptime); later ones only move
+the time forward. -/
+ember def time_in := do
+  let mut v : u64 := 0
+  for ti : u16 in [28, 36) do
+    v := (v <<< 8) ||| (buf[ti] : u64)
+  let up : u32 ← mmio.read32(UPTIME)
+  if !h_now_ok then
+    h_now := v
+    h_up_at := up
+    if v >= (up : u64) then
+      h_boot := v - (up : u64)
+    else
+      h_boot := 0
+    h_now_ok := true
+    return
+  let tnow : u64 ← clock()
+  if v >= tnow then
+    h_now := v
+    h_up_at := up
+
+/-- `Net.udp_input` with the time port: a datagram to it goes to `time_in`
+when it holds 8 bytes, and is dropped silently otherwise; nothing is sent
+back (`Spec.Srv.Stack.udpInput` with the application's `udpPort`). -/
+ember def udp_input (src : u32) (dst : u32) (n : u16) := do
+  if n < 8 then
+    trace.drop(D_SHORT_UDP)
+    return
+  let ul : u16 ← get16(24)
+  if ul < 8 || ul > n then
+    trace.drop(D_BAD_UDP_LENGTH)
+    return
+  let cs : u16 ← get16(26)
+  if cs != 0 then
+    let p : u16 ← pseudo(src, dst, 17, ul)
+    let s : u16 ← csum(20, ul, p)
+    let ok : bool ← verifies(s)
+    if !ok then
+      trace.drop(D_BAD_UDP_CHECKSUM)
+      return
+  let sport : u16 ← get16(20)
+  let dport : u16 ← get16(22)
+  if dport == TIME_PORT then
+    if ul == 16 then
+      time_in()
+    return
+  if dport != ECHO_PORT then
+    trace.drop(D_UDP_PORT_CLOSED)
+    return
+  set16(20, dport)
+  set16(22, sport)
+  set16(26, 0)
+  let p2 : u16 ← pseudo(OUR_IP, src, 17, ul)
+  let s2 : u16 ← csum(20, ul, p2)
+  let c : u16 := ~~~s2
+  if c == 0 then
+    set16(26, 0xFFFF)
+  else
+    set16(26, c)
+  ip_send(17, src, ul)
+
 def fns : List Fn :=
   [hc_dec_byte, hc_dec_ok, hc_conn_tok, hc_conn_byte, hc_vend, hc_vbyte, hc_line, hc_reset, h_byte, h_total, dyn_put, dyn_num,
-   dyn_ok, hc_exec, hc_decide, hc_decided, h_feed, hc_next]
+   dyn_ok, hc_exec, hc_decide, hc_decided, h_feed, hc_next, time_in, udp_input]
 
 /-- The functions the HTTP program takes in place of `Net.Http`'s (kept connections). -/
 def httpFns : List Fn := [h_kept, app_room, app_acked, app_close]
@@ -567,7 +636,7 @@ def globals (n : Nat) (site : Spec.Srv.Http.Site) (base : Nat) : List Global :=
    u8s "CLOSEW" (bytesOf "close"),
    { name := "KEEP_ALIVE", ty := .bool, init := [if site.keepAlive then 1 else 0], const := true },
    { name := "R_POST", ty := .arr .bool (max 1 nr), init := site.routes.map (fun r => if r.post then 1 else 0), const := true },
-   scalar "BODY_MAX" .u16 site.bodyMax,
+   scalar "BODY_MAX" .u16 site.bodyMax, scalar "TIME_PORT" .u16 Spec.Srv.Http.timePort.toNat,
    scalar "K_KEEP" .u16 base, scalar "K_404K" .u8 (base + nr), scalar "K_405GK" .u8 (base + nr + 1),
    scalar "K_405G" .u8 (base + nr + 2), scalar "K_405P" .u8 (base + nr + 3), scalar "K_411" .u8 (base + nr + 4),
    scalar "K_413" .u8 (base + nr + 5), scalar "K_409K" .u8 (base + nr + 6), scalar "K_409" .u8 (base + nr + 7),

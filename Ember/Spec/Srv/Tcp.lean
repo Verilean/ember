@@ -66,6 +66,10 @@ structure App where
   /-- `recv` with the shared state: in-order data of a connection may change
   it.  By default the shared state is left alone. -/
   recvG : G → σ → ByteArray → G × σ := fun g s d => (g, recv s d)
+  /-- A UDP port whose datagrams go to the application (plan M9.4: the
+  time), and what one does to the shared state; no answer is sent. -/
+  udpPort : Option UInt16 := none
+  udpG : G → ByteArray → G := fun g _ => g
 
 /-- The echo application of `Ember.Spec.Tcp`: the state is its buffer. -/
 def echo : App where

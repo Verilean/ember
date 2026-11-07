@@ -1,5 +1,6 @@
 import Tests.Ember.SrvTests
 import Tests.Ember.AuthTests
+import Tests.Ember.TlsTests
 
 /-!
 # The token check in Ember against the reference (plan M9.3)
@@ -247,25 +248,42 @@ def recorded : IO Nat := do
 def entropyOf (c : UInt32) : ByteArray :=
   ByteArray.mk ((List.replicate 8 [c.toUInt8, (c >>> 8).toUInt8, (c >>> 16).toUInt8, (c >>> 24).toUInt8]).flatten.toArray)
 
-/-- With `entropy` the server's random and key share change, and the Ember
-program, reading the RNG register, gives `Spec.Srv.Tls`'s trace: the
-interpreter with the register set to a value, the host C (whose register
-reads 0) with zeros. -/
+/-- 32 bytes that are not eight equal reads. -/
+def entropyLive : ByteArray := ByteArray.mk ((List.range 32).map (·.toUInt8 * 37 + 5)).toArray
+
+/-- With `entropy` the server's random and key share change; eight equal
+reads of the RNG (a dead generator) end the handshake with
+`internal_error` (decision 9).  The Ember program, reading the RNG
+register, gives `Spec.Srv.Tls`'s trace: the interpreter with the register
+set to a value, the host C (whose register reads 0) with zeros — both
+eight equal reads, so both refused, as the Spec. -/
 def rng : IO Nat := do
   let mut bad := 0
   let t ← Trace.readFile "Tests/Ember/https/curl-get.trace"
   let ins := t.inputs
   let c : UInt32 := 0x9e3779b9
-  let site := { Srv.Tls.demo with entropy := some (entropyOf c) }
+  if Srv.Tls.stuck entropyLive || !Srv.Tls.stuck (entropyOf c) || !Srv.Tls.stuck (entropyOf 0) then
+    IO.println "FAIL rng: stuck"; bad := bad + 1
+  let live := { Srv.Tls.demo with entropy := some entropyLive }
+  let dead := { Srv.Tls.demo with entropy := some (entropyOf c) }
   let plain := Tools.NetCheck.comparable (Srv.run (Srv.Tls.app Srv.Tls.demo) (srvCfg {} 1) ins)
-  let mixed := Tools.NetCheck.comparable (Srv.run (Srv.Tls.app site) (srvCfg {} 1) ins)
+  let mixed := Tools.NetCheck.comparable (Srv.run (Srv.Tls.app live) (srvCfg {} 1) ins)
   if (diff plain mixed { observable := false }).equal then
     IO.println "FAIL rng: the RNG's bytes change nothing"; bad := bad + 1
-  let p1 := Tools.NetCheck.checked (Net.Tls.prog 1 site)
+  -- a live generator gets a ServerHello, a dead one internal_error and nothing else
+  let ch := TlsTests.clientHello TlsTests.goodShare
+  let ok := HttpTests.exchange (Srv.Tls.app live) ch
+  if ok.resp.size < 6 || ok.resp[0]! != 22 || ok.resp[5]! != 2 then
+    IO.println s!"FAIL rng live: no ServerHello: {CryptoTests.toHex (ok.resp.extract 0 16)}"; bad := bad + 1
+  let no := HttpTests.exchange (Srv.Tls.app dead) ch
+  if no.resp.toList != (Srv.Tls.record 21 (Srv.Tls.b1 2 ++ Srv.Tls.b1 80)).toList || !no.fin then
+    IO.println s!"FAIL rng dead: {CryptoTests.toHex no.resp} (fin {no.fin})"; bad := bad + 1
+  let refused := Tools.NetCheck.comparable (Srv.run (Srv.Tls.app dead) (srvCfg {} 1) ins)
+  let p1 := Tools.NetCheck.checked (Net.Tls.prog 1 dead)
   let m0 := Machine.init p1 ins
   let m0 := { m0 with world := { m0.world with mmio := m0.world.mmio.insert 0x600260B0 c } }
   let r := runMachine m0 { Spec.Config.header {} with impl := "ember-interp" } (fuel := 4000000000)
-  let d := diff mixed (Tools.NetCheck.comparable r.trace) { observable := false, context := 2 }
+  let d := diff refused (Tools.NetCheck.comparable r.trace) { observable := false, context := 2 }
   if r.error.isSome || !d.equal then
     IO.println s!"FAIL rng interpreter: {d.report}"; bad := bad + 1
   if ← Tools.Cc.available then
@@ -284,7 +302,7 @@ def rng : IO Nat := do
         let d2 := diff s (Tools.NetCheck.comparable tc) { observable := false, context := 2 }
         if rc != 0 || !d2.equal then
           IO.println s!"FAIL rng host C (exit {rc}): {d2.report}"; bad := bad + 1
-  IO.println s!"rng: the RNG's bytes change the handshake; Ember reading the register = Spec.Srv.Tls (interpreter, host C), {bad} failures"
+  IO.println s!"rng: the RNG's bytes change the handshake; eight equal reads refuse it; Ember reading the register = Spec.Srv.Tls (interpreter, host C), {bad} failures"
   return bad
 
 def run : IO Nat := do

@@ -67,10 +67,75 @@ def single : List (String × ByteArray × String × Bool) := [
   ("an empty body", post "1" "", "HTTP/1.1 200 OK", false)
 ]
 
+/-- The shared state at the start: the demo site's time. -/
+def g0 : Http.Ctl := Http.ctlInit site
+
+def be8 (v : Nat) : ByteArray := ByteArray.mk ((List.range 8).reverse.map fun i => (v / 256 ^ i % 256).toUInt8).toArray
+
+/-- A token of the demo provider with a payload of our own. -/
+def tokenWith (payload : String) : ByteArray :=
+  Auth.sign Auth.demoIdpKey "{\"alg\":\"ES256\",\"kid\":\"demo\"}" payload
+
+def claims (rest : String) (now : Nat := Auth.demoNow) : String :=
+  s!"\{\"iss\":\"https://idp.ember.local\",\"aud\":\"ember-drone\",\"exp\":{now + 3600},\"scope\":\"drone:control camera:read\"{rest}}"
+
+/-- Plan M9.4: the time from datagrams (forward only), 503 without it,
+and `iat` on the control routes (decision 8-4). -/
+def time : IO Nat := do
+  let mut bad := 0
+  let t := Auth.demoNow
+  -- timeIn
+  let g := Http.timeIn {} (be8 t)
+  if g.now != some t || g.boot != some t then
+    IO.println s!"  FAIL time: first datagram {g.now} {g.boot}"; bad := bad + 1
+  let g2 := Http.timeIn g (be8 (t - 1))
+  let g3 := Http.timeIn g (be8 (t + 10))
+  let g4 := Http.timeIn g ((be8 (t + 10)).push 0)
+  let g5 := Http.timeIn {} (ByteArray.mk #[1, 2, 3])
+  if g2.now != some t || g3.now != some (t + 10) || g3.boot != some t || g4.now != some t || g5.now.isSome then
+    IO.println "  FAIL time: forward only, 8 bytes only"; bad := bad + 1
+  -- no time: 503 on protected routes, a page without scope as ever
+  let none0 : Http.Site := { site with now := none }
+  let n0 := Http.ctlInit none0
+  let st (gs : Http.Ctl) (s : Http.Site) (req : ByteArray) := statusLine (Http.recvCtl s gs {} req).2.resp
+  if st n0 none0 (post "1" "go") != "HTTP/1.1 503 Service Unavailable" ||
+     st n0 none0 (str s!"GET /status HTTP/1.1\r\n{bearer ctl}\r\n") != "HTTP/1.1 503 Service Unavailable" ||
+     st n0 none0 (str "GET /hello.txt HTTP/1.1\r\n\r\n") != "HTTP/1.1 200 OK" then
+    IO.println "  FAIL time: no time"; bad := bad + 1
+  let n1 := Http.timeIn n0 (be8 t)
+  if st n1 none0 (post "1" "go") != "HTTP/1.1 200 OK" then
+    IO.println "  FAIL time: after the datagram"; bad := bad + 1
+  -- the time moved past the token's exp
+  if st (Http.timeIn n1 (be8 (t + 3600 + 60))) none0 (post "1" "go") != "HTTP/1.1 401 Unauthorized" then
+    IO.println "  FAIL time: expired after a later datagram"; bad := bad + 1
+  -- iat: control needs one at or after the start; other routes do not
+  let early := tokenWith (claims ",\"iat\":1799999999")
+  let atBoot := tokenWith (claims s!",\"iat\":{t}")
+  let noIat := tokenWith (claims "")
+  let strIat := tokenWith (claims ",\"iat\":\"1800000000\"")
+  let twoIat := tokenWith (claims s!",\"iat\":{t},\"iat\":{t}")
+  let earlyCam := tokenWith ((claims ",\"iat\":1").replace "drone:control camera:read" "camera:read")
+  let cases : List (String × ByteArray × String) := [
+    ("POST, iat before the start", post "1" "go" "" early, "HTTP/1.1 401 Unauthorized"),
+    ("POST, iat at the start", post "1" "go" "" atBoot, "HTTP/1.1 200 OK"),
+    ("POST, no iat", post "1" "go" "" noIat, "HTTP/1.1 401 Unauthorized"),
+    ("POST, iat a string", post "1" "go" "" strIat, "HTTP/1.1 401 Unauthorized"),
+    ("POST, iat twice", post "1" "go" "" twoIat, "HTTP/1.1 401 Unauthorized"),
+    ("POST, no scope and an early iat: 403 first", post "1" "go" "" earlyCam, "HTTP/1.1 403 Forbidden"),
+    ("GET, iat before the start", str s!"GET /control HTTP/1.1\r\n{bearer early}\r\n", "HTTP/1.1 200 OK"),
+    ("GET, no iat", str s!"GET /control HTTP/1.1\r\n{bearer noIat}\r\n", "HTTP/1.1 200 OK"),
+    ("GET, iat a string", str s!"GET /control HTTP/1.1\r\n{bearer strIat}\r\n", "HTTP/1.1 401 Unauthorized")]
+  for (name, req, want) in cases do
+    let got := st g0 site req
+    if got != want then
+      IO.println s!"  FAIL time {name}: {got}"; bad := bad + 1
+  IO.println s!"time: datagrams, 503 without the time, {cases.length} iat cases, {bad} failures"
+  return bad
+
 def run : IO Nat := do
   let mut bad := 0
   for (name, req, line, close) in single do
-    let (l, c, _) := one {} req
+    let (l, c, _) := one g0 req
     if l != line || c != close then
       IO.println s!"  FAIL control {name}: {l} closed={c}"; bad := bad + 1
   -- a sequence on the shared state, each request on a fresh connection
@@ -82,19 +147,19 @@ def run : IO Nat := do
     ("seq 2 land", post "2" "land", "HTTP/1.1 200 OK", 2, "land"),
     ("seq 5", post "5" "hover", "HTTP/1.1 200 OK", 3, "hover"),
     ("seq 3 after 5", post "3" "x", "HTTP/1.1 409 Conflict", 3, "hover")]
-  let mut g : Http.Ctl := {}
+  let mut g : Http.Ctl := g0
   for (name, req, line, cmds, cmd) in steps do
     let (l, _, g') := one g req
     g := g'
     if l != line || g.cmds != cmds || g.cmd != str cmd then
       IO.println s!"  FAIL control {name}: {l}, {g.cmds} commands, last {String.fromUTF8! g.cmd}"; bad := bad + 1
   -- byte by byte = whole; the answer carries the number
-  let (g1, c1) := Http.recvCtl site {} {} (post "7" "takeoff")
-  let (g2, c2) := (post "7" "takeoff").foldl (fun (g, c) b => Http.recvCtl site g c (ByteArray.mk #[b])) (({} : Http.Ctl), ({} : Http.Conn))
+  let (g1, c1) := Http.recvCtl site g0 {} (post "7" "takeoff")
+  let (g2, c2) := (post "7" "takeoff").foldl (fun (g, c) b => Http.recvCtl site g c (ByteArray.mk #[b])) (g0, ({} : Http.Conn))
   if c1.resp != c2.resp || g1.last != g2.last || !(String.fromUTF8! c1.resp).endsWith "ok 7\n" then
     IO.println "  FAIL control: byte by byte"; bad := bad + 1
   -- a kept connection: once the response is acknowledged, the next request
-  let (k1, c) := Http.recvCtl site {} {} (str s!"GET /status HTTP/1.1\r\n{bearer ctl}\r\n")
+  let (k1, c) := Http.recvCtl site g0 {} (str s!"GET /status HTTP/1.1\r\n{bearer ctl}\r\n")
   let c := Http.ackedCtl c c.resp.size
   let (k2, c) := Http.recvCtl site k1 c (post "1" "takeoff")
   if statusLine c.resp != "HTTP/1.1 200 OK" || k2.last != 1 then
@@ -103,6 +168,6 @@ def run : IO Nat := do
   if Http.demoAuth.ctl || Http.demo.ctl || !site.ctl then
     IO.println "  FAIL control: Site.ctl"; bad := bad + 1
   IO.println s!"control: {single.length} requests, {steps.length} steps on the shared state, byte by byte, a kept connection, {bad} failures"
-  return bad
+  return bad + (← time)
 
 end Ember.Tests.ControlTests

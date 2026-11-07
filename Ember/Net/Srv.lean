@@ -527,7 +527,10 @@ def prog (n : Nat) (app : App) : Prog :=
   { structs := [Tcb, Net.Seg],
     globals := Net.constants ++ netState ++ [nConns n, t, cur] ++ connGlobals n ++ app.globals ++
       [booted, tick_due],
-    fns := Net.fns ++ Net.ipFns ++ app.fns ++ reused ++ tcp ++ [main],
+    -- a function of the application named as one of `Net.ipFns` takes its
+    -- place (plan M9.4: `udp_input` with the time port)
+    fns := Net.fns ++ Net.ipFns.map (fun f => (app.fns.find? (·.name == f.name)).getD f) ++
+      app.fns.filter (fun f => !Net.ipFns.any (·.name == f.name)) ++ reused ++ tcp ++ [main],
     dropReasons := Net.dropReasons, notes := Net.notes }
 
 /-- The echo program on `n` connections (`Spec.Srv.echo`, SLIP, MTU 296). -/

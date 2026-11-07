@@ -21,7 +21,7 @@ Nothing of the token is kept but what the check needs:
   object) and looks at the top level only; the signature into `j_sig`;
 * the claims are compared with the configuration as they are decoded:
   `alg` with `ES256`, `kid` with each key's id, `iss`, `aud` (a string or
-  an array of strings), `exp` and `nbf` as numbers, `scope`'s words with
+  an array of strings), `exp`, `nbf` and `iat` as numbers, `scope`'s words with
   every scope a route of the site needs (a bit each, `j_grant`);
 * when the header is complete and the route is protected (`ha_decide`),
   the answer is chosen as `Spec.Srv.Http.guard` chooses it; only then is
@@ -118,6 +118,12 @@ ember def js_vdone (kind : u8) := do
       j_nbfok[cur] := true
     else
       js_bad()
+  if key == 9 then
+    if kind == 1 then
+      j_iat[cur] := j_num[cur]
+      j_iatok[cur] := true
+    else
+      js_bad()
   if key == 8 then
     if kind != 0 || u then
       js_bad()
@@ -132,13 +138,13 @@ ember def js_vdone (kind : u8) := do
 ember def js_sbyte (b : u8) := do
   let sp : u16 := j_spos[cur]
   if j_isk[cur] && j_dep[cur] == 1 then
-      for i : u16 in [0, 8) do
+      for i : u16 in [0, 9) do
         if ((j_kmask[cur] >>> (i : u8)) &&& 1) == 1 then
           let mut same : bool := false
           if sp < JK_LEN[i] then
             same := JK[JK_OFF[i] + sp] == b
           if !same then
-            j_kmask[cur] := j_kmask[cur] &&& (~~~((1 : u8) <<< (i : u8)))
+            j_kmask[cur] := j_kmask[cur] &&& (~~~((1 : u16) <<< (i : u8)))
   if !j_isk[cur] then
     let key : u8 := j_key[cur]
     let d : u8 := j_dep[cur]
@@ -204,7 +210,7 @@ ember def js_sstart (isKey : bool) := do
     if j_seg[cur] == 0 then
       j_kmask[cur] := 0x07
     else
-      j_kmask[cur] := 0xF8
+      j_kmask[cur] := 0x1F8
 
 /-- A key's closing quote: at the top level, which key it is (and was it there before). -/
 ember def js_kend := do
@@ -212,12 +218,12 @@ ember def js_kend := do
   if j_dep[cur] != 1 then
     return
   let mut key : u8 := 0
-  for i : u16 in [0, 8) do
+  for i : u16 in [0, 9) do
     if ((j_kmask[cur] >>> (i : u8)) &&& 1) == 1 && JK_LEN[i] == j_spos[cur] then
       key := (i : u8) + 1
   j_key[cur] := key
   if key != 0 then
-    let bit : u8 := (1 : u8) <<< (key - 1)
+    let bit : u16 := (1 : u16) <<< (key - 1)
     if (j_seen[cur] &&& bit) != 0 then
       js_bad()
     j_seen[cur] := j_seen[cur] ||| bit
@@ -604,6 +610,7 @@ ember def j_start := do
   j_audok[cur] := false
   j_expok[cur] := false
   j_nbfok[cur] := false
+  j_iatok[cur] := false
   j_grant[cur] := 0
   for i : u16 in [0, 8) do
     a_h[cur * 8 + i] := A_IV[i]
@@ -720,11 +727,19 @@ ember def ha_line (x : u8) := do
 
 /-! ## The answer on a protected route -/
 
+/-- The time: `h_now` when it was set, plus the seconds since (the board's
+runtime answers reads of `UPTIME` with the seconds since the start; 0 off
+the board, where the time stays as set, as in the Spec). -/
+ember def clock : u64 := do
+  let up : u32 ← mmio.read32(UPTIME)
+  let d : u32 := up - h_up_at
+  return h_now + (d : u64)
+
 /-- Is the token of the connection accepted (`Spec.Srv.Auth.check`)? -/
 ember def ha_valid : bool := do
   if j_bad[cur] || !j_algok[cur] || !j_issok[cur] || !j_audok[cur] || !j_expok[cur] then
     return false
-  let now : u64 := h_now
+  let now : u64 ← clock()
   if now >= j_exp[cur] + A_SKEW then
     return false
   if j_nbfok[cur] && j_nbf[cur] > now + A_SKEW then
@@ -824,7 +839,7 @@ ember def h_feed (x : u8) := do
 def fns : List Fn :=
   [a_hash_byte, a_hash_final, js_bad, js_isarr, js_vdone, js_sbyte, js_sstart, js_kend, js_str, js_close, js_vstart,
    js_lit, js_nend, js_num, js_byte, j_reset_json, j_segend, j_out, j_char, j_fin, ha_reset, j_start,
-   ha_vbyte, ha_vend, ha_line, ha_valid, ha_guard, ha_decide, h_feed]
+   ha_vbyte, ha_vend, ha_line, clock, ha_valid, ha_guard, ha_decide, h_feed]
 
 /-- `fns` without `h_feed` (the control requests of M9.5 have their own). -/
 def coreFns : List Fn := fns.filter (·.name != "h_feed")
@@ -856,7 +871,7 @@ def globals (n : Nat) (site : Http.Site) : List Global :=
   let scs := scopes site
   let kids := cfg.keys.map (bytesOf ·.kid)
   let scb := scs.map bytesOf
-  let jk := ["alg", "kid", "crit", "iss", "aud", "exp", "nbf", "scope"].map bytesOf
+  let jk := ["alg", "kid", "crit", "iss", "aud", "exp", "nbf", "scope", "iat"].map bytesOf
   let lits := ["true", "false", "null"].map bytesOf
   let rscope := site.routes.map fun r => match r.scope with
     | none => 0
@@ -878,9 +893,13 @@ def globals (n : Nat) (site : Http.Site) : List Global :=
    scalar "A_SKEW" .u64 cfg.skew, { name := "A_HAVE", ty := .bool, init := [if site.auth.isSome then 1 else 0], const := true },
    { name := "A_IV", ty := .arr .u32 8, const := true,
      init := [0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19] },
-   -- the time (plan M9.4 sets it while running)
+   -- the time (plan M9.4: set by `Net.Ctl.time_in` while running): its value
+   -- when set, the board's uptime then, the time of the start
    { name := "h_now", ty := .u64, init := [site.now.getD 0] },
    { name := "h_now_ok", ty := .bool, init := [if site.now.isSome then 1 else 0] },
+   { name := "h_up_at", ty := .u32 }, { name := "h_boot", ty := .u64, init := [site.now.getD 0] },
+   -- read by the ESP32-C3's runtime as the seconds since the start (SYSTIMER)
+   scalar "UPTIME" .u32 0x60023040,
    scalar "L_REQ" .u8 16, scalar "L_SKIP" .u8 15, scalar "L_VAL" .u8 14,
    scalar "V_LEAD" .u8 0, scalar "V_SCH" .u8 10, scalar "V_SCHBAD" .u8 20, scalar "V_SCHHT" .u8 21,
    scalar "V_SP" .u8 22, scalar "V_TOK" .u8 23, scalar "V_TRAIL" .u8 24, scalar "V_TOKBAD" .u8 25,
@@ -901,13 +920,14 @@ def globals (n : Nat) (site : Http.Site) : List Global :=
    { name := "j_st", ty := .arr .u8 n }, { name := "j_dep", ty := .arr .u8 n }, { name := "j_arr", ty := .arr .u16 n },
    { name := "j_sub", ty := .arr .u8 n }, { name := "j_lid", ty := .arr .u8 n }, { name := "j_esc", ty := .arr .u8 n },
    { name := "j_isk", ty := .arr .bool n }, { name := "j_u", ty := .arr .bool n }, { name := "j_spos", ty := .arr .u16 n },
-   { name := "j_kmask", ty := .arr .u8 n }, { name := "j_key", ty := .arr .u8 n }, { name := "j_seen", ty := .arr .u8 n },
+   { name := "j_kmask", ty := .arr .u16 n }, { name := "j_key", ty := .arr .u8 n }, { name := "j_seen", ty := .arr .u16 n },
    { name := "j_vok", ty := .arr .bool n }, { name := "j_vmask", ty := .arr .u8 n },
    { name := "j_wpos", ty := .arr .u16 n }, { name := "j_walive", ty := .arr .u8 n }, { name := "j_grant", ty := .arr .u8 n },
    { name := "j_inaud", ty := .arr .bool n }, { name := "j_audhit", ty := .arr .bool n }, { name := "j_audbad", ty := .arr .bool n },
    { name := "j_algok", ty := .arr .bool n }, { name := "j_kid", ty := .arr .u8 n }, { name := "j_issok", ty := .arr .bool n },
    { name := "j_audok", ty := .arr .bool n }, { name := "j_expok", ty := .arr .bool n }, { name := "j_nbfok", ty := .arr .bool n },
    { name := "j_exp", ty := .arr .u64 n }, { name := "j_nbf", ty := .arr .u64 n }, { name := "j_num", ty := .arr .u64 n },
+   { name := "j_iat", ty := .arr .u64 n }, { name := "j_iatok", ty := .arr .bool n },
    { name := "j_ndig", ty := .arr .u8 n }, { name := "j_nplain", ty := .arr .bool n }]
 
 end Ember.Net.Auth

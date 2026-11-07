@@ -17,10 +17,16 @@ open Ember Ember.Spec Ember.Trace Ember.Lang Ember.Tests.SrvTests Ember.Tests.Ht
 open Ember.Tests.ControlTests (post bearer ctl)
 
 /-- One kept connection: the requests in turn (each cut into `pieces`),
-the responses ACKed as they come, until nothing more arrives; then our FIN. -/
-def keepSession (A : Srv.App) (reqs : List ByteArray) (pieces : Nat := 1) : Array Input × ByteArray := Id.run do
+the responses ACKed as they come, until nothing more arrives; then our FIN.
+`pre`: inputs before the connection; `between`: an input before each
+request (plan M9.4: the time datagrams). -/
+def keepSession (A : Srv.App) (reqs : List ByteArray) (pieces : Nat := 1) (pre : Array Input := #[])
+    (between : List (Option Input) := []) : Array Input × ByteArray := Id.run do
   let mut s := Srv.State.init A {}
   let mut ins : Array Input := #[]
+  for i in pre do
+    s := (Srv.step s i).1
+    ins := ins.push i
   let mut resp := ByteArray.empty
   let mut cseq : UInt32 := 1000
   let syn := Peer.slip (Peer.tcp peerPort cseq 0 Tcp.SYN (mss := some 536) (dport := A.port))
@@ -31,7 +37,10 @@ def keepSession (A : Srv.App) (reqs : List ByteArray) (pieces : Nat := 1) : Arra
   cseq := cseq + 1
   let mut sack : UInt32 := sa.seq + 1
   let mss := (sa.mss.map (·.toNat)).getD 536
-  for req in reqs do
+  for (req, ri) in reqs.zipIdx do
+    if let some (some i) := between[ri]? then
+      s := (Srv.step s i).1
+      ins := ins.push i
     let k := max 1 pieces
     let step := min mss ((req.size + k - 1) / k)
     let mut off := 0
@@ -98,9 +107,38 @@ def csite : Srv.Http.Site := Srv.Http.demoCtl
 def capp : Srv.App := Srv.Http.app csite
 def cmk (n : Nat) : Prog := Tools.NetCheck.checked (Net.Http.prog n csite)
 
+/-- A datagram with the time `v` on the time port (plan M9.4). -/
+def timeDgram (v : Nat) (len : Nat := 8) : Input :=
+  Peer.slip (Peer.udp 5000 37 ((ControlTests.be8 v).extract (8 - min 8 len) 8 ++ ByteArray.mk (Array.replicate (len - min 8 len) 0)))
+
+/-- The demo control site without a time: it comes in datagrams. -/
+def tsite : Srv.Http.Site := { csite with now := none }
+def tapp : Srv.App := Srv.Http.app tsite
+def tmk (n : Nat) : Prog := Tools.NetCheck.checked (Net.Http.prog n tsite)
+
+def timeLists : List (String × Array Input × List ByteArray × List (Option Input)) :=
+  let t := Spec.Srv.Auth.demoNow
+  [("no time: 503", #[], [cget "/status"], []),
+   ("a short datagram, then 503", #[timeDgram t 7], [cget "/status"], []),
+   ("a long datagram, then 503", #[timeDgram t 9], [cget "/status"], []),
+   ("the time, then a POST and a GET", #[timeDgram t], [post "1" "go", cget "/status"], []),
+   ("the time, an earlier one, a later one past exp",
+    #[timeDgram t], [post "1" "go", post "2" "go", post "3" "go"],
+    [none, some (timeDgram (t - 100)), some (timeDgram (t + 3700))]),
+   ("a token issued before the start",
+    #[timeDgram (t + 1)], [post "1" "go", cget "/control"], []),
+   ("past exp, then an earlier time: still expired",
+    #[timeDgram t, timeDgram (t + 3700), timeDgram t], [cget "/status"], []),
+   ("an iat that is not a number",
+    #[timeDgram t], [ControlTests.str s!"GET /status HTTP/1.1\r\n{bearer (ControlTests.tokenWith (ControlTests.claims ",\"iat\":\"1800000000\""))}\r\n"], [])]
+
 def sessions : List (String × Array Input) :=
   lists.flatMap fun (name, reqs) =>
     [(name, (keepSession capp reqs).1), (name ++ " (7 pieces)", (keepSession capp reqs 7).1)]
+
+def timeSessions : List (String × Array Input) :=
+  timeLists.flatMap fun (name, pre, reqs, between) =>
+    [(name, (keepSession tapp reqs 1 pre between).1), (name ++ " (7 pieces)", (keepSession tapp reqs 7 pre between).1)]
 
 def run : IO Nat := do
   let mut bad := 0
@@ -113,6 +151,14 @@ def run : IO Nat := do
   | .error e => IO.println s!"FAIL control program does not check: {repr e}"; return bad + 1
   | .ok _ => pure ()
   bad := bad + (← AuthNetTests.emberRuns "control" capp cmk (sessions.toArray))
+  -- plan M9.4: what the client got with the time from datagrams
+  let answers := timeLists.map fun (_, pre, reqs, between) =>
+    let r := (keepSession tapp reqs 1 pre between).2
+    ((String.fromUTF8! r).splitOn "HTTP/1.1 ").drop 1 |>.map (fun x => String.ofList (x.toList.take 3))
+  let want := [["503"], ["503"], ["503"], ["200", "200"], ["200", "200", "401"], ["401"], ["401"], ["401"]]
+  if answers != want then
+    IO.println s!"FAIL time sessions: {answers}"; bad := bad + 1
+  bad := bad + (← AuthNetTests.emberRuns "time" tapp tmk (timeSessions.toArray))
   let (a, hfx) ← AuthNetTests.fixtures "http-ctl" "Tests/Ember/http-ctl" capp
   bad := bad + a + (← AuthNetTests.emberRuns "http-ctl" capp cmk (AuthNetTests.variants hfx 13))
   let tapp := Srv.Tls.app Srv.Tls.demoCtl

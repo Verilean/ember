@@ -105,7 +105,27 @@ structure Ctl where
   lastHash : ByteArray := .empty
   cmd      : ByteArray := .empty
   cmds     : Nat := 0
+  /-- Plan M9.4: the time (seconds since 1970) once known, and the time the
+  device started at, for the control routes (decision 8-4). -/
+  now      : Option Nat := none
+  boot     : Option Nat := none
   deriving Inhabited
+
+/-- The shared state at the start: the site's time, if it has one (the tests). -/
+def ctlInit (site : Site) : Ctl := { now := site.now, boot := site.now }
+
+/-- The UDP port of the time (plan M9.4, decision 7). -/
+def timePort : UInt16 := 37
+
+/-- A datagram on the time port: 8 bytes, seconds since 1970, big-endian.
+The time only moves forward; the first one also fixes the start (the
+uptime of the reference is 0).  Anything else changes nothing. -/
+def timeIn (g : Ctl) (d : ByteArray) : Ctl :=
+  if d.size != 8 then g else
+  let v := d.foldl (fun a b => a * 256 + b.toNat) 0
+  match g.now with
+  | none => { g with now := some v, boot := some v }
+  | some t => if v ≥ t then { g with now := some v } else g
 
 def crlf2 : List UInt8 := [13, 10, 13, 10]
 
@@ -143,7 +163,8 @@ def authFields (hdr : ByteArray) : List (List UInt8) :=
     else some (((rest.drop 1).dropWhile isOws).reverse.dropWhile isOws).reverse
 
 /-- The answer on a protected route that needs `need`, when the route itself is `ok`. -/
-def guard (site : Site) (need : String) (hdr : ByteArray) (head : Bool) (ok : ByteArray) : ByteArray :=
+def guard (site : Site) (need : String) (hdr : ByteArray) (head : Bool) (ok : ByteArray)
+    (minIat : Option Nat := none) : ByteArray :=
   match authFields hdr with
   | [] => errorText 401 "Unauthorized" head challenge
   | [v] =>
@@ -153,11 +174,13 @@ def guard (site : Site) (need : String) (hdr : ByteArray) (head : Bool) (ok : By
     | some cfg, some now =>
       let tok := rest.dropWhile (· == 32)
       if tok.isEmpty || tok.any isOws then errorText 401 "Unauthorized" head invalidToken else
-      match Auth.check cfg now (ByteArray.mk tok.toArray) with
+      match Auth.checkIat cfg now (ByteArray.mk tok.toArray) with
       | none => errorText 401 "Unauthorized" head invalidToken
-      | some scopes =>
-        if need == "" || scopes.contains (str need) then ok
-        else errorText 403 "Forbidden" head (insufficientScope need)
+      | some (scopes, iat) =>
+        if need != "" && !scopes.contains (str need) then errorText 403 "Forbidden" head (insufficientScope need)
+        -- a control route: no token issued before the device started (decision 8-4)
+        else if minIat.any (fun b => !iat.any (· ≥ b)) then errorText 401 "Unauthorized" head invalidToken
+        else ok
     | _, _ => errorText 503 "Service Unavailable" head
   | _ => errorText 400 "Bad Request" false
 
@@ -266,7 +289,7 @@ inductive Next where
   /-- Read a control request's body: its length and sequence number. -/
   | body (n seq : Nat)
 
-def answerCtl (site : Site) (req hdr : ByteArray) : Next :=
+def answerCtl (site : Site) (req hdr : ByteArray) (boot : Option Nat := none) : Next :=
   match spaceSplit (requestLine req) with
   | [m, target, v] =>
     if (v.take 7) != (str "HTTP/1.").toList || v.length != 8 || !(v.getLast?.any fun c => 48 ≤ c && c ≤ 57) ||
@@ -311,7 +334,7 @@ def answerCtl (site : Site) (req hdr : ByteArray) : Next :=
                 let ok := response 200 "OK" r.ctype r.body false
                 let allowed := match r.scope with
                   | none => none
-                  | some need => let a := guard site need hdr false ok; if a == ok then none else some a
+                  | some need => let a := guard site need hdr false ok boot; if a == ok then none else some a
                 match allowed with
                 | some refusal => .respond refusal true
                 | none => .body n seq
@@ -325,7 +348,7 @@ def answerCtl (site : Site) (req hdr : ByteArray) : Next :=
 def control (g : Ctl) (body : ByteArray) (seq : Nat) (keep : Bool) : Ctl × ByteArray :=
   let h := Spec.Crypto.sha256 body
   let ok := response 200 "OK" "text/plain" (str s!"ok {seq}\n") false "" !keep
-  if seq > g.last then ({ last := seq, lastHash := h, cmd := body, cmds := g.cmds + 1 }, ok)
+  if seq > g.last then ({ g with last := seq, lastHash := h, cmd := body, cmds := g.cmds + 1 }, ok)
   else if seq == g.last && h == g.lastHash then (g, ok)
   else (g, errorText 409 "Conflict" false "" !keep)
 
@@ -347,7 +370,7 @@ def stepCtl (site : Site) (gc : Ctl × Conn) (b : UInt8) : Ctl × Conn :=
   let hdr := c.hdr.push b
   if crlf == 4 then
     if !req.toList.contains 13 then (g, { decided := true, resp := errorText 400 "Bad Request" false }) else
-    match answerCtl site req hdr with
+    match answerCtl { site with now := g.now } req hdr g.boot with
     | .respond r close => (g, { decided := true, resp := r, closeAfter := close })
     | .body n seq =>
       -- the connection is kept unless the request says otherwise (as for GET)
@@ -377,7 +400,7 @@ def appCtl (site : Site) : App where
   init := {}
   -- nothing more is taken while a response is out (no pipelining)
   room c cap := if c.decided then 0 else cap
-  recv c d := (recvCtl site {} c d).2
+  recv c d := (recvCtl site (ctlInit site) c d).2
   avail c := c.resp.size
   bytes c off n := Bytes.slice c.resp off n
   acked := ackedCtl
@@ -385,8 +408,10 @@ def appCtl (site : Site) : App where
   idleClose := true
   reuseTimeWait := true
   G := Ctl
-  ginit := {}
+  ginit := ctlInit site
   recvG g c d := recvCtl site g c d
+  udpPort := some timePort
+  udpG := timeIn
 
 /-- The HTTP application of a site as in M8 (no control routes, one request per connection). -/
 def appM8 (site : Site) : App where

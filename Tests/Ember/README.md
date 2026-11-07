@@ -122,13 +122,16 @@ routes, control requests, kept connections, the RNG's bytes mixed in, as
 shipped) and two images for replay, and replays on them the sessions
 recorded with curl and tokens of the demo provider (`Tests/Ember/https-auth`,
 `Tests/Ember/https-ctl`; as recorded, re-chunked, with ticks; `EMBER_M9_DUMP=DIR`
-writes them with `Spec.Srv.Tls`'s traces).  By hand, with a token from
-`ember-host --token "drone:control"`:
+writes them with `Spec.Srv.Tls`'s traces).  The shipped image has no time
+until a datagram on UDP port 37 gives it (plan M9.4; 503 before).  By
+hand, with a token from `ember-host --token "drone:control"` (issued at
+`Auth.demoNow`, so the time sent is that one):
 
 ```
 python3 tools/ember/record-linux.py client --name ctl-qemu --out /tmp --settle 3 \
     --host "python3 tools/ember/qemu-bridge.py .lake/build/esp32c3/stack-https-ctl.bin" \
-    -- sh -c 'sleep 2; curl -sk -H "Authorization: Bearer $T" https://10.0.0.1/status \
+    -- sh -c 'sleep 2; python3 -c "import socket, struct; socket.socket(socket.AF_INET, socket.SOCK_DGRAM).sendto(struct.pack(\">Q\", 1800000000), (\"10.0.0.1\", 37))"; sleep 1
+       curl -sk -H "Authorization: Bearer $T" https://10.0.0.1/status \
        --next -sk -H "Authorization: Bearer $T" -H "X-Ember-Seq: 1" --data-binary takeoff https://10.0.0.1/cmd'
 ```
 

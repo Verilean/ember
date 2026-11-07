@@ -117,7 +117,9 @@ def udpInput (h : Ipv4.Hdr) (p : ByteArray) : StackM A Unit := do
   | .error r => dropS r
   | .ok d =>
     let s ← getS
-    if d.dport == echoPort then
+    if A.udpPort == some d.dport then
+      modifyS fun s => { s with g := A.udpG s.g d.data }
+    else if d.dport == echoPort then
       sendIp Ipv4.protoUdp h.src (Udp.emit s.ip h.src d.dport d.sport d.data)
     else if d.dport == Dhcp.clientPort && s.cfg.dhcp then
       dhcpApply (Dhcp.input s.dhcp s.ip s.cfg.mac (Bytes.slice p 8 (p.size - 8)))
