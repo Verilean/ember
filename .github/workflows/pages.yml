@@ -1,0 +1,88 @@
+# Build the Ember book (docs/book/*.md) into a static site and deploy it
+# to GitHub Pages on every push to `main`.  The site is rendered by
+# lean-tea's `static_site` (LeanTea.Site, the generator of the lean-tea
+# book), at a fixed commit, with its built-in sidebar layout.  Nothing
+# of Ember itself is built here.
+
+name: pages
+
+on:
+  push:
+    branches: [main]
+    paths: ["docs/book/**", ".github/workflows/pages.yml"]
+  workflow_dispatch:
+
+# Allow only one concurrent deployment.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+# Nothing by default: each job gets only what it needs.  The build
+# job runs third-party code (lean-tea's lake build) and only reads;
+# Pages write and the OIDC token are the deploy job's alone.
+permissions: {}
+
+env:
+  # lean-tea's main, the commit the book was built and checked with
+  LEAN_TEA_SHA: a7ee790dcfe604fee6a79ea134b1d79be2651d8f
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Checkout lean-tea (the site generator)
+        uses: actions/checkout@v4
+        with:
+          repository: Verilean/lean-tea
+          ref: ${{ env.LEAN_TEA_SHA }}
+          path: lean-tea
+          persist-credentials: false
+
+      - name: Install elan
+        run: |
+          set -euo pipefail
+          curl -sSf https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh \
+            | sh -s -- -y --default-toolchain none
+          echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
+
+      - name: Cache lean-tea's Lake build
+        uses: actions/cache@v4
+        with:
+          path: lean-tea/.lake
+          key: ${{ runner.os }}-lean-tea-${{ env.LEAN_TEA_SHA }}
+
+      - name: Build static_site
+        working-directory: lean-tea
+        run: lake build static_site
+
+      - name: Render docs/book → docs-site/
+        run: |
+          lean-tea/.lake/build/bin/static_site build docs/book --out docs-site \
+            --title Ember --tagline "a TCP/IP stack in Lean, checked down to the C"
+          ls -la docs-site/
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs-site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
