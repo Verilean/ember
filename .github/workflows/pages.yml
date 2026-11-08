@@ -17,10 +17,10 @@ concurrency:
   group: pages
   cancel-in-progress: false
 
-permissions:
-  contents: read
-  pages: write
-  id-token: write
+# Nothing by default: each job gets only what it needs.  The build
+# job runs third-party code (lean-tea's lake build) and only reads;
+# Pages write and the OIDC token are the deploy job's alone.
+permissions: {}
 
 env:
   # lean-tea's main, the commit the book was built and checked with
@@ -29,9 +29,13 @@ env:
 jobs:
   build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Checkout lean-tea (the site generator)
         uses: actions/checkout@v4
@@ -39,6 +43,7 @@ jobs:
           repository: Verilean/lean-tea
           ref: ${{ env.LEAN_TEA_SHA }}
           path: lean-tea
+          persist-credentials: false
 
       - name: Install elan
         run: |
@@ -71,6 +76,9 @@ jobs:
   deploy:
     needs: build
     runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
