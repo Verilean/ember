@@ -39,6 +39,8 @@ structure State where
   arp   : Arp.Cache := {}
   dhcp  : Dhcp.St := {}
   tickDue : Bool := false
+  /-- The application's state shared by all connections (plan M9.5). -/
+  g     : A.G := A.ginit
 
 instance : Inhabited (State A) := ⟨{}⟩
 
@@ -80,8 +82,8 @@ def runTcp (i : Nat) (act : TcpM A Unit) : StackM A Unit := do
   let s ← getS
   let tag := if s.conns.size > 1 then s!"conn={i} " else ""
   let (_, c) := act.run { tcb := s.conns[i]?.getD {}, iss := s.iss, ourIp := s.ip,
-                          mss := mssFor s.cfg.mtu, tag }
-  modifyS fun s => { s with conns := s.conns.set! i c.tcb, iss := c.iss }
+                          mss := mssFor s.cfg.mtu, tag, g := s.g }
+  modifyS fun s => { s with conns := s.conns.set! i c.tcb, iss := c.iss, g := c.g }
   for (dst, seg) in c.out do sendIp Ipv4.protoTcp dst seg
   for d in c.diag do ev d
 
@@ -115,7 +117,9 @@ def udpInput (h : Ipv4.Hdr) (p : ByteArray) : StackM A Unit := do
   | .error r => dropS r
   | .ok d =>
     let s ← getS
-    if d.dport == echoPort then
+    if A.udpPort == some d.dport then
+      modifyS fun s => { s with g := A.udpG s.g d.data }
+    else if d.dport == echoPort then
       sendIp Ipv4.protoUdp h.src (Udp.emit s.ip h.src d.dport d.sport d.data)
     else if d.dport == Dhcp.clientPort && s.cfg.dhcp then
       dhcpApply (Dhcp.input s.dhcp s.ip s.cfg.mac (Bytes.slice p 8 (p.size - 8)))

@@ -237,7 +237,9 @@ def main():
         # docs/Ember-plan.md §M8 are the acceptance, the ±3 % the gate
         # and the HTTPS server (Net.Tls, two connections) on the ESP32-C3 (plan M8.7)
         for prog, prof, key, fn in [("http", "sdcc-z80", "z80.http", z80), ("http", "rv32", "esp32c3.http", esp32c3),
-                                    ("https", "rv32", "esp32c3.https", esp32c3)]:
+                                    ("https", "rv32", "esp32c3.https", esp32c3),
+                                    # M9: protected routes, control requests, kept connections, the RNG
+                                    ("https-ctl", "rv32", "esp32c3.https-ctl", esp32c3)]:
             src = emitted(tmp, prog, prof)
             if src is not None:
                 r = fn(tmp, prog, key, src=src)

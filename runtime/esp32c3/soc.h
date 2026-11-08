@@ -74,5 +74,34 @@
 #define SYSTIMER_TARGET0_WORK_EN (1u << 24)
 #define SYSTIMER_PERIOD_MODE     (1u << 30)
 #define SYSTIMER_HZ 16000000u
+#define SYSTIMER_UNIT0_OP       REG(0x60023004u)
+#define SYSTIMER_UNIT0_VALUE_LO REG(0x60023044u)
+#define SYSTIMER_UNIT0_UPDATE   (1u << 30)
+#define SYSTIMER_UNIT0_VALID    (1u << 29)
+/* Read by the program as the seconds since the start (rt.c, uptime) */
+#define UPTIME                  0x60023040u
+
+/* RNG and its SAR ADC noise source (plan M9.4, decision 9).  Addresses and
+   fields from ESP-IDF v5.3, components/soc/esp32c3/include/soc/
+   {reg_base,rtc_cntl_reg,system_reg,apb_saradc_reg,regi2c_saradc}.h
+   (Apache-2.0, Espressif Systems). */
+#define RNG_DATA                    0x600260B0u
+#define RTC_CNTL_ANA_CONF           REG(0x60008034u)
+#define RTC_CNTL_SAR_I2C_PU         (1u << 22)
+#define RTC_CNTL_SENSOR_CTRL        REG(0x6000811Cu)
+#define RTC_CNTL_FORCE_XPD_SAR_S    30
+#define SYSTEM_APB_SARADC_BIT       (1u << 28)
+#define APB_SARADC_CTRL             REG(0x60040000u)
+#define APB_SARADC_CTRL2            REG(0x60040004u)
+#define APB_SARADC_FSM_WAIT         REG(0x6004000Cu)
+#define APB_SARADC_SAR_PATT_TAB1    REG(0x60040018u)
+#define APB_SARADC_SAR_PATT_TAB2    REG(0x6004001Cu)
+#define APB_SARADC_DMA_CONF         REG(0x60040050u)
+#define APB_SARADC_APB_ADC_CLKM_CONF REG(0x60040054u)
+/* ROM: rom_i2c_writeReg_Mask (esp32c3.rom.ld), which ESP-IDF's
+   esp_rom_regi2c_write_mask is (esp32c3.rom.api.ld) */
+#define ROM_I2C_WRITEREG_MASK       0x40001960u
+#define I2C_SAR_ADC                 0x69u
+#define I2C_SAR_ADC_HOSTID          0u
 
 #endif

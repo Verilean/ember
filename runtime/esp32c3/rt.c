@@ -19,6 +19,10 @@
  *                1: one tick per byte 't' received on UART1 — still
  *                   delivered by the SYSTIMER interrupt, but when the
  *                   host says, so that fixtures replay deterministically
+ *   EMBER_ENTROPY 1: the SAR ADC's noise feeds the RNG from the start, and
+ *                reads of the RNG data register are paced as ESP-IDF's
+ *                `esp_random` (plan M9.4, decision 9); a register that
+ *                does not change reads as 0, which the TLS code refuses
  *   EMBER_ICOUNT 1: `ins=` in the idle line is the number of instructions
  *                retired so far, interrupts included, writing the idle
  *                lines excluded (QEMU with -icount; `minstret` is not a
@@ -227,8 +231,11 @@ static void systimer_init(void) {
 #endif
 }
 
+static uint32_t uptime(void);
+
 static void systimer_isr(void) {
   SYSTIMER_INT_CLR = 1;
+  (void)uptime();
 #if EMBER_TICK_HOST
   if (tick_req == 0) return;
   if (--tick_req == 0) SYSTIMER_CONF &= ~SYSTIMER_TARGET0_WORK_EN;
@@ -361,7 +368,106 @@ void ember_note(uint8_t code, uint32_t value) {
 #endif
 }
 
-uint32_t ember_mmio_read32(uint32_t addr) { return REG(addr); }
+static uint32_t systimer_now(void) {
+  SYSTIMER_UNIT0_OP = SYSTIMER_UNIT0_UPDATE;
+  while (!(SYSTIMER_UNIT0_OP & SYSTIMER_UNIT0_VALID)) {}
+  return SYSTIMER_UNIT0_VALUE_LO;
+}
+
+/* Whole seconds since the start, from SYSTIMER's low word (16 MHz, so it
+   wraps every 268 s: the 500 ms tick calls this too).  The program reads
+   it at UPTIME (plan M9.4: the time advances between the datagrams that
+   set it).  32-bit arithmetic only (no libgcc division, see below). */
+static uint32_t up_secs, up_frac, up_last;
+static uint32_t uptime(void) {
+  uint32_t now = systimer_now();
+  up_frac += now - up_last;
+  up_last = now;
+  while (up_frac >= SYSTIMER_HZ) { up_frac -= SYSTIMER_HZ; up_secs++; }
+  return up_secs;
+}
+
+#if EMBER_ENTROPY
+/* The SAR ADC as a noise source for the RNG: ESP-IDF v5.3,
+   components/bootloader_support/src/bootloader_random_esp32c3.c,
+   bootloader_random_enable (Apache-2.0, Espressif Systems), the same
+   register writes in the same order. */
+static void set_field(volatile uint32_t *r, uint32_t v, uint32_t mask, unsigned shift) {
+  *r = (*r & ~(mask << shift)) | ((v & mask) << shift);
+}
+
+static void sar_i2c(uint8_t reg, uint8_t msb, uint8_t lsb, uint8_t data) {
+  typedef void (*wm_t)(uint8_t, uint8_t, uint8_t, uint8_t, uint8_t, uint8_t);
+  ((wm_t)ROM_I2C_WRITEREG_MASK)(I2C_SAR_ADC, I2C_SAR_ADC_HOSTID, reg, msb, lsb, data);
+}
+
+static void entropy_init(void) {
+  set_field(&RTC_CNTL_SENSOR_CTRL, 0x3, 0x3, RTC_CNTL_FORCE_XPD_SAR_S);
+  RTC_CNTL_ANA_CONF |= RTC_CNTL_SAR_I2C_PU;
+  /* bridging SAR2's internal reference voltage (regi2c_saradc.h) */
+  sar_i2c(0x7, 6, 6, 1);                               /* ADC_SARADC2_ENCAL_REF */
+  sar_i2c(0x7, 1, 0, 0);                               /* ADC_SARADC_DTEST_RTC */
+  sar_i2c(0x7, 3, 3, 0);                               /* ADC_SARADC_ENT_RTC */
+  sar_i2c(0x7, 2, 2, 0);                               /* ADC_SARADC_ENT_TSENS */
+  /* SAR ADC2's internal channel */
+  SYSTEM_PERIP_CLK_EN0 |= SYSTEM_APB_SARADC_BIT;
+  SYSTEM_PERIP_RST_EN0 &= ~SYSTEM_APB_SARADC_BIT;
+  set_field(&APB_SARADC_APB_ADC_CLKM_CONF, 0x2, 0x3, 21);    /* CLK_SEL */
+  APB_SARADC_APB_ADC_CLKM_CONF |= 1u << 20;                  /* CLK_EN */
+  APB_SARADC_CTRL |= 1u << 6;                                /* SAR_CLK_GATED */
+  set_field(&APB_SARADC_CTRL, 0x3, 0x3, 27);                 /* XPD_SAR_FORCE */
+  set_field(&APB_SARADC_CTRL, 1, 0xFF, 7);                   /* SAR_CLK_DIV */
+  set_field(&APB_SARADC_FSM_WAIT, 8, 0xFF, 8);               /* RSTB_WAIT */
+  set_field(&APB_SARADC_FSM_WAIT, 5, 0xFF, 0);               /* XPD_WAIT */
+  set_field(&APB_SARADC_FSM_WAIT, 100, 0xFF, 16);            /* STANDBY_WAIT */
+  APB_SARADC_CTRL |= 1u << 23;                               /* SAR_PATT_P_CLEAR */
+  APB_SARADC_CTRL &= ~(1u << 23);
+  set_field(&APB_SARADC_CTRL, 0, 0x7, 15);                   /* SAR_PATT_LEN */
+  set_field(&APB_SARADC_SAR_PATT_TAB1, 0x9cffff, 0xFFFFFF, 0); /* ADC2's internal channel, attenuation */
+  set_field(&APB_SARADC_SAR_PATT_TAB2, 0xffffff, 0xFFFFFF, 0);
+  set_field(&APB_SARADC_CTRL2, 100, 0xFFF, 12);              /* TIMER_TARGET: sampling frequency */
+  set_field(&APB_SARADC_APB_ADC_CLKM_CONF, 15, 0xFF, 0);     /* CLKM_DIV_NUM */
+  APB_SARADC_CTRL2 &= ~1u;                                   /* MEAS_NUM_LIMIT */
+  APB_SARADC_DMA_CONF |= 1u << 31;                           /* APB_ADC_TRANS */
+  APB_SARADC_CTRL2 |= 1u << 24;                              /* TIMER_EN */
+}
+
+/* As ESP-IDF's esp_random (components/esp_hw_support/hw_random.c): the
+   register gains 2 bits of entropy per APB cycle, so successive results
+   are at least 16 APB cycles (0.2 us at 80 MHz; 4 SYSTIMER counts at
+   16 MHz) apart, and the reads while waiting are XORed in.  If the
+   register never changed during a call it reads as 0. */
+#define RNG_WAIT 4u
+static uint32_t rng_last;
+
+static uint32_t rng_read(void) {
+  uint32_t first = REG(RNG_DATA), r = first, now, changed = 0, v;
+  do {
+    now = systimer_now();
+    v = REG(RNG_DATA);
+    changed |= v ^ first;
+    r ^= v;
+  } while (now - rng_last < RNG_WAIT);
+  rng_last = now;
+  v = REG(RNG_DATA);
+  changed |= v ^ first;
+  return changed ? r ^ v : 0;
+}
+
+#endif
+
+uint32_t ember_mmio_read32(uint32_t addr) {
+  if (addr == UPTIME) {                                /* the tick's interrupt updates it too */
+    irq_off();
+    uint32_t s = uptime();
+    irq_on();
+    return s;
+  }
+#if EMBER_ENTROPY
+  if (addr == RNG_DATA) return rng_read();
+#endif
+  return REG(addr);
+}
 void ember_mmio_write32(uint32_t addr, uint32_t value) { REG(addr) = value; }
 
 /* Shifts of 64-bit values by a variable amount (plan M8.5: SHA-512, the
@@ -447,6 +553,9 @@ void rt_main(void) {
 #else
   uart0_rx_init();
   systimer_init();
+#if EMBER_ENTROPY
+  entropy_init();
+#endif
   irq_init();
 #if EMBER_TRACE >= 1
   dbg_str("# ember-trace v1  impl=esp32c3  build=dev  profile=rv32  link=slip\n");

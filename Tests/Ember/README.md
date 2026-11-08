@@ -5,7 +5,7 @@ tshark) say "skipped" when it is missing.  The full set of tools comes
 with `nix-shell` (see `shell.nix`):
 
 ```
-nix-shell --run 'lake test'          # ≈ 6 minutes; EMBER_ONLY=spec|srv|crypto|lang|net|esp32|z80 .lake/build/bin/test runs one suite
+nix-shell --run 'lake test'          # ≈ 6 minutes; EMBER_ONLY=spec|srv|crypto|auth|control|lang|net|esp32|z80 .lake/build/bin/test runs one suite
 ```
 
 ## What `lake test` checks
@@ -14,7 +14,10 @@ nix-shell --run 'lake test'          # ≈ 6 minutes; EMBER_ONLY=spec|srv|crypto
 |---|---|---|
 | `Tests/Ember/SpecTests.lean` | M1 | checksum (RFC 1071/1624), SLIP, headers, trace format and `ember-diff`; **corpus replay** (`corpus/`, `regress/`); hand-written **scenarios** with their expectations; **1 000 generated sessions** per protocol, each also mutated and re-chunked, against the properties of `Ember.Spec.Gen`; the corpus through the `ember-host` binary; pcaps decoded by `tshark` |
 | `Tests/Ember/SrvTests.lean`, `HttpTests.lean` | M8.1, M8.2, M8.6 | the stack with an application interface: `Spec.Srv` with echo and one connection = `Spec.Stack`, every trace line, on the corpus and on generated sessions (ICMP, UDP, TCP, DHCP; mutated, re-chunked, ticks mid-frame, Ethernet); the Ember program `Net.Srv` (interpreted, and as host C with `-O2` and UBSan/ASan) = `Spec.Srv` with 1 and 2 connections; a second client served with 2 connections, reset with 1. HTTP: a TCP client drives `Spec.Srv` with `Spec.Srv.Http.demo` (11 requests: routes, query, 404, HEAD, 501, HTTP/1.0, bad lines, a header longer than `reqMax`; in 1, 3 and 7 segments; three clients in a row on one connection, taking the one in TIME-WAIT) — the bytes received are `Http.answer`'s and the server closes; the recorded curl session `http/` replays; the Ember program `Net.Http` (interpreted and host C) = `Spec.Srv` on all of these, mutated, re-chunked and with ticks; HTTPS: the sessions recorded from Linux clients (`https/`: curl and `openssl s_client` against `ember-host --https`, and a ClientHello without ChaCha20, answered with `handshake_failure`) replay through `Spec.Srv.Tls` line for line; `TlsTests.lean`: the key schedule against RFC 8448 §3 (early, handshake and master secrets, the handshake traffic secrets, the server's handshake key — 16 bytes there — and IV, its finished key; that trace's AES-GCM records and RSA signature are not this server's and are not checked), and key shares of small order (u = 0, 1, a point of order 8) answered with `illegal_parameter` only (RFC 8446 §7.4.2), and 15 malformed ClientHellos (a length past or short of what contains it) with `handshake_failure` only; **the HTTPS server in Ember** (`Net.Tls`, M8.7): the interpreter on the recorded and made sessions, the host C (`-O2`, UBSan/ASan, 1 and 2 connections) on those and on their re-chunked and ticked forms = `Spec.Srv.Tls`; `qemu-test.sh` replays them on the ESP32-C3 image `stack-https-test` (`EMBER_HTTPS_DUMP=DIR`) |
-| `Tests/Ember/CryptoTests.lean` | M8.5a, M8.5b | the crypto reference (`Ember/Spec/Crypto`) against the RFCs' test vectors: SHA-256 and SHA-512 (FIPS 180-2, a million `a`), HMAC-SHA256 (RFC 4231), HKDF (RFC 5869), ChaCha20, Poly1305 and the AEAD (RFC 8439), X25519 (RFC 7748), Ed25519 (RFC 8032), verification and rejection; and against OpenSSL on 30 random inputs each (SHA-256, SHA-512, HMAC, Poly1305, ChaCha20 from a random counter, X25519, Ed25519 signatures; skipped without `openssl`); **the crypto in Ember** (`Ember/Net/Crypto`: SHA-256, HMAC, HKDF-Extract and -Expand, ChaCha20, Poly1305, the AEAD — sealing, and opening with the tag compared without a branch —, X25519, SHA-512, Ed25519 signing, reduction mod L) behind a request/answer program (`Net.Crypto.testProg`), interpreted and as host C with `-O2` and UBSan/ASan: about 460 requests (the RFC vectors, edge values, cipher texts and tags with a changed byte — padding lengths, Poly1305 near p, X25519 u at and above p, scalars at L − 1, L, L + 1, 2^512 − 1 — and random inputs) = the reference; `qemu-test.sh` replays the same requests on the ESP32-C3 image `crypto-test` (`EMBER_CRYPTO_DUMP=DIR` writes them) |
+| `Tests/Ember/CryptoTests.lean` | M8.5a, M8.5b | the crypto reference (`Ember/Spec/Crypto`) against the RFCs' test vectors: SHA-256 and SHA-512 (FIPS 180-2, a million `a`), HMAC-SHA256 (RFC 4231), HKDF (RFC 5869), ChaCha20, Poly1305 and the AEAD (RFC 8439), X25519 (RFC 7748), Ed25519 (RFC 8032), verification and rejection, ECDSA P-256 (RFC 6979 A.2.5: the public key, the nonce, the signatures of `sample` and `test`; random signatures verified by `openssl dgst -verify`; the complete projective ladder the Ember version uses = the affine reference); and against OpenSSL on 30 random inputs each (SHA-256, SHA-512, HMAC, Poly1305, ChaCha20 from a random counter, X25519, Ed25519 signatures; skipped without `openssl`); **the crypto in Ember** (`Ember/Net/Crypto`: SHA-256, HMAC, HKDF-Extract and -Expand, ChaCha20, Poly1305, the AEAD — sealing, and opening with the tag compared without a branch —, X25519, SHA-512, Ed25519 signing, reduction mod L, ECDSA P-256 signing and, M9.2, verification on a hash — good signatures for nine keys (among them 1, 2, n − 1, n − 2), the hash, `r`, `s` altered, `n − s`, another key, a key off the curve, `x = p`, (0, 0), `r`/`s` at 0 and n, RFC 7515 A.3, and a key and signature made once by OpenSSL 3.5.9 — accepted, refused with the message, `r` or `s` changed) behind a request/answer program (`Net.Crypto.testProg`), interpreted and as host C with `-O2` and UBSan/ASan: about 460 requests (the RFC vectors, edge values, cipher texts and tags with a changed byte — padding lengths, Poly1305 near p, X25519 u at and above p, scalars at L − 1, L, L + 1, 2^512 − 1 — and random inputs) = the reference; `qemu-test.sh` replays the same requests on the ESP32-C3 image `crypto-test` (`EMBER_CRYPTO_DUMP=DIR` writes them) |
+| `Tests/Ember/AuthTests.lean` | M9.1 | OIDC access tokens in the reference (`Ember/Spec/Srv/Auth.lean`, protected routes of `Spec/Srv/Http.lean`): strict base64url (11 cases, both ways); RFC 7515 A.3 (the ES256 signature, the key from `d`, the payload's members); 74 tokens signed by `Auth.sign` (RFC 6979) and the scopes each must grant or its refusal — `alg` none/HS256/RS256/twice, `crit`, `kid` (unknown, absent with one and with two keys), altered or missing signature, `iss`/`aud` (arrays, escapes, `\u`, twice), every key the check reads given twice (`crit`, `kid`, `nbf`, `exp`, `aud`, `scope`), `exp`/`nbf` at the skew's bounds and as strings, fractions, 13 digits, leading zeros, a key hidden behind an escape, nested values skipped, depth 16 and 17, trailing bytes, trailing commas in arrays and objects (an `aud` array with ours and a comma after it), `[,]`, two commas; 18 requests on a site with public and protected routes (401 with and without `error`, 403 with the scope, 400 for two fields, 503 without a clock or keys), whole and byte by byte; with `openssl`, a token signed by OpenSSL accepted (refused when altered) and ours verified by `openssl dgst -verify` |
+| `Tests/Ember/AuthNetTests.lean`, `Tests/Ember/http-auth/`, `Tests/Ember/https-auth/` | M9.3 | the token check in Ember (`Ember/Net/Auth.lean`) against the reference: 119 requests (every token of `AuthTests` on `/status`, six on `/control`, the requests of `AuthTests.routes`, 28 edges of the `Authorization` field: tabs and spaces around `Bearer`, CRs inside the value, a bare LF, white space before the colon, longer and shorter names, HEAD, POST, a query) on five sites (two keys, one key, no clock, no keys, a later clock), whole and in seven pieces: answers = `Http.answer`, the interpreter (first site) and host C (every site, 1 and 2 connections; UBSan/ASan) = `Spec.Srv`; sessions recorded with curl and tokens of the demo provider (`ember-host --auth`, `--token`) over HTTP (200, 403) and HTTPS (200, 401 without a token, 403, 401 for an altered token): `Spec.Srv` = recorded, the interpreter and host C (as recorded, re-chunked, with ticks) = `Spec.Srv`; M9.4: with the RNG's bytes mixed in (`Spec.Srv.Tls.Site.entropy`), the handshake changes, and the Ember program reading the RNG register gives `Spec.Srv.Tls`'s trace (the interpreter with the register set, host C with it at 0) |
+| `Tests/Ember/ControlTests.lean`, `Tests/Ember/ControlNetTests.lean`, `Tests/Ember/http-ctl/`, `Tests/Ember/https-ctl/` | M9.5 | control requests and kept connections: in the reference, 33 requests (405, 404, 411, 413, 501, `Content-Length` and `X-Ember-Seq` in and out of their canonical form, 401/403, HTTP/1.0 and `Connection` closing — `close` among comma-separated tokens, in any case, with white space, in a second field; `closed`, `clo se`, `keep-alive;close` keep —, 2^32 − 1 and 2^32) and seven steps of the shared state (executed, answered again with the same body, 409 with another body or an older number), byte by byte, a kept connection; in Ember (`Ember/Net/Ctl.lean`), sixteen lists of requests on one kept connection (leading zeros and `Connection` lists among them) (whole and in seven pieces) and the sessions recorded with curl `--next` over HTTP and HTTPS: `Spec.Srv` = recorded, the interpreter and host C = `Spec.Srv` (`EMBER_ONLY=control`) |
 | `Tests/Ember/LangTests.lean` | M2, M5.4, M5.7 | **the total semantics** `Lang.Sem` (what the proofs unfold) = interpreter, on random programs, the examples and every build of the stack on the corpus; **the emitted C under the C semantics** `Ember.C.Sem` = `Lang.Sem`, same programs, three profiles, never undefined, and a planted emitter bug noticed; type checker (one negative test per rule, with spans), interpreter (every construct, traps, fuel), surface syntax = hand-built AST, profiles, **golden C** (`golden/`), examples vs Lean references, **interpreter = host C** (−O0/−O2, UBSan/ASan, strict warnings), **SDCC** `--Werror`, **1 000 random programs** (`ember-fuzz`) |
 | `Tests/Ember/NetTests.lean` | M3 | `Ember.Net` functions vs `Ember.Spec` on 10 000 random inputs; the corpus (SLIP and Ethernet fixtures) and **1 000 generated sessions** per protocol × 3 variants, plus 1 000 Ethernet and 1 000 DHCP sessions: Spec = Ember interpreter (**lockstep**) = host C |
 | `Tests/Ember/TargetTests.lean` | M4 | `tools/ember/qemu-test.sh`: the bare-metal ESP32-C3 images in Espressif's QEMU — boot, trap handler, UART, interrupt-driven echo of 10 000 bytes, SLIP loopback, the SLIP corpus and **100 generated sessions** per protocol × 3 variants (target trace = Spec trace), SYSTIMER tick |
@@ -114,6 +117,24 @@ python3 tools/ember/record-linux.py client --name curl-qemu --out /tmp \
 and the exchanges of `HttpTests.lean`, mutated, re-chunked and with ticks,
 whose expected traces are `Spec.Srv`'s (`EMBER_HTTP_DUMP=DIR` writes them).
 
+For plan M9, `qemu-test.sh` also builds `stack-https-ctl` (protected
+routes, control requests, kept connections, the RNG's bytes mixed in, as
+shipped) and two images for replay, and replays on them the sessions
+recorded with curl and tokens of the demo provider (`Tests/Ember/https-auth`,
+`Tests/Ember/https-ctl`; as recorded, re-chunked, with ticks; `EMBER_M9_DUMP=DIR`
+writes them with `Spec.Srv.Tls`'s traces).  The shipped image has no time
+until a datagram on UDP port 37 gives it (plan M9.4; 503 before).  By
+hand, with a token from `ember-host --token "drone:control"` (issued at
+`Auth.demoNow`, so the time sent is that one):
+
+```
+python3 tools/ember/record-linux.py client --name ctl-qemu --out /tmp --settle 3 \
+    --host "python3 tools/ember/qemu-bridge.py .lake/build/esp32c3/stack-https-ctl.bin" \
+    -- sh -c 'sleep 2; python3 -c "import socket, struct; socket.socket(socket.AF_INET, socket.SOCK_DGRAM).sendto(struct.pack(\">Q\", 1800000000), (\"10.0.0.1\", 37))"; sleep 1
+       curl -sk -H "Authorization: Bearer $T" https://10.0.0.1/status \
+       --next -sk -H "Authorization: Bearer $T" -H "X-Ember-Seq: 1" --data-binary takeoff https://10.0.0.1/cmd'
+```
+
 `Tests/Ember/http/curl-session.trace` was recorded so (GET of the page and
 of a 2 110-byte file over several segments, a missing path, POST, HEAD;
 one connection, each client taking the previous one's TIME-WAIT).
@@ -125,12 +146,15 @@ one connection, each client taking the previous one's TIME-WAIT).
 the same demo site on port 443.  The certificate is a self-signed demo
 (`Spec.Srv.Tls.demoCert`, its key in the source): use `curl -k` or
 `openssl s_client`.  The server's random and ephemeral key come from a
-fixed seed and the client's random, so traces are reproducible; this is
-a test configuration, not a secure one.
+seed, 32 bytes of the system's randomness taken at start (plan M9.4;
+`Tools.HostEntropy`: the host does not start without them) and the
+client's random.  Fixtures are recorded with `--no-entropy` (the fixed
+seed alone, so traces are reproducible and `Spec.Srv.Tls.demo` replays
+them; a test configuration, not a secure one):
 
 ```
 nix-shell --run 'python3 tools/ember/record-linux.py client --name tls --out /tmp \
-    --host ".lake/build/bin/ember-host --https" \
+    --host ".lake/build/bin/ember-host --https --no-entropy" \
     -- sh -c "curl -sS -k -v https://10.0.0.1/"'
 ```
 
@@ -143,3 +167,22 @@ The bridge drops the ROM boot loader's banner on UART0 (before the first
 SLIP END); `record-linux.py` keeps the bytes after the last END undecoded
 between reads (a data byte 0xC0, sent escaped, split a frame when the
 decoded rest was read again).
+
+### A browser (M8.8)
+
+A browser does not offer Ed25519: `Spec.Srv.Tls` and `Net.Tls` answer a
+client that offers only `ecdsa_secp256r1_sha256` with the P-256 demo
+certificate (`Spec.Srv.Tls.demoCertP256`, `ember.local` and `10.0.0.1`).
+Headless Chromium against the ESP32-C3 in QEMU, inside `nix-shell`
+(Chromium's path from `nix-shell -p chromium --run 'command -v chromium'`):
+
+```
+python3 tools/ember/record-linux.py client --name browser --out /tmp \
+    --host "python3 tools/ember/qemu-bridge.py .lake/build/esp32c3/stack-https.bin" \
+    -- sh -c 'sleep 2; $CHROMIUM --headless=new --no-sandbox --ignore-certificate-errors \
+                --user-data-dir=/tmp/profile --dump-dom https://10.0.0.1/'
+```
+
+A browser's request header is longer than `reqMax`: the header is taken
+up to `hdrMax` (8 KB) and only its first `reqMax` bytes, the request line,
+are kept.
